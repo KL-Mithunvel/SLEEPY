@@ -1,0 +1,12 @@
+{
+  "name": "SLEEPY — Work Tracked",
+  "short_name": "SLEEPY",
+  "description": "Even when sleeping, work is tracked and handled.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#12141a",
+  "theme_color": "#1a1d23",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

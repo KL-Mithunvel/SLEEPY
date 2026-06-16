@@ -1,0 +1,207 @@
+/* ── SLEEPY global styles ── dark theme over Bootstrap 5.3 dark ── */
+
+:root {
+  --sidebar-width: 220px;
+  --topbar-height: 52px;
+  --bg-app: #12141a;
+  --bg-sidebar: #1a1d23;
+  --bg-topbar: #1a1d23;
+  --bg-card: #1e2128;
+  --border-subtle: #2a2d35;
+  --text-muted-custom: #8b949e;
+  --accent: #6ea8fe;
+}
+
+html, body, #app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background-color: var(--bg-app);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 0.9rem;
+}
+
+/* ── Layout ── */
+
+.app-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-sidebar {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  z-index: 100;
+}
+
+.app-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.app-topbar {
+  height: var(--topbar-height);
+  min-height: var(--topbar-height);
+  background: var(--bg-topbar);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  padding: 0 1.25rem;
+  gap: 1rem;
+}
+
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+  background: var(--bg-app);
+}
+
+/* ── Sidebar branding ── */
+
+.sidebar-brand {
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sidebar-brand .brand-name {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+
+.sidebar-brand .brand-sub {
+  font-size: 0.68rem;
+  color: var(--text-muted-custom);
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+/* ── Sidebar nav ── */
+
+.sidebar-nav {
+  padding: 0.75rem 0;
+  flex: 1;
+}
+
+.nav-item .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.55rem 1.25rem;
+  color: #ced4da;
+  border-radius: 0;
+  font-size: 0.875rem;
+  transition: background 0.12s, color 0.12s;
+  text-decoration: none;
+}
+
+.nav-item .nav-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.nav-item .nav-link.active {
+  background: rgba(110, 168, 254, 0.12);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.nav-item .nav-link i {
+  font-size: 1rem;
+  width: 1.1rem;
+  text-align: center;
+}
+
+/* ── Cards ── */
+
+.card {
+  background: var(--bg-card) !important;
+  border-color: var(--border-subtle) !important;
+}
+
+/* ── Topbar ── */
+
+.topbar-page-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.topbar-user {
+  font-size: 0.8rem;
+  color: var(--text-muted-custom);
+}
+
+/* ── Utility ── */
+
+.text-accent { color: var(--accent) !important; }
+
+/* ── Mobile: sidebar becomes bottom nav ── */
+
+@media (max-width: 767px) {
+  .app-layout {
+    flex-direction: column;
+  }
+
+  .app-sidebar {
+    width: 100%;
+    min-width: unset;
+    height: auto;
+    border-right: none;
+    border-top: 1px solid var(--border-subtle);
+    order: 2;
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .sidebar-brand {
+    display: none;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    flex-direction: row;
+    padding: 0;
+    width: 100%;
+  }
+
+  .nav-item {
+    flex: 1;
+  }
+
+  .nav-item .nav-link {
+    flex-direction: column;
+    gap: 2px;
+    padding: 0.5rem 0.25rem;
+    font-size: 0.72rem;
+    text-align: center;
+    justify-content: center;
+  }
+
+  .nav-item .nav-link i {
+    font-size: 1.2rem;
+  }
+
+  .app-main {
+    order: 1;
+    flex: 1;
+  }
+
+  .app-content {
+    padding: 1rem 0.75rem;
+  }
+}

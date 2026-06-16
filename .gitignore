@@ -1,0 +1,41 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# --- uv ---
+.python-version
+
+# --- Secrets (never commit) ---
+code/backend/secrets_*.py
+!code/backend/example_secrets_*.py
+
+# --- SQLite databases ---
+*.db
+*.sqlite
+*.sqlite3
+
+# --- User data (the MD corpus and derived DBs) ---
+data/
+
+# --- Frontend build output ---
+code/frontend/dist/
+code/frontend/node_modules/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.iml
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Logs / scratch ---
+scratch/
+*.log
+
+# --- Docker volumes (if bind-mounted locally) ---
+volumes/

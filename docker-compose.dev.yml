@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./data/kla/db/chroma:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+
+  # Keycloak is NOT included here for local dev.
+  # Set DEV_AUTH_BYPASS=1 in your environment to skip auth entirely.
+  # Wire Keycloak in when deploying to Proxmox VM.
