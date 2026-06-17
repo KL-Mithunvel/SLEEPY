@@ -94,7 +94,8 @@ def auth_me():
 
 
 # ---------------------------------------------------------------------------
-# Blueprints registered here as modules are built
+# Blueprints
 # ---------------------------------------------------------------------------
-# from projects import projects_bp
-# app.register_blueprint(projects_bp, url_prefix="/api/projects")
+from ai_bp import ai_bp  # noqa: E402
+
+app.register_blueprint(ai_bp)

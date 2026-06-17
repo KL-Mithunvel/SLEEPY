@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _db_path: str | None = None
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+# Keeps the shared-cache in-memory DB alive for the lifetime of the process.
+# SQLite destroys a named :memory: DB as soon as all connections to it close,
+# so without this reference, init_db() would create tables that disappear the
+# moment its connection closes.
+_keepalive_conn: sqlite3.Connection | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +80,12 @@ _MIGRATIONS = [
         )
         """,
     ]),
+    (2, "Add result column to ai_events", [
+        # Stores generated text (briefings, suggestions) separate from the diff field.
+        "ALTER TABLE ai_events ADD COLUMN result TEXT",
+    ]),
 ]
+
 
 
 # ---------------------------------------------------------------------------
@@ -83,12 +94,21 @@ _MIGRATIONS = [
 
 def init_db():
     """Apply pending migrations. Call once at app startup."""
-    global _db_path
+    global _db_path, _keepalive_conn
     raw = config.SQLITE_DB_PATH
     if raw == ":memory:":
         _db_path = ":memory:"
+        # Open a permanent keepalive so the shared-cache DB isn't destroyed when
+        # the migration connection closes (SQLite drops named :memory: DBs when
+        # the last connection to them closes).
+        if _keepalive_conn is None:
+            _keepalive_conn = sqlite3.connect(
+                "file::memory:?cache=shared", uri=True, timeout=10, check_same_thread=False
+            )
     else:
-        _db_path = os.path.abspath(raw)
+        # Relative paths are anchored to the backend dir (not the process cwd),
+        # so behavior doesn't depend on where the entry point is invoked from.
+        _db_path = raw if os.path.isabs(raw) else os.path.abspath(os.path.join(_BACKEND_DIR, raw))
         os.makedirs(os.path.dirname(_db_path), exist_ok=True)
 
     with _lock:
@@ -119,7 +139,12 @@ def return_db(conn: sqlite3.Connection):
 # ---------------------------------------------------------------------------
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_db_path, timeout=10)
+    # Shared-cache URI makes all :memory: connections see the same DB, which is
+    # required for tests (and for multi-worker scenarios using a single file).
+    if _db_path == ":memory:":
+        conn = sqlite3.connect("file::memory:?cache=shared", uri=True, timeout=10)
+    else:
+        conn = sqlite3.connect(_db_path, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 

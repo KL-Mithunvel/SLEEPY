@@ -26,3 +26,17 @@ SLOW_REQUEST_MS = int(os.getenv("SLOW_REQUEST_MS", "3000"))
 USER_DATA_ROOT = os.getenv("USER_DATA_ROOT", os.path.abspath(
     os.path.join(os.path.dirname(__file__), "../../data/kla")
 ))
+
+# --- ChromaDB ---
+# Empty CHROMA_HOST = use local PersistentClient (dev); set to hostname for Docker/prod HTTP client.
+CHROMA_HOST = os.getenv("CHROMA_HOST", "")
+CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8001"))
+CHROMA_PATH = os.getenv("CHROMA_PATH", os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../data/kla/db/chroma")
+))
+CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "md_corpus")
+
+# --- LLM ---
+LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "claude-sonnet-4-6")
+LLM_MAX_CONTEXT_CHUNKS = int(os.getenv("LLM_MAX_CONTEXT_CHUNKS", "8"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "4096"))

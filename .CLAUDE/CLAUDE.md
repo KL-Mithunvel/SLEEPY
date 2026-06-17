@@ -1,140 +1,343 @@
-# CLAUDE.md
+# CLAUDE.md — SLEEPY (PMA)
 
-> **IMPORTANT:** Read `CLAUDE-COMMON.md` first — it contains general must-follow instructions (companion files, deployment model, workflow, template structure). This file contains repo-specific instructions. Anything here overrides `CLAUDE-COMMON.md`.
->
-> **Also read `PROJ_STARTER.md`** — it contains the owner's personal preferences (interaction rules, coding standards, tech stack choices, commit style). Copy its sections into any new project's `CLAUDE.md` User Rules alongside the rules from `CLAUDE-COMMON.md`.
+> **Read companion files first:** `CLAUDE-COMMON.md` (workflow rules) and `PROJ_STARTER.md` (engineering standards + stack). Both auto-load alongside this file. Anything here overrides those.
 
 ---
 
-## About This Repository
+## Project Overview
 
-This repo is a curated library of `CLAUDE.md` files. Each file serves as a project brief for AI-assisted development sessions — capturing architecture, rules, conventions, and status so that Claude Code can contribute effectively without needing to re-discover project context from scratch.
+**SLEEPY — EVEN WHEN SLEEPING WORK IS TRACKED AND HANDLED**
+A calm, self-hosted personal AI project-management assistant for a single user (KL Mithunvel / klm@smtw.in). Markdown + Git is the durable source of truth; the AI reads it, surfaces "why this task matters", drafts messages, and safely patches MD files via diff → apply → GitPython commit.
 
-The files here are used as **standard templates and reference material** for future projects.
-
-| File | Purpose |
-|------|---------|
-| `CLAUDE.md` | Project template — copy this into new projects |
-| `CLAUDE-COMMON.md` | Universal workflow rules — must-follow for every project |
-| `PROJ_STARTER.md` | Personal preferences and tech stack defaults — copy into new projects |
-| `<project-id>.md` | `<Project name — one-line description>` |
-
-New entries follow the same naming convention: `<short-project-id>.md`.
+- **Author:** KL Mithunvel
+- **License:** Internal / private
+- **Dev entry point:** `main.py` (repo root) — starts Flask + Vite dev server together
+- **Prod entry point:** gunicorn targeting `code/backend/app:app`; worker via `uv run python code/backend/worker.py`
+- **Python:** 3.12 (locked via `.python-version` at root, managed by uv)
+- **Status:** Phase 3 complete (AI layer). Phase 4 next (Today View, Morning Briefing UI, Task Capture).
 
 ---
 
-## How to Start a New Project
+## Running the System
 
-1. Copy `CLAUDE.md` into the new project root (keep the name `CLAUDE.md`).
-2. Copy `CLAUDE-COMMON.md` and `PROJ_STARTER.md` alongside it, or reference the ones in this library.
-3. Fill in every `[TO BE FILLED]` section below with the project's actual details.
-4. In the **User Rules** section: copy `CLAUDE-COMMON.md` → Standard User Rules verbatim, then copy `PROJ_STARTER.md` contents below that. Add project-specific overrides last, clearly labelled.
-5. Delete any `[if applicable]` sections that do not apply to the project.
+```bat
+REM Activate venv first (Windows)
+.venv\Scripts\activate
 
----
+REM Dev — Flask + Vite together (DEV_AUTH_BYPASS=1 auto-set)
+tooling\run-backend.bat
 
-## Project Overview  [TO BE FILLED]
+REM Alternatively: uv run python main.py
+REM (uv activates the root .venv automatically)
 
-> What the project is, who built it, the core problem it solves. Author, license, entry point, minimum runtime versions.
+REM Backend tests only
+tooling\run-backend-tests.bat
 
-_Not yet filled — update before the first session._
+REM Frontend only
+tooling\run-frontend.bat
 
----
+REM Worker (separate process)
+tooling\run-worker.bat
 
-## Running the System  [TO BE FILLED]
+REM One-shot MD corpus re-index into ChromaDB
+tooling\run-md-index.bat
 
-> Copy-paste-ready commands to start, test, and lint. Virtualenv activation first. Dev/simulation commands separated from hardware/production commands. Any seed-data or one-time setup steps.
+REM Start ChromaDB via Docker (if using HTTP mode instead of embedded PersistentClient)
+docker compose -f docker-compose.dev.yml up -d
+```
 
-_Not yet filled — update before the first session._
+**Dev URLs:** Backend → `http://localhost:5000` | Frontend → `http://localhost:5173`
 
----
-
-## Architecture  [TO BE FILLED]
-
-> Module responsibilities table (file → role). Data flow diagram (ASCII). Threading or async model. Simulation vs real mode and how to switch.
-
-_Not yet filled — update before the first session._
-
----
-
-## Key Modules  [TO BE FILLED]
-
-> One subsection per file or logical group. Public interface: function names, parameters, return types, exceptions raised. Side effects and I/O.
-
-_Not yet filled — update before the first session._
+**One-time setup:**
+1. Copy `code/backend/example_secrets_app.py` → `code/backend/secrets_app.py` and fill in values.
+2. `uv sync` at repo root to create `.venv` and install all deps.
+3. `npm install` in `code/frontend/` for the Vite dev server.
 
 ---
 
-## Schema Reference  [if applicable — TO BE FILLED]
+## Architecture
 
-> Path to DDL/schema file, read-only vs writable, tooling for inspection, annotated schema doc. Delete this section if the project has no data layer.
+### Data layers
 
-_Not yet filled — update before the first session._
+| Layer | Technology | Role | Rebuilable? |
+|---|---|---|---|
+| MD corpus | Markdown files + Git | Single source of truth — all context | No |
+| Vector index | ChromaDB | Derived MD index for RAG | Yes (reindex) |
+| App state | SQLite | Sessions, task_queue, ai_events, job history | Mostly — task_queue history is permanent |
+
+### Services (Docker Compose — prod on Proxmox)
+
+| Service | Role |
+|---|---|
+| `backend` | Flask (gunicorn). Routes, auth, MD patch flow, AI proxy |
+| `worker` | Separate process: APScheduler + task_queue drainer. Never inside web |
+| `frontend` | Vue 3 + Vite SPA, served as static PWA |
+| `chromadb` | Vector store for MD corpus chunks |
+| `keycloak` | OIDC auth (reuse `Office.smtw.in` realm, `pma` client). Not in dev — use `DEV_AUTH_BYPASS=1` |
+| `caddy` | HTTPS + Let's Encrypt reverse proxy |
+
+### Dev vs prod mode
+
+| | Dev | Prod |
+|---|---|---|
+| Entry point | `python main.py` (root) | `gunicorn code/backend/app:app` |
+| Auth | `DEV_AUTH_BYPASS=1` — synthetic "owner" user | Keycloak live |
+| Frontend | Vite dev server (`localhost:5173`) | Built static files served by caddy |
+| DB path | `data/kla/db/sqlite/pma.db` (relative to `code/backend/`) | Same path, mounted volume |
+
+### Module layout
+
+```
+SLEEPY/
+├── main.py                    # Dev entry point (root, added 2026-06-17)
+├── pyproject.toml / uv.lock   # Dependency declarations (root)
+├── requirements.txt           # Exported pin list (auto-generated by uv)
+├── code/
+│   ├── backend/               # Flask app — all Python lives here
+│   │   ├── app.py             # Flask app factory, CORS, slow-req logger, auth hooks
+│   │   ├── config.py          # Loads secrets_app; exports all constants
+│   │   ├── auth_utils.py      # Token validation, permission helpers
+│   │   ├── config_rbac.py     # RBAC policy table (ROLES, PERMISSIONS)
+│   │   ├── local_db.py        # SQLite migration engine + connection management
+│   │   ├── db_helpers.py      # row_to_dict / rows_to_list serialisation helpers
+│   │   ├── task_queue.py      # DB-backed queue: enqueue/claim/done/fail
+│   │   ├── task_handlers.py   # Dispatch table: task_type → handler fn
+│   │   ├── worker.py          # Standalone worker: APScheduler + drain loop
+│   │   ├── scheduled_tasks.py # Cron registry (SCHEDULED_TASKS list)
+│   │   ├── secrets_app.py     # Gitignored — never commit
+│   │   ├── example_secrets_app.py  # Template — checked in
+│   │   └── tests/
+│   │       ├── conftest.py    # App fixture, DEV_AUTH_BYPASS=1, SQLITE_DB_PATH=:memory:
+│   │       └── test_rbac.py   # Layer 1 + Layer 2 tests (9 tests)
+│   └── frontend/              # Vue 3 + Vite SPA
+│       ├── src/
+│       │   ├── main.js        # App bootstrap
+│       │   ├── api.js         # Fetch wrapper — injects Bearer token
+│       │   ├── stores/auth.js # Keycloak init + reactive state
+│       │   ├── router/        # Vue Router
+│       │   ├── components/layout/   # AppSidebar, AppTopbar
+│       │   └── views/         # TodayView, ProjectsView, LogsView
+│       ├── index.html
+│       └── vite.config.js
+├── data/                      # Gitignored — per-user MD corpus + derived DBs
+│   └── kla/                   # KLA's folder (see Per-User Layout below)
+├── docs/
+│   ├── PROJ_CHARTER.md        # Full charter — canonical reference for scope + decisions
+│   └── PROJ_STARTER.md        # Engineering standards baseline (also in .CLAUDE/)
+├── tooling/
+│   ├── run-backend.bat        # Start Flask + Vite (cd repo root → uv run python main.py)
+│   ├── run-backend-tests.bat  # uv run pytest from code/backend
+│   └── run-frontend.bat       # npm run dev from code/frontend
+└── docker-compose.dev.yml     # ChromaDB dev service
+```
+
+### Important layout quirk — main.py at root
+
+`main.py` lives at repo root but backend modules (`config`, `local_db`, `app`, etc.) live in `code/backend/`. `main.py` inserts `code/backend` onto `sys.path` at startup so their bare imports keep working. Do not move or import `main.py` from `code/backend` — it's intentionally at root since 2026-06-17.
+
+### Per-user data layout (`data/<USER>/`)
+
+```
+data/kla/
+├── ABOUT.md              # User profile + working style
+├── People.md             # All contacts (one ## section per person)
+├── db/
+│   ├── sqlite/           # SQLite app state (pma.db)
+│   └── chroma/           # ChromaDB persistence
+├── <OU>/                 # One folder per Organisational Unit
+│   └── <project>.md      # Project files live directly in OU folder
+├── logs/                 # YYYY-MM-DD.md + YYYY-WNN.md
+├── archive/              # Completed / shelved projects
+└── inbox.md              # Quick captures
+```
 
 ---
 
-## Key Conventions  [if applicable — TO BE FILLED]
+## Key Modules
 
-> Universal row keys, encoded fields with full encode AND decode formulas, sentinel values, current-record pattern, per-tenant partitioning, env vars. Delete if no non-obvious encoding exists.
+### `main.py` (root)
+Dev-only entry point. Inserts `code/backend` onto `sys.path`, sets `DEV_AUTH_BYPASS=1` (overridable), starts Flask on port 5000, spawns Vite dev server as a subprocess. Registers `atexit` to terminate Vite on exit. Never used in prod (gunicorn calls `app:app` directly).
 
-_Not yet filled — update before the first session._
+### `code/backend/app.py`
+Flask app with CORS (origins from `config.CORS_ORIGINS`), per-request DB caching on `g`, slow-request logger (`SLOW_REQUEST_MS`), and `validate_token` as `before_request`. Only public route is `GET /healthz`. Blueprints registered here as features are built.
+
+### `code/backend/config.py`
+Loads from `secrets_app`; all modules import from `config`, never from `secrets_app` directly. Key exports: `CLAUDE_API_KEY`, `KEYCLOAK_*`, `SQLITE_DB_PATH`, `DEBUG`, `CORS_ORIGINS`, `SLOW_REQUEST_MS`, `USER_DATA_ROOT`.  `USER_DATA_ROOT` resolves relative to `config.py`'s own directory (not cwd) — defaults to `../../data/kla` → `data/kla/` at repo root.
+
+### `code/backend/auth_utils.py`
+- `validate_token()` — `before_request` handler; sets `g.user` or returns 401. Skips `/healthz` and OPTIONS. In dev bypass mode, synthesises `owner` user.
+- `compute_permissions(roles: list[str]) → set[str]` — union of all permission keys for the given roles.
+- `has_perm(perm_key: str) → bool` — checks `g.user`; `owner` role bypasses all.
+- `require_perm(perm_key: str)` — route decorator; returns 403 on failure.
+- JWKS client cached globally; evicted + retried once on decode failure (handles key rotation).
+
+### `code/backend/config_rbac.py`
+- `ROLES = ("owner",)` — single role, single user. Add roles only when a second user exists.
+- `PERMISSIONS` dict — `"module:action" → (role_tuple,)`. Never put `"admin"` in tuples.
+- `OWNER_REALM_ROLES` — Keycloak realm role names that map to `"owner"`.
+
+### `code/backend/local_db.py`
+- `init_db()` — applies pending migrations from `_MIGRATIONS` list. Called once at startup.
+- `get_db() → sqlite3.Connection` — opens a new connection with WAL + foreign keys. Use inside requests via `g`.
+- `return_db(conn)` — closes connection.
+- `_MIGRATIONS` — append-only list of `(version, description, [sql_stmts])`. Never edit applied entries.
+- Relative `SQLITE_DB_PATH` is resolved against `code/backend/` (not cwd) so it works regardless of where main.py is invoked from.
+
+### `code/backend/task_queue.py`
+- `enqueue(conn, task_type, payload, delay_seconds=0) → int` — inserts row, commits, returns id.
+- `claim_next(conn) → dict | None` — claims next due pending task; sets status=running + locked_until.
+- `mark_done(conn, task_id)` / `mark_failed(conn, task_id, error, retry_delay_seconds=60)`.
+- All times stored as IST ISO-8601 strings.
+
+### `code/backend/task_handlers.py`
+- `HANDLERS: dict[str, callable]` — dispatch table mapping `task_type` to `handler(payload, conn)`.
+- `dispatch(task_type, payload, conn)` — looks up and calls handler.
+- **Handlers must NOT commit** — the worker owns the transaction boundary.
+- Current handlers: `md_reindex`, `morning_briefing` (both are stubs — Phase 3 work).
+
+### `code/backend/scheduled_tasks.py`
+- `SCHEDULED_TASKS` — list of `{task_type, cron, payload}` dicts. APScheduler in the worker reads this to register cron jobs that enqueue into `task_queue`.
+- Current schedule: morning briefing at 06:30 IST, MD reindex at 02:00 IST.
+
+### `code/backend/worker.py`
+Separate process (`uv run python code/backend/worker.py`). Calls `local_db.init_db()`, starts APScheduler from `SCHEDULED_TASKS`, then loops every 5s calling `_drain_once()` which claims and dispatches all pending tasks. Handles `KeyboardInterrupt`/`SystemExit` gracefully.
+
+### `code/frontend/src/stores/auth.js`
+Keycloak auth store (Pinia). Fetches `/api/auth/config`, inits Keycloak with `login-required` + PKCE S256, then fetches `/api/auth/me` for `role` + `permissions`. The frontend never parses the JWT directly. In dev bypass mode, the backend synthesises the me response.
+
+### `code/frontend/src/api.js`
+Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Injects Bearer token from auth store before every request. No view calls `fetch` directly.
 
 ---
 
-## Data Files  [TO BE FILLED]
+## Schema Reference
 
-> What is stored, where, and whether it is git-tracked. Runtime-generated vs committed files. Files that must never be committed.
+- **SQLite DB:** `data/kla/db/sqlite/pma.db` (relative to `code/backend/`, resolves to repo-root-relative path)
+- **Inspecting:** `sqlite3 data/kla/db/sqlite/pma.db ".tables"` or any SQLite browser
 
-_Not yet filled — update before the first session._
+### Tables
 
----
+| Table | Purpose | Mutable? |
+|---|---|---|
+| `db_version` | Migration history | Append-only |
+| `ai_events` | Every AI interaction (diffs, accepted/rejected, tokens) | Immutable — set `voided=1`, never DELETE |
+| `task_queue` | Async job queue — status: pending → running → done / failed | Read/write |
+| `md_chunks_meta` | LlamaIndex chunk tracking for MD corpus | Rebuild on reindex |
 
-## Platform Constraints  [TO BE FILLED]
+### `ai_events` columns
+`id, event_type, prompt_hash, model, diff, accepted (1/0/NULL), voided, latency_ms, input_tokens, output_tokens, created_at`
 
-> Target OS(es), platform-specific libraries and their guards, hardware dependencies and dev-mode equivalents.
-
-_Not yet filled — update before the first session._
-
----
-
-## Deployment Notes  [if applicable — TO BE FILLED]
-
-> Dev vs deployment environment table, code transfer command, one-time target setup, pre-deploy checklist, hardware smoke test, config/env differences. Delete if no hardware or remote target.
-
-_Not yet filled — update before the first session._
+### `task_queue` status values
+`pending → running → done | failed`. `attempts < max_attempts` determines eligibility for retry.
 
 ---
 
-## Known Technical Debt  [TO BE FILLED]
+## Key Conventions
 
-> Existing rule violations (file + line), temporary workarounds. Do not omit — document so debt is not accidentally perpetuated.
-
-_None recorded yet._
+| Convention | Value / Rule |
+|---|---|
+| `DEV_AUTH_BYPASS` | `1` = skip Keycloak, synthesise `owner` user. Set by `main.py` by default. **Never `1` in prod.** |
+| `SQLITE_DB_PATH` | Default: `"../../data/kla/db/sqlite/pma.db"` (relative to `code/backend/`). Override with env var. Tests force `:memory:`. |
+| `USER_DATA_ROOT` | Default: `data/kla/` (resolved relative to `code/backend/__file__`). Override with env var. |
+| AI commit author | `Arivu Baalan <arivu@smtw.in>` — every GitPython commit from the AI uses this author, never the dev's identity |
+| Dates in SQLite | ISO-8601 strings, IST (naive). No TIMESTAMPTZ. `datetime('now', 'localtime')` in SQL. |
+| Task handler commits | Handlers **must not commit** — the worker owns the transaction |
+| `_MIGRATIONS` | Append-only forever. Never edit or delete an applied entry — it will desync other instances |
+| `ai_events` | Immutable event log. Never UPDATE/DELETE. Set `voided=1` to cancel. |
+| Bare imports | Backend modules use bare imports (`import config`). Works because `main.py` / `conftest.py` both insert `code/backend` onto `sys.path` before importing. |
+| MD corpus writes | Only allowed via the diff → validate → apply → user confirmation → GitPython commit flow. Never direct file writes from API routes. |
 
 ---
 
-## Development Rules  [TO BE FILLED]
+## Data Files
 
-> Binding architectural rules, each numbered and sourced. Referenced by number in TODO items and commit messages.
-
-_Not yet filled — update before the first session._
+| Path | Contents | Git-tracked? |
+|---|---|---|
+| `data/kla/` | MD corpus + SQLite + ChromaDB | No (gitignored) |
+| `code/backend/secrets_app.py` | API keys, Keycloak config, DB path | **Never commit** |
+| `code/backend/example_secrets_app.py` | Template with placeholder values | Yes |
+| `.venv/` | Root virtualenv (uv) | No (gitignored) |
+| `code/frontend/node_modules/` | npm dependencies | No (gitignored) |
+| `code/frontend/dist/` | Vite build output | No (gitignored) |
+| `VERSION` | Semantic version string | Yes |
 
 ---
 
-## Project TODO List  [TO BE FILLED]
+## Platform Constraints
+
+- **Dev OS:** Windows 11. Use bat wrappers in `tooling/` — never bare `uv run` or `npm` outside of wrappers when running automated commands.
+- **Prod OS:** Proxmox Ubuntu VM. Docker Compose. No Windows-specific code in any library path.
+- **Auth in dev:** Keycloak is not in `docker-compose.dev.yml`. Always run with `DEV_AUTH_BYPASS=1` locally.
+- **ChromaDB in dev:** `docker compose -f docker-compose.dev.yml up -d` (Phase 3+ only).
+- All backend Python is platform-neutral. `main.py` handles the Windows `vite.cmd` vs Unix `vite` binary difference.
+
+---
+
+## Deployment Notes
+
+| | Dev (Windows) | Prod (Proxmox VM) |
+|---|---|---|
+| Entry | `python main.py` (root) | `gunicorn code/backend/app:app` |
+| Worker | `uv run python code/backend/worker.py` | Same, as a separate container/process |
+| Auth | `DEV_AUTH_BYPASS=1` | Keycloak `Office.smtw.in` realm, `pma` client |
+| DB | `data/kla/db/sqlite/pma.db` | Same path, Docker bind-mount |
+| Public URL | `localhost:5000` | `pa.mspv.app` via nginx + Certbot |
+
+**Pre-deploy checklist:** All tests green → `main.py` boots clean locally → `uv export` requirements.txt synced → VERSION bumped.
+
+---
+
+## Known Technical Debt
+
+1. `task_handlers.py:12–26` — `_handle_md_reindex` and `_handle_morning_briefing` are placeholder stubs. Both tasks are currently NOOPs. Wire up in Phase 3.
+2. No Telegram notifier yet — `scheduled_tasks.py` triggers jobs that ultimately should send Telegram messages. Phase 5.
+3. No Jira sync tables or handlers. Phase 3/4.
+4. `pyproject.toml` still says `name = "backend"` — should be updated to `name = "sleepy"` when renaming matters (non-urgent).
+5. `tooling/` is missing: `run-md-index.bat`, `run-worker.bat`, `run-frontend-build.bat` (referenced in charter §10 but not yet created).
+
+---
+
+## Development Rules
+
+1. **Windows first.** Write and test everything on dev machine before touching the Proxmox VM. Tests must pass locally before any deploy step.
+2. **DEV_AUTH_BYPASS=1 is dev-only.** Guard it in config — it must never be `1` in prod. If adding a new auth-touching feature, test both with and without bypass.
+3. **MD corpus is read-only except via the AI edit flow.** Flask routes must never write directly to `data/<USER>/` files. All AI edits go through: LLM diff → validate (path stays inside `data/<USER>/`, no binary, no large change without confirm) → apply → user confirmation gate → GitPython commit with author `Arivu Baalan <arivu@smtw.in>` → log in `ai_events`.
+4. **Task handlers never commit.** The worker owns the transaction boundary. Handlers receive a connection and do their work; `mark_done` / `mark_failed` in the worker commits.
+5. **`_MIGRATIONS` is append-only.** Never edit or delete an applied migration entry. Use `ADD COLUMN IF NOT EXISTS` and `CREATE TABLE IF NOT EXISTS` for safety.
+6. **`ai_events` is an immutable log.** Set `voided=1` to logically cancel. Never UPDATE/DELETE rows.
+7. **Secrets never leave `secrets_app.py`.** All modules import from `config.py`, not from `secrets_app` directly. `config.py` is the single audit point.
+8. **AI interaction author is always `Arivu Baalan <arivu@smtw.in>`.** GitPython must set this explicitly on every AI-initiated commit.
+9. **Thin blueprints.** Route dispatch only. Non-trivial validation/mutation in `<module>_recording.py`; state projection in `<module>_state.py`.
+10. **Test before every commit.** `tooling/run-backend-tests.bat` must pass. For frontend changes, `npm run build` in `code/frontend/` must succeed.
+
+---
+
+## Project TODO List
 
 Legend: 🔴 Bug / rule violation  |  🟡 Incomplete feature  |  🟢 Not started  |  ✅ Done
 
-_Not yet filled._
+### DONE
+- ✅ Phase 0 — Scaffold: directory structure, uv backend init, Vue 3 + Vite frontend, Docker Compose dev, secrets pattern, .gitignore, bat wrappers
+- ✅ Phase 1 — Backend foundation: Flask app, SQLite migrations, RBAC (config_rbac.py + auth_utils.py), task queue, worker skeleton, slow-request logger, 9/9 tests passing
+- ✅ Phase 2 — Frontend skeleton: Keycloak JS auth store, api.js, sidebar/topbar layout, PWA manifest, Vue Router, dark-mode Bootstrap theme, dev bypass working
+- ✅ Infra — Moved `main.py`, `pyproject.toml`, `uv.lock`, `requirements.txt` to repo root; single root `.venv`; fixed `SQLITE_DB_PATH` cwd-independence
+
+### NOT STARTED
+- 🟢 Phase 3 — AI layer: LiteLLM + ChromaDB + LlamaIndex MD indexing, safe MD edit flow (diff → patch → GitPython commit), `ai_events` logging
+- 🟢 Phase 4 — Core features: Today View, Project Dashboard, Morning Briefing generator, Task Capture (quick-capture to inbox.md)
+- 🟢 Phase 5 — Integrations: Telegram notifier, email support (Gmail MCP or Graph API), nightly scheduled jobs wired up
+- 🟢 Phase 6 — Deploy: production Docker Compose, Caddy HTTPS, nginx `pa.mspv.app`, Keycloak `pma` client, mobile PWA test
 
 ---
 
 ## User Rules
 
-> Copy **Standard User Rules** from `CLAUDE-COMMON.md` verbatim here, then copy all sections from `PROJ_STARTER.md` below those. Add project-specific overrides at the bottom, clearly labelled.
-
-See `CLAUDE-COMMON.md` → Standard User Rules and `PROJ_STARTER.md` for the full rule set.
+See `CLAUDE-COMMON.md` (Standard User Rules — workflow, deployment model, virtualenv, testing) and `PROJ_STARTER.md` (Engineering Preferences, Stack, RBAC pattern, Flask blueprint pattern, task queue pattern, etc.) for the full baseline. Both files are in this `.CLAUDE/` directory and are auto-loaded.
 
 ### Project-Specific Overrides
 
-_None — add below as needed._
+- **Commit author for AI-generated commits:** `Arivu Baalan <arivu@smtw.in>`. Regular dev commits use the configured git identity (`kl mithunvel`).
+- **Always use `tooling/run-backend-tests.bat`** to run tests — not `pytest` directly — so the correct working directory (`code/backend`) is set for uv.
+- **Never run `uv run` from `code/backend/` for the app** (use root `uv run python main.py` or the bat wrapper). Tests still run from `code/backend/` via the bat wrapper.
+- **UI design tone:** Dark mode, personal tool aesthetic, clean Bootstrap 5. Timestamps as `DD-MM-YYYY HH:MM`.
+- **MD corpus paths** are always resolved via helpers or explicit `USER_DATA_ROOT` — never construct `data/<user>/` paths by hand in route code.

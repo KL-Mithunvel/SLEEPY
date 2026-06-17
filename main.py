@@ -15,11 +15,15 @@ import sys
 # explicitly-set env var (e.g. DEV_AUTH_BYPASS=0 to test the Keycloak path).
 os.environ.setdefault("DEV_AUTH_BYPASS", "1")
 
+# Backend modules use bare imports (import config, etc.) and live in
+# code/backend rather than next to this entry point — put them on the path.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "code", "backend"))
+
 import config
 import local_db
 from app import app
 
-FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
+FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "code", "frontend"))
 
 _frontend_proc: subprocess.Popen | None = None
 
