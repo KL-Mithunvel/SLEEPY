@@ -206,14 +206,14 @@ class CurrentUser:
 
     @property
     def db_path(self) -> Path:
-        return self.data_root / "db" / "pma.sqlite3"
+        return self.data_root / "db" / "sqlite" / "app.db"
 
     @property
     def v_db_path(self) -> Path:
         return self.data_root / "db" / "chroma"
 ```
 
-The username is derived from the Keycloak token's `username` claim. The claim format is `<user>@office.smtw.in`; only the local part (before `@`) is used as the username key. This means `DATA_ROOT/kla/` for a user whose Keycloak `username` claim is `kla@office.smtw.in`.
+The username is derived from the Keycloak token's `preferred_username` or `username` claim. Only the local part (before `@`) is used as the username key. This means `DATA_ROOT/<username>/` maps to each user's data directory.
 
 ---
 

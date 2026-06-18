@@ -32,6 +32,8 @@ PMA (`pa.mspv.app`) is a self-hosted personal AI project assistant:
 | [15-news-watch.md](15-news-watch.md) | Complete news watch system: two-stage async pipeline, topics config, dedup, feedback, ABOUT.md |
 | [16-project-documentation-guide.md](16-project-documentation-guide.md) | How to document each project: frontmatter fields, every section, best practices, examples |
 | [17-recurring-tasks-and-progress-tracking.md](17-recurring-tasks-and-progress-tracking.md) | Full recurring task system: Recur files, plan hierarchy, carry-forward, materialiser stages, Govern |
+| [18-system-prompt.md](18-system-prompt.md) | AI persona (Arivu Baalan Bot), all behavioral rules, log/note shortcuts, -QUEUE- pattern, inline progress annotation, pma-edit rules as instructed to the AI |
+| [19-housekeeping.md](19-housekeeping.md) | Corpus health checker system: 4 checkers (project hygiene, frontmatter, owner validation, date validation), archive_old_daily action, inbox integration |
 
 ## Quick Start for Rebuilding
 
