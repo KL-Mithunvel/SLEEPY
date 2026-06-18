@@ -11,5 +11,6 @@
 - [x] Phase 2 — Frontend skeleton: Keycloak JS auth store, api.js helper, sidebar/topbar layout, PWA manifest, Vue Router, dark mode Bootstrap theme — build passes, dev bypass working
 - [x] Phase 3 — AI layer: LiteLLM + ChromaDB + LlamaIndex MD indexing, safe MD edit flow (diff → patch → GitPython commit), ai_events logging, Flask blueprint (`/api/ai/*`), 54/54 tests passing
 - [x] Phase 4 — Core features: Today View (briefing card, task list, quick capture → inbox.md), Projects view (OU-grouped, status badges, task counts, inline content), Logs view (daily/weekly filter, inline reader), 82/82 tests passing
-- [ ] Phase 5 — Integrations: email support (Gmail MCP or Graph API)
+- [x] AI Assistant view — natural language chat, edit proposals with diff + Apply/Discard, retry/clarify flow
+- [ ] Phase 5 — Integrations: WhatsApp notifications + outbound messaging (Twilio or Meta Cloud API), email support (Gmail MCP or Graph API)
 - [ ] Phase 6 — Deploy: production Docker Compose, Caddy HTTPS, nginx pa.mspv.app, Keycloak pma client, mobile PWA test

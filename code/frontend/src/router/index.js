@@ -3,9 +3,10 @@ import TodayView from '../views/TodayView.vue'
 
 const routes = [
   { path: '/',         redirect: '/today' },
-  { path: '/today',    component: TodayView,                                              meta: { title: 'Today',    perm: 'logs:read' } },
-  { path: '/projects', component: () => import('../views/ProjectsView.vue'),              meta: { title: 'Projects', perm: 'projects:read' } },
-  { path: '/logs',     component: () => import('../views/LogsView.vue'),                  meta: { title: 'Logs',     perm: 'logs:read' } },
+  { path: '/today',    component: TodayView,                                              meta: { title: 'Today',     perm: 'logs:read'    } },
+  { path: '/projects', component: () => import('../views/ProjectsView.vue'),              meta: { title: 'Projects',  perm: 'projects:read' } },
+  { path: '/logs',     component: () => import('../views/LogsView.vue'),                  meta: { title: 'Logs',      perm: 'logs:read'    } },
+  { path: '/ai',       component: () => import('../views/AiView.vue'),                    meta: { title: 'Assistant', perm: 'ai:suggest'   } },
 ]
 
 const router = createRouter({

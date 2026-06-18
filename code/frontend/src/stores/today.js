@@ -8,9 +8,6 @@ export const useTodayStore = defineStore('today', {
     tasks: [],
     loadingToday: false,
     loadingBriefing: false,
-    captureText: '',
-    capturing: false,
-    captureSuccess: false,
     error: null,
   }),
 
@@ -41,23 +38,6 @@ export const useTodayStore = defineStore('today', {
         this.error = e.message
       } finally {
         this.loadingBriefing = false
-      }
-    },
-
-    async capture() {
-      if (!this.captureText.trim()) return
-      this.capturing = true
-      this.captureSuccess = false
-      this.error = null
-      try {
-        await apiPost('/api/today/capture', { text: this.captureText.trim() })
-        this.captureText = ''
-        this.captureSuccess = true
-        setTimeout(() => { this.captureSuccess = false }, 3000)
-      } catch (e) {
-        this.error = e.message
-      } finally {
-        this.capturing = false
       }
     },
   },

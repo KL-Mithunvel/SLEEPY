@@ -208,6 +208,180 @@ def edit_reject(event_id: int):
 
 
 # ---------------------------------------------------------------------------
+# AI Chat — natural language interface that routes to answer or edit
+# ---------------------------------------------------------------------------
+
+_CHAT_SYSTEM = """\
+You are a calm, precise personal project-management assistant for KL Mithunvel (klm@smtw.in).
+
+## Data layout
+All project data lives as Markdown files under the user's data root. The structure is:
+
+  <OU>/<project-slug>.md        — one file per project (e.g. SMTW/finance-review.md)
+  logs/YYYY-MM-DD.md            — daily log files
+  logs/YYYY-WNN.md              — weekly review files
+  inbox.md                      — quick captures and unprocessed items
+  ABOUT.md                      — user profile
+  People.md                     — contacts
+
+OU (Organisational Unit) is a top-level folder grouping related projects.
+You may encounter OUs such as SMTW, Infra, Personal, or others the user mentions.
+When creating a NEW project, pick a sensible OU and slug from the user's instruction.
+
+## Standard project file format
+A new project file should follow this structure:
+
+  # <Project Title>
+
+  **Status:** Active | On Hold | Complete
+  **OU:** <OU name>
+  **Started:** <DD-MM-YYYY>
+
+  ## Overview
+  <one paragraph describing the project>
+
+  ## Tasks
+  - [ ] <task description>  <!-- due: DD-MM-YYYY -->
+  - [x] <completed task>
+
+  ## Notes
+  <any other context>
+
+## Classify every message as QUESTION or INSTRUCTION
+
+QUESTION — user wants information (status, summary, what's due, who is working on what, etc.)
+Reply with:
+INTENT: answer
+RESPONSE:
+[concise answer using only what is in the context; if the corpus is empty say so clearly]
+
+INSTRUCTION — user wants to create, update, or capture something
+Reply with:
+INTENT: edit
+FILE: <relative path, e.g. SMTW/finance-review.md or inbox.md>
+SUMMARY: <one-line description of the change>
+CONTENT:
+<the COMPLETE new content of the file — every single line>
+
+## Rules
+- For INTENT: edit, always output the COMPLETE file content after CONTENT: — never a partial snippet
+- You MAY create new files that do not yet exist — set FILE to the correct new path
+- If you cannot determine the right OU or file, use INTENT: answer to ask one clarifying question
+- Never fabricate tasks, people, or decisions not stated by the user or present in the context
+- Dates are formatted DD-MM-YYYY\
+"""
+
+
+def _parse_chat_response(raw: str) -> dict:
+    lines = raw.strip().split("\n")
+    intent = "answer"
+    file_path = summary = ""
+    content_lines: list[str] = []
+    response_lines: list[str] = []
+    content_started = response_started = False
+
+    for line in lines:
+        s = line.strip()
+        if s == "INTENT: edit":
+            intent = "edit"
+        elif s == "INTENT: answer":
+            intent = "answer"
+        elif s.startswith("FILE:") and intent == "edit":
+            file_path = s[5:].strip()
+        elif s.startswith("SUMMARY:") and intent == "edit":
+            summary = s[8:].strip()
+        elif s == "CONTENT:" and intent == "edit":
+            content_started = True
+        elif s == "RESPONSE:" and intent == "answer":
+            response_started = True
+        elif content_started and intent == "edit":
+            content_lines.append(line)
+        elif response_started and intent == "answer":
+            response_lines.append(line)
+
+    if intent == "edit":
+        return {"intent": "edit", "file_path": file_path,
+                "summary": summary, "content": "\n".join(content_lines)}
+
+    answer = "\n".join(response_lines).strip() if response_lines else raw.strip()
+    return {"intent": "answer", "content": answer}
+
+
+@ai_bp.post("/api/ai/chat")
+@require_perm("ai:suggest")
+def chat_endpoint():
+    """
+    Natural-language chat endpoint.
+
+    Request:
+        { "message": "...", "history": [{"role": "user"|"assistant", "content": "..."}] }
+
+    Response (answer):
+        { "type": "answer", "content": "..." }
+
+    Response (edit proposal):
+        { "type": "edit", "event_id": 42, "rel_path": "...", "diff": "...", "summary": "..." }
+    """
+    body = request.get_json(silent=True) or {}
+    message = (body.get("message") or "").strip()
+    history = body.get("history") or []
+
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+
+    context = ai_client.build_rag_context(message)
+
+    messages = [{"role": "system", "content": _CHAT_SYSTEM}]
+    for h in history[-8:]:
+        if h.get("role") in ("user", "assistant") and h.get("content"):
+            messages.append({"role": h["role"], "content": h["content"]})
+
+    if context:
+        user_content = f"{message}\n\n{context}"
+    else:
+        # No indexed content — AI can still CREATE new files; it just cannot query existing ones.
+        # Do not block the request: let the AI decide based on intent.
+        user_content = (
+            f"{message}\n\n"
+            "[System note: The project corpus index is currently empty — no existing Markdown "
+            "files have been indexed yet. If the user is asking about existing projects or tasks, "
+            "tell them nothing is indexed and they should run a reindex. If the user is asking you "
+            "to CREATE something new, go ahead and create it using the file layout described in "
+            "your system prompt.]"
+        )
+    messages.append({"role": "user", "content": user_content})
+
+    db = _db()
+    try:
+        resp = ai_client.chat(messages, event_type="ai_chat", conn=db)
+    except Exception as exc:
+        logger.exception("Chat LLM call failed")
+        return jsonify({"error": str(exc)}), 502
+
+    parsed = _parse_chat_response(resp["content"])
+
+    if parsed["intent"] == "edit":
+        if not parsed["file_path"] or not parsed["content"]:
+            return jsonify({"type": "answer",
+                            "content": "I couldn't determine which file to edit. Could you be more specific?"})
+        try:
+            result = md_editor.propose_edit(parsed["file_path"], parsed["content"], parsed["summary"], db)
+        except ValueError as exc:
+            return jsonify({"type": "answer", "content": f"I couldn't apply that edit: {exc}"})
+
+        return jsonify({
+            "type": "edit",
+            "event_id": result["event_id"],
+            "rel_path": result["rel_path"],
+            "diff": result["diff"],
+            "summary": result["summary"],
+            "is_new": result.get("is_new", False),
+        })
+
+    return jsonify({"type": "answer", "content": parsed["content"]})
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

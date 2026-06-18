@@ -5,9 +5,10 @@ import { useAuthStore } from '../../stores/auth.js'
 const auth = useAuthStore()
 
 const navItems = [
-  { to: '/today',    label: 'Today',    icon: 'bi-calendar-check', perm: 'logs:read'    },
-  { to: '/projects', label: 'Projects', icon: 'bi-folder2-open',   perm: 'projects:read' },
-  { to: '/logs',     label: 'Logs',     icon: 'bi-journal-text',   perm: 'logs:read'    },
+  { to: '/today',    label: 'Today',     icon: 'bi-calendar-check', perm: 'logs:read'    },
+  { to: '/projects', label: 'Projects',  icon: 'bi-folder2-open',   perm: 'projects:read' },
+  { to: '/logs',     label: 'Logs',      icon: 'bi-journal-text',   perm: 'logs:read'    },
+  { to: '/ai',       label: 'Assistant', icon: 'bi-stars',          perm: 'ai:suggest'   },
 ]
 
 function canSee(perm) {

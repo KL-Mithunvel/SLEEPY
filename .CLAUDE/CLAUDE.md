@@ -322,9 +322,10 @@ Legend: 🔴 Bug / rule violation  |  🟡 Incomplete feature  |  🟢 Not start
 - ✅ Phase 3 — AI layer: LiteLLM + ChromaDB + LlamaIndex MD indexing, safe MD edit flow (diff → patch → GitPython commit), `ai_events` logging, 54/54 tests passing
 - ✅ Phase 4 — Core features: Today View (briefing card, task list, quick capture → inbox.md), Projects view, Logs view, 82/82 tests passing
 - ✅ Nightly scheduled jobs wired: APScheduler in worker enqueues `morning_briefing` (06:30 IST) and `md_reindex` (02:00 IST); handlers call real `ai_client` and `md_indexer` implementations
+- ✅ AI Assistant view (`/ai`): natural-language chat → LLM classifies intent → answer bubble or diff card with Apply/Discard; retry/clarify via conversation history; `POST /api/ai/chat` backend endpoint
 
 ### NOT STARTED
-- 🟢 Phase 5 — Integrations: email support (Gmail MCP or Graph API)
+- 🟢 Phase 5 — Integrations: WhatsApp notifications + outbound messaging (Twilio or Meta Cloud API), email support (Gmail MCP or Graph API)
 - 🟢 Phase 6 — Deploy: production Docker Compose, Caddy HTTPS, nginx `pa.mspv.app`, Keycloak `pma` client, mobile PWA test
 
 ---

@@ -1,19 +1,47 @@
 <script setup>
-import { onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import { useTodayStore } from '../stores/today.js'
+import { useAiStore } from '../stores/ai.js'
 
 const auth = useAuthStore()
 const today = useTodayStore()
+const ai = useAiStore()
 
 const now = new Date()
 const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
 
-function onCaptureKey(e) {
+// Last message pair for the mini chat display
+const lastUserMsg = computed(() => {
+  const u = [...ai.messages].reverse().find(m => m.role === 'user')
+  return u || null
+})
+const lastAiMsg = computed(() => {
+  const msgs = ai.messages
+  if (!msgs.length) return null
+  const last = msgs[msgs.length - 1]
+  return last.role === 'assistant' ? last : null
+})
+
+function onAiKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
-    today.capture()
+    sendToAi()
   }
+}
+
+async function sendToAi() {
+  if (!ai.inputText.trim() || ai.loading) return
+  await ai.send(ai.inputText)
+}
+
+function diffLineClass(line) {
+  if (line.startsWith('+++') || line.startsWith('---')) return 'diff-header'
+  if (line.startsWith('+')) return 'diff-add'
+  if (line.startsWith('-')) return 'diff-remove'
+  if (line.startsWith('@@')) return 'diff-hunk'
+  return 'diff-context'
 }
 
 function truncate(text, max = 180) {
@@ -144,43 +172,120 @@ onMounted(() => today.fetchToday())
       </div>
     </div>
 
-    <!-- Quick Capture -->
+    <!-- AI Assistant (mini chat) -->
     <div class="card p-3">
       <div class="d-flex align-items-center gap-2 mb-2">
-        <i class="bi bi-plus-circle text-accent"></i>
-        <span class="fw-semibold" style="font-size: 0.85rem;">Quick Capture</span>
+        <i class="bi bi-stars text-accent"></i>
+        <span class="fw-semibold" style="font-size: 0.85rem;">AI Assistant</span>
+        <RouterLink
+          to="/ai"
+          style="font-size: 0.72rem; margin-left: auto; color: var(--accent, #6ea8fe); text-decoration: none;"
+        >Full chat →</RouterLink>
       </div>
 
+      <!-- Last AI response -->
+      <div v-if="lastAiMsg" class="mb-2">
+        <!-- Answer -->
+        <div
+          v-if="lastAiMsg.type === 'answer'"
+          class="p-2 rounded"
+          style="background: var(--bg-app, #13131f); border: 1px solid var(--border-color, rgba(255,255,255,0.07)); font-size: 0.81rem; color: var(--text-main, #e0e0e0); white-space: pre-wrap; max-height: 120px; overflow-y: auto;"
+        >{{ lastAiMsg.content }}</div>
+
+        <!-- Edit proposal -->
+        <div
+          v-else-if="lastAiMsg.type === 'edit'"
+          class="rounded"
+          style="background: var(--bg-app, #13131f); border: 1px solid var(--border-color, rgba(255,255,255,0.07)); overflow: hidden; font-size: 0.8rem;"
+        >
+          <div class="px-2 py-1" style="border-bottom: 1px solid var(--border-color); background: rgba(110,168,254,0.05);">
+            <template v-if="lastAiMsg.settled && lastAiMsg.confirmed">
+              <i class="bi bi-check-circle-fill text-success me-1"></i>
+              Applied — <code style="font-size: 0.75rem;">{{ lastAiMsg.edit.rel_path }}</code>
+            </template>
+            <template v-else-if="lastAiMsg.settled">
+              <i class="bi bi-x-circle me-1" style="color: #f87171;"></i> Discarded
+            </template>
+            <template v-else>
+              <i class="bi bi-pencil-square me-1" style="color: var(--accent);"></i>
+              Edit <code style="font-size: 0.75rem;">{{ lastAiMsg.edit.rel_path }}</code>
+              — {{ lastAiMsg.edit.summary }}
+            </template>
+          </div>
+
+          <!-- Compact diff (collapsed, scrollable) -->
+          <div
+            v-if="!lastAiMsg.settled"
+            style="font-family: monospace; font-size: 0.72rem; max-height: 100px; overflow-y: auto; background: var(--bg-app);"
+          >
+            <div
+              v-for="(line, li) in lastAiMsg.edit.diff.split('\n').slice(0, 30)"
+              :key="li"
+              :class="['diff-line-sm', diffLineClass(line)]"
+            >{{ line }}</div>
+          </div>
+
+          <!-- Apply / Discard -->
+          <div v-if="!lastAiMsg.settled" class="d-flex gap-2 px-2 py-1" style="border-top: 1px solid var(--border-color);">
+            <button class="btn btn-success btn-sm py-0" style="font-size: 0.74rem;" @click="ai.confirmEdit(ai.messages.length - 1)">
+              <i class="bi bi-check-lg me-1"></i>Apply
+            </button>
+            <button class="btn btn-outline-secondary btn-sm py-0" style="font-size: 0.74rem;" @click="ai.discardEdit(ai.messages.length - 1)">
+              <i class="bi bi-x-lg me-1"></i>Discard
+            </button>
+            <RouterLink to="/ai" style="font-size: 0.72rem; margin-left: auto; color: var(--accent); align-self: center; text-decoration: none;">
+              View full diff →
+            </RouterLink>
+          </div>
+        </div>
+
+        <!-- Error -->
+        <div
+          v-else-if="lastAiMsg.type === 'error'"
+          class="p-2 rounded"
+          style="background: rgba(248,113,113,0.1); color: #f87171; font-size: 0.8rem; border: 1px solid rgba(248,113,113,0.2);"
+        >
+          <i class="bi bi-exclamation-triangle me-1"></i>{{ lastAiMsg.content }}
+        </div>
+      </div>
+
+      <!-- Input -->
       <div class="input-group">
         <input
-          v-model="today.captureText"
+          v-model="ai.inputText"
           type="text"
           class="form-control form-control-sm"
-          placeholder="Capture a thought or task… (saved to inbox.md)"
-          :disabled="today.capturing"
-          @keydown="onCaptureKey"
+          placeholder="Ask anything or give an instruction… (Enter to send)"
+          :disabled="ai.loading"
+          style="background: var(--bg-app); border-color: var(--border-color); color: var(--text-main);"
+          @keydown="onAiKey"
         />
         <button
           class="btn btn-primary btn-sm"
-          :disabled="today.capturing || !today.captureText.trim()"
-          @click="today.capture()"
+          :disabled="ai.loading || !ai.inputText.trim()"
+          @click="sendToAi"
         >
-          <span v-if="today.capturing" class="spinner-border spinner-border-sm" role="status"></span>
+          <span v-if="ai.loading" class="spinner-border spinner-border-sm" role="status"></span>
           <i v-else class="bi bi-send"></i>
         </button>
       </div>
-
-      <!-- Success flash -->
-      <div
-        v-if="today.captureSuccess"
-        class="mt-2 d-flex align-items-center gap-1"
-        style="font-size: 0.76rem; color: #75b798;"
-      >
-        <i class="bi bi-check-circle-fill"></i> Saved to inbox.md
-      </div>
-      <div v-else style="font-size: 0.72rem; color: var(--text-muted-custom); margin-top: 0.4rem;">
-        Press Enter to capture · Writes to inbox.md via the safe edit flow
+      <div style="font-size: 0.71rem; color: var(--text-muted-custom); margin-top: 0.35rem;">
+        AI decides what to do — updates project files, answers questions, or captures to inbox.
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.diff-line-sm {
+  display: block;
+  padding: 0 0.5rem;
+  white-space: pre;
+  line-height: 1.4;
+}
+.diff-add    { background: rgba(117,183,152,0.13); color: #75b798; }
+.diff-remove { background: rgba(248,113,113,0.13); color: #f87171; }
+.diff-hunk   { color: #6ea8fe; opacity: 0.75; }
+.diff-header { color: var(--text-muted-custom); opacity: 0.5; }
+.diff-context{ color: var(--text-muted-custom); }
+</style>
