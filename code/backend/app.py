@@ -32,21 +32,21 @@ def get_db():
 
 
 # ---------------------------------------------------------------------------
+# Slow-request logger — must run before auth so g._req_start is always set
+# ---------------------------------------------------------------------------
+
+@app.before_request
+def _start_timer():
+    g._req_start = time.monotonic()
+
+
+# ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
 
 @app.before_request
 def _auth():
     return auth_utils.validate_token()
-
-
-# ---------------------------------------------------------------------------
-# Slow-request logger
-# ---------------------------------------------------------------------------
-
-@app.before_request
-def _start_timer():
-    g._req_start = time.monotonic()
 
 
 @app.after_request
@@ -96,6 +96,12 @@ def auth_me():
 # ---------------------------------------------------------------------------
 # Blueprints
 # ---------------------------------------------------------------------------
-from ai_bp import ai_bp  # noqa: E402
+from ai_bp import ai_bp                # noqa: E402
+from today_bp import today_bp          # noqa: E402
+from projects_bp import projects_bp    # noqa: E402
+from logs_bp import logs_bp            # noqa: E402
 
 app.register_blueprint(ai_bp)
+app.register_blueprint(today_bp)
+app.register_blueprint(projects_bp)
+app.register_blueprint(logs_bp)

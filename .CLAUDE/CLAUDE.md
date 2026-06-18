@@ -14,7 +14,7 @@ A calm, self-hosted personal AI project-management assistant for a single user (
 - **Dev entry point:** `main.py` (repo root) — starts Flask + Vite dev server together
 - **Prod entry point:** gunicorn targeting `code/backend/app:app`; worker via `uv run python code/backend/worker.py`
 - **Python:** 3.12 (locked via `.python-version` at root, managed by uv)
-- **Status:** Phase 3 complete (AI layer). Phase 4 next (Today View, Morning Briefing UI, Task Capture).
+- **Status:** Phases 0–4 + nightly jobs complete. Phase 5 next (email support). Phase 6 is deploy.
 
 ---
 
@@ -289,11 +289,9 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 
 ## Known Technical Debt
 
-1. `task_handlers.py:12–26` — `_handle_md_reindex` and `_handle_morning_briefing` are placeholder stubs. Both tasks are currently NOOPs. Wire up in Phase 3.
-2. No Telegram notifier yet — `scheduled_tasks.py` triggers jobs that ultimately should send Telegram messages. Phase 5.
-3. No Jira sync tables or handlers. Phase 3/4.
-4. `pyproject.toml` still says `name = "backend"` — should be updated to `name = "sleepy"` when renaming matters (non-urgent).
-5. `tooling/` is missing: `run-md-index.bat`, `run-worker.bat`, `run-frontend-build.bat` (referenced in charter §10 but not yet created).
+1. No Jira sync tables or handlers.
+2. `pyproject.toml` still says `name = "backend"` — should be updated to `name = "sleepy"` when renaming matters (non-urgent).
+3. `tooling/` is missing: `run-md-index.bat`, `run-worker.bat`, `run-frontend-build.bat` (referenced in charter §10 but not yet created).
 
 ---
 
@@ -321,11 +319,12 @@ Legend: 🔴 Bug / rule violation  |  🟡 Incomplete feature  |  🟢 Not start
 - ✅ Phase 1 — Backend foundation: Flask app, SQLite migrations, RBAC (config_rbac.py + auth_utils.py), task queue, worker skeleton, slow-request logger, 9/9 tests passing
 - ✅ Phase 2 — Frontend skeleton: Keycloak JS auth store, api.js, sidebar/topbar layout, PWA manifest, Vue Router, dark-mode Bootstrap theme, dev bypass working
 - ✅ Infra — Moved `main.py`, `pyproject.toml`, `uv.lock`, `requirements.txt` to repo root; single root `.venv`; fixed `SQLITE_DB_PATH` cwd-independence
+- ✅ Phase 3 — AI layer: LiteLLM + ChromaDB + LlamaIndex MD indexing, safe MD edit flow (diff → patch → GitPython commit), `ai_events` logging, 54/54 tests passing
+- ✅ Phase 4 — Core features: Today View (briefing card, task list, quick capture → inbox.md), Projects view, Logs view, 82/82 tests passing
+- ✅ Nightly scheduled jobs wired: APScheduler in worker enqueues `morning_briefing` (06:30 IST) and `md_reindex` (02:00 IST); handlers call real `ai_client` and `md_indexer` implementations
 
 ### NOT STARTED
-- 🟢 Phase 3 — AI layer: LiteLLM + ChromaDB + LlamaIndex MD indexing, safe MD edit flow (diff → patch → GitPython commit), `ai_events` logging
-- 🟢 Phase 4 — Core features: Today View, Project Dashboard, Morning Briefing generator, Task Capture (quick-capture to inbox.md)
-- 🟢 Phase 5 — Integrations: Telegram notifier, email support (Gmail MCP or Graph API), nightly scheduled jobs wired up
+- 🟢 Phase 5 — Integrations: email support (Gmail MCP or Graph API)
 - 🟢 Phase 6 — Deploy: production Docker Compose, Caddy HTTPS, nginx `pa.mspv.app`, Keycloak `pma` client, mobile PWA test
 
 ---
