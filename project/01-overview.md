@@ -1,7 +1,7 @@
 # PMA — Project Overview
 
 **Full name:** ProjectManagementAssistant (working name)
-**Production URL:** `https://pa.mspv.app`
+**Production URL:** `https://pma.example.com`
 **Version:** 0.1.41
 **Status:** Internal beta
 **Started:** 2026-04-14
@@ -43,7 +43,7 @@ Every piece of project context lives in a Git-managed Markdown corpus. Decisions
 
 **Why Markdown:** human-readable, diffable, editable with any tool, portable. No vendor lock-in. The user can read, edit, and backup their corpus independently of PMA.
 
-**Why Git:** every AI edit is a commit. The user can `git log` to see what the assistant changed and `git revert` to undo it. The assistant's authorship (`Arivu Baalan <arivu@smtw.in>`) is distinct from the user's authorship, so the history is clear.
+**Why Git:** every AI edit is a commit. The user can `git log` to see what the assistant changed and `git revert` to undo it. The assistant's authorship (`PMA Bot <assistant@company.com>`) is distinct from the user's authorship, so the history is clear.
 
 ### Per-User Data Isolation
 
@@ -151,12 +151,12 @@ The frontend is a **Vue 3 SPA** built with Vite and served as static files by ng
 
 | Component | Technology | Notes |
 |---|---|---|
-| Provider | Keycloak | Realm: `Office`, Client: `pma` |
+| Provider | Keycloak | Realm: `MyRealm`, Client: `pma` |
 | Flow | PKCE S256 | Implemented in keycloak-js (frontend) |
 | Token validation | PyJWT + JWKS | RS256, JWKS fetched from Keycloak's certs endpoint |
 | Roles | Keycloak realm + resource | `realm_access.roles` + `resource_access.<client>.roles` |
 | `aud` claim | Not verified | Keycloak default `aud=account`; `azp` claim checked instead |
-| Internal URL rewrite | Yes | `https://sso.mspv.app` → `http://<KEYCLOAK_HOST_IP>:8080` |
+| Internal URL rewrite | Yes | `https://sso.example.com` → `http://<KEYCLOAK_HOST_IP>:8080` |
 | Dev bypass | `DEV_AUTH_BYPASS=1` | Sets user from `DEV_USER` env, no Keycloak needed |
 
 ### Storage
@@ -377,10 +377,10 @@ No shared SQLite, no shared ChromaDB, no cross-user data access.
 All AI-generated edits committed to the Markdown corpus use a fixed Git actor:
 
 ```
-Arivu Baalan <arivu@smtw.in>
+PMA Bot <assistant@company.com>
 ```
 
-Commit messages use the prefix `AI:` (e.g. `AI: updated project status for KILN-AR26`). MCP-originated edits use `mcp@smtw.in` as the email to distinguish them in `git log`.
+Commit messages use the prefix `AI:` (e.g. `AI: updated project status for INFRA-UP26`). MCP-originated edits use `mcp@company.com` as the email to distinguish them in `git log`.
 
 User-authored commits use the user's Keycloak email.
 
@@ -394,7 +394,7 @@ The LLM produces edits in a custom SEARCH/REPLACE format rather than unified dif
 
 ```
 ```pma-edit
-file: Projects/KILN/ar26.md
+file: Projects/INFRA/up26.md
 <<<<<<< SEARCH
 - [ ] Review proposal
 =======
@@ -411,7 +411,7 @@ The last system block in every Claude API call is tagged with `cache_control: {t
 
 ### Development Auth Bypass
 
-Set `DEV_AUTH_BYPASS=1` in the environment to skip Keycloak entirely. The backend synthesises a `CurrentUser` from `DEV_USER` (default: `"kla"`) and grants `admin` role. No Keycloak server required for local development.
+Set `DEV_AUTH_BYPASS=1` in the environment to skip Keycloak entirely. The backend synthesises a `CurrentUser` from `DEV_USER` (default: `"devuser"`) and grants `admin` role. No Keycloak server required for local development.
 
 ---
 
@@ -507,7 +507,7 @@ This progressive-disclosure approach keeps the baseline system prompt compact wh
 | Integration | Purpose | Auth mechanism |
 |---|---|---|
 | Anthropic Claude API | Primary LLM | API key (`ANTHROPIC_API_KEY`) |
-| Keycloak | OIDC auth | Realm `Office`, client `pma`, PKCE S256 |
+| Keycloak | OIDC auth | Realm `MyRealm`, client `pma`, PKCE S256 |
 | Microsoft Graph (O365) | Email sending | MSAL client credentials (`O365_TENANT_ID`, `O365_CLIENT_ID`, `O365_CLIENT_SECRET`) |
 | Telegram Bot API | Notification sending | Bot token (`TELEGRAM_BOT_TOKEN`) |
 | Jira Cloud | Issue read/create | API token (`JIRA_API_TOKEN`, `JIRA_USER_EMAIL`) |
@@ -525,7 +525,7 @@ All configuration is centralised in `code/backend/config.py`. Values are resolve
 |---|---|---|
 | `DATA_ROOT` | `<repo>/data` | Root directory for all user data |
 | `DEV_AUTH_BYPASS` | `0` | Set to `1` to skip Keycloak in development |
-| `DEV_USER` | `kla` | Username used when `DEV_AUTH_BYPASS=1` |
+| `DEV_USER` | `admin` | Username used when `DEV_AUTH_BYPASS=1` |
 | `DEBUG` | `0` | Flask debug mode |
 | `HOST` | `127.0.0.1` | Flask bind host |
 | `PORT` | `5000` | Flask bind port |
@@ -541,7 +541,7 @@ All configuration is centralised in `code/backend/config.py`. Values are resolve
 | Variable | Description |
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic API key |
-| `KEYCLOAK_REALM_URL` | Public realm URL (e.g. `https://sso.mspv.app/realms/Office`) |
+| `KEYCLOAK_REALM_URL` | Public realm URL (e.g. `https://sso.example.com/realms/MyRealm`) |
 | `KEYCLOAK_CLIENT_ID` | Keycloak client ID (`pma`) |
 | `KEYCLOAK_HOST_IP` | LAN IP of Keycloak host for internal URL rewrite |
 | `O365_TENANT_ID` | Azure AD tenant ID |
@@ -582,7 +582,7 @@ uv run pytest
 
 ### Auth in Development
 
-Set `DEV_AUTH_BYPASS=1` in a `.env` file in `code/`. The backend will synthesise a `CurrentUser` for `DEV_USER` (default: `kla`) with admin role. No Keycloak server needed.
+Set `DEV_AUTH_BYPASS=1` in a `.env` file in `code/`. The backend will synthesise a `CurrentUser` for `DEV_USER` (default: `devuser`) with admin role. No Keycloak server needed.
 
 ### Building for Production
 

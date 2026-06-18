@@ -111,7 +111,7 @@ RUN .venv/bin/python -c "from fastembed import TextEmbedding; TextEmbedding('BAA
 ### Flask-CORS (>=6.0.2)
 - Handles CORS for API endpoints
 - In development: allows requests from `http://localhost:5173` (Vite dev server)
-- In production: allows `CORS_ORIGINS` env var (e.g. `https://pma.mspv.app`)
+- In production: allows `CORS_ORIGINS` env var (e.g. `https://pma.example.com`)
 
 ### APScheduler (>=3.11.2)
 - `BackgroundScheduler` (thread-based)

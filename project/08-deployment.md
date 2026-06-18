@@ -7,7 +7,7 @@ Internet → Caddy (reverse proxy, TLS) → pma-frontend (Nginx, port 80)
                                       → pma-backend (gunicorn, port 5000)
                                       → pma-worker (APScheduler, no HTTP)
                      ↕
-                  Keycloak SSO (sso.mspv.app, external)
+                  Keycloak SSO (sso.example.com, external)
 ```
 
 ## Docker Compose (Production)
@@ -15,7 +15,7 @@ Internet → Caddy (reverse proxy, TLS) → pma-frontend (Nginx, port 80)
 File: `tooling/build/example-docker-compose.yml`
 
 ```yaml
-# Production deployment template for PMA (pma.mspv.app).
+# Production deployment template for PMA (pma.example.com).
 # Copy to target server as docker-compose.yml and adjust secrets/volumes as needed.
 #
 # Required on host:
@@ -33,10 +33,10 @@ services:
       - ${DATA_ROOT}:/data
     environment:
       DATA_ROOT: /data
-      CORS_ORIGINS: https://pma.mspv.app
+      CORS_ORIGINS: https://pma.example.com
       TZ: Asia/Kolkata
     extra_hosts:
-      - "sso.mspv.app:${KEYCLOAK_HOST_IP}"
+      - "sso.example.com:${KEYCLOAK_HOST_IP}"
 
   worker:
     image: REGISTRY/pma-backend:latest
@@ -50,7 +50,7 @@ services:
       DATA_ROOT: /data
       TZ: Asia/Kolkata
     extra_hosts:
-      - "sso.mspv.app:${KEYCLOAK_HOST_IP}"
+      - "sso.example.com:${KEYCLOAK_HOST_IP}"
 
   frontend:
     image: REGISTRY/pma-frontend:latest
@@ -78,7 +78,7 @@ KEYCLOAK_HOST_IP=192.168.1.xxx  # internal IP of Keycloak server
 ```python
 # /path/to/secrets_app.py — NEVER commit to git
 ANTHROPIC_API_KEY = "sk-ant-api03-..."
-KEYCLOAK_REALM_URL = "https://sso.mspv.app/realms/Office"
+KEYCLOAK_REALM_URL = "https://sso.example.com/realms/MyRealm"
 KEYCLOAK_HOST_IP = "192.168.1.xxx"
 DATA_ROOT = "/data"
 MCP_API_KEY = "your-mcp-api-key"
@@ -196,7 +196,7 @@ mkdir -p /opt/pma/data/<username>/db
 PMA uses Caddy as the reverse proxy. Example `Caddyfile`:
 
 ```
-pma.mspv.app {
+pma.example.com {
     # Frontend (SPA)
     reverse_proxy /api/* pma-backend:5000
     reverse_proxy /mcp/* pma-backend:5000
@@ -215,18 +215,18 @@ Note: Caddy handles TLS termination. Backend containers receive plain HTTP.
 ## Keycloak Setup
 
 ### Realm Configuration
-- Realm name: `Office`
+- Realm name: any (e.g. `MyRealm`) — must match the realm portion of `KEYCLOAK_REALM_URL`
 - Client ID: `pma`
 - Client protocol: `openid-connect`
 - Access type: `public` (no client secret, uses PKCE)
-- Valid redirect URIs: `https://pma.mspv.app/*`
-- Web origins: `https://pma.mspv.app`
+- Valid redirect URIs: `https://pma.example.com/*`
+- Web origins: `https://pma.example.com`
 - Standard flow: enabled
 - Direct access grants: disabled (PKCE only)
 - PKCE challenge method: `S256`
 
 ### User Setup
-- Users are Keycloak users in the `Office` realm
+- Users are Keycloak users in the realm `MyRealm`
 - Username maps to `DATA_ROOT/<username>/` on disk
 - Roles can be realm-level or client-level (both supported)
 
@@ -234,7 +234,7 @@ Note: Caddy handles TLS termination. Backend containers receive plain HTTP.
 Backend fetches: `<KEYCLOAK_REALM_URL>/protocol/openid-connect/certs`
 
 For containers using `extra_hosts`, this resolves via:
-`https://sso.mspv.app/realms/Office` → internally: `http://<KEYCLOAK_HOST_IP>:8080/realms/Office`
+`https://sso.example.com/realms/MyRealm` → internally: `http://<KEYCLOAK_HOST_IP>:8080/realms/MyRealm`
 
 ## Production Startup Sequence
 
@@ -245,7 +245,7 @@ For containers using `extra_hosts`, this resolves via:
    - `docker logs pma-backend` — should show gunicorn workers started
    - `docker logs pma-worker` — should show APScheduler jobs scheduled, initial index_sync running
    - `docker logs pma-frontend` — should show Nginx started
-5. `curl https://pma.mspv.app/api/health` → `{"status": "ok", "version": "..."}`
+5. `curl https://pma.example.com/api/health` → `{"status": "ok", "version": "..."}`
 
 ## Upgrade Process
 
@@ -259,7 +259,7 @@ docker compose up -d --no-deps worker
 docker compose up -d --no-deps frontend
 
 # Verify health
-curl https://pma.mspv.app/api/health
+curl https://pma.example.com/api/health
 ```
 
 ## Backup Strategy
@@ -270,7 +270,7 @@ curl https://pma.mspv.app/api/health
    git remote add origin git@github.com:user/md-corpus.git
    git push -u origin main
    ```
-2. **SQLite databases** (`pma.sqlite3`, `queue.sqlite3`): backup regularly
+2. **SQLite databases** (`db/sqlite/app.db`, `queue.sqlite3`): backup regularly
 3. **ChromaDB**: can be rebuilt from MD corpus via `/api/corpus/reindex` — less critical to backup
 4. **secrets_app.py**: store in a password manager or secrets vault
 
@@ -280,7 +280,7 @@ curl https://pma.mspv.app/api/health
 - Queue stats: `GET /api/corpus/queue-stats` (auth required)
 - Index status: `GET /api/corpus/index-status` (auth required)
 - Worker logs: `docker logs pma-worker`
-- Slow request log: backend logs WARNING for requests >1000ms
+- Slow request log: backend logs WARNING for requests >3000ms (configurable via `SLOW_REQUEST_MS`)
 
 ## Scaling Considerations
 

@@ -34,9 +34,9 @@ This file is the primary secrets carrier in production. It is a plain Python mod
 # secrets_app.py — NOT committed to git. Mount :ro in Docker at runtime.
 # Copy from example_secrets_app.py and fill in.
 
-KEYCLOAK_REALM_URL = "https://sso.mspv.app/realms/Office"
+KEYCLOAK_REALM_URL = "https://sso.example.com/realms/MyRealm"
 KEYCLOAK_CLIENT_ID = "pma"
-KEYCLOAK_HOST_IP = "10.24.0.18"   # empty string to use public URL
+KEYCLOAK_HOST_IP = ""   # empty string to use public URL; set to LAN IP for direct container access
 
 LLM_PROVIDER = "anthropic"
 ANTHROPIC_API_KEY = "sk-ant-..."
@@ -44,18 +44,18 @@ ANTHROPIC_API_KEY = "sk-ant-..."
 O365_TENANT_ID = ""
 O365_CLIENT_ID = ""
 O365_CLIENT_SECRET = ""
-O365_MAILBOX = "user@smtw.in"
-O365_SENDER_NAME = "Arivu Baalan BOT"
+O365_MAILBOX = "pmabot@company.com"      # mailbox the bot sends from
+O365_SENDER_NAME = "PMA Bot"             # display name in From: field
 
 TELEGRAM_BOT_TOKEN = ""
 TELEGRAM_DEFAULT_CHAT_ID = ""
 
-JIRA_BASE_URL = "https://smtw-jira.atlassian.net"
+JIRA_BASE_URL = "https://company.atlassian.net"
 JIRA_USER_EMAIL = ""
 JIRA_API_TOKEN = ""
 
 MCP_API_KEY = ""
-MCP_USER = "kla"
+MCP_USER = "admin"                        # username mapped to MCP_API_KEY
 MCP_OAUTH_CLIENT_ID = "pma-mcp"
 MCP_OAUTH_CLIENT_SECRET = ""
 
@@ -82,14 +82,14 @@ INDEX_SYNC_INTERVAL_SEC = 300
 | `HOST` | `str` | `"127.0.0.1"` | Flask bind host. |
 | `PORT` | `int` | `5000` | Flask bind port. |
 | `SLOW_REQUEST_MS` | `int` | `3000` | Requests slower than this (milliseconds) are logged as warnings. |
-| `DEV_USER` | `str` | `"kla"` | Fallback username when auth is bypassed (development only). |
+| `DEV_USER` | `str` | `"devuser"` | Fallback username when auth is bypassed (development only). Set to your development username. |
 
 ### Authentication
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `DEV_AUTH_BYPASS` | `bool` | `False` | When `"1"`, skip Keycloak token validation entirely. The `X-Dev-User` header (or `DEV_USER`) is used as the username. **Never enable in production.** Read from `DEV_AUTH_BYPASS` env var. |
-| `KEYCLOAK_REALM_URL` | `str` | required | Full realm URL including the realm name. Example: `https://sso.mspv.app/realms/Office`. Used for issuer validation and JWKS endpoint construction. |
+| `KEYCLOAK_REALM_URL` | `str` | required | Full realm URL including the realm name. Example: `https://sso.example.com/realms/MyRealm`. Used for issuer validation and JWKS endpoint construction. |
 | `KEYCLOAK_CLIENT_ID` | `str` | `"pma"` | Keycloak client ID. Used to validate the `azp` claim in JWT tokens. |
 | `KEYCLOAK_HOST_IP` | `str` | `""` (empty) | LAN IP of the Keycloak host. When set, the JWKS endpoint fetch is rewritten from the public HTTPS URL to `http://<IP>:8080/...` for container-to-Keycloak direct access (bypasses the reverse proxy). The public URL is still used for issuer validation. Empty string = use public URL for everything (development or when Keycloak is directly accessible). |
 
@@ -115,8 +115,8 @@ All O365 variables use the client-credentials OAuth flow — the app authenticat
 | `O365_TENANT_ID` | `str` | `""` | Azure Active Directory tenant ID. |
 | `O365_CLIENT_ID` | `str` | `""` | Azure app registration client ID. |
 | `O365_CLIENT_SECRET` | `str` | `""` | Azure app registration client secret. |
-| `O365_MAILBOX` | `str` | `""` | The mailbox address the bot sends from (e.g. `arivu@smtw.in`). |
-| `O365_SENDER_NAME` | `str` | `"Arivu Baalan BOT"` | Display name in the `From:` field of outgoing emails. |
+| `O365_MAILBOX` | `str` | `""` | The mailbox address the bot sends from (e.g. `pmabot@company.com`). |
+| `O365_SENDER_NAME` | `str` | `"PMA Bot"` | Display name in the `From:` field of outgoing emails. |
 
 When any of `O365_TENANT_ID`, `O365_CLIENT_ID`, or `O365_CLIENT_SECRET` is empty, email functionality is disabled. The email service checks for this at runtime.
 
@@ -131,7 +131,7 @@ When any of `O365_TENANT_ID`, `O365_CLIENT_ID`, or `O365_CLIENT_SECRET` is empty
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `JIRA_BASE_URL` | `str` | `""` | Jira Cloud base URL. Example: `https://smtw-jira.atlassian.net`. Empty string disables Jira sync. |
+| `JIRA_BASE_URL` | `str` | `""` | Jira Cloud base URL. Example: `https://company.atlassian.net`. Empty string disables Jira sync. |
 | `JIRA_USER_EMAIL` | `str` | `""` | Email address of the Jira account that owns the API token. |
 | `JIRA_API_TOKEN` | `str` | `""` | Jira API token from `id.atlassian.com`. |
 
@@ -144,7 +144,7 @@ The MCP server exposes PMA tools to external LLM clients (Claude Desktop, Claude
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `MCP_API_KEY` | `str` | `""` | Static API key for simple MCP client authentication. Clients send via `X-API-Key` header. Empty string disables simple API key auth. |
-| `MCP_USER` | `str` | `"kla"` (= `DEV_USER`) | Username mapped to the `MCP_API_KEY`. MCP edits are committed with this username and the `mcp@smtw.in` author email. |
+| `MCP_USER` | `str` | `"admin"` | Username mapped to the `MCP_API_KEY`. MCP edits are committed with this username. Set to the Keycloak username of the person using the MCP connector. |
 | `MCP_OAUTH_CLIENT_ID` | `str` | `"pma-mcp"` | OAuth 2.0 client_id for Claude.ai connector OAuth flow. |
 | `MCP_OAUTH_CLIENT_SECRET` | `str` | `""` | OAuth 2.0 client_secret. Set a strong random value in production. |
 
@@ -193,7 +193,7 @@ The `CurrentUser` frozen dataclass in `config.py` provides computed paths for a 
 ```python
 @dataclass(frozen=True)
 class CurrentUser:
-    username: str         # Keycloak username (local part of email, e.g. "kla")
+    username: str         # Keycloak username (local part of email, e.g. "admin")
     email: str = ""       # Keycloak email claim
 
     @property
@@ -281,7 +281,7 @@ The system prompt is hot-reloaded from `code/src/prompts/SystemPrompt.MD` on eac
 | `backend`   | Built from repo           | Flask + gunicorn. Handles auth, chat, MD patch flow, API routes.              |
 | `worker`    | Same image, different cmd | APScheduler + task queue drainer. Runs completely separate from web process.  |
 | `frontend`  | Built from repo           | Vue 3 SPA served as static files (or Nuxt node if SSR needed).               |
-| `keycloak`  | Official Keycloak image   | OIDC/OAuth2 + Active Directory + Passkeys. Existing `Office` realm reused.    |
+| `keycloak`  | Official Keycloak image   | OIDC/OAuth2 + Active Directory + Passkeys. Existing realm `MyRealm` reused.    |
 | `caddy`     | Official Caddy image      | HTTPS termination, Let's Encrypt certs, reverse proxy to backend.            |
 | `chromadb`  | Official ChromaDB image   | Vector store for MD corpus. Persists to Docker volume.                       |
 
@@ -292,7 +292,7 @@ services:
   backend:
     environment:
       DATA_ROOT: /data
-      CORS_ORIGINS: https://pma.mspv.app
+      CORS_ORIGINS: https://pma.example.com
       TZ: Asia/Kolkata
     volumes:
       - /path/to/secrets_app.py:/app/backend/secrets_app.py:ro
@@ -314,7 +314,7 @@ services:
 ### CORS Configuration
 
 - `CORS_ORIGINS` env var — comma-separated list of allowed origins for Flask-CORS.
-- Production value: `https://pma.mspv.app`.
+- Production value: `https://pma.example.com`.
 - Development: typically `http://localhost:5173` (Vite dev server) or `*` with `DEV_AUTH_BYPASS=1`.
 
 ---
@@ -354,7 +354,7 @@ cp backend/example_secrets_app.py backend/secrets_app.py
 # Edit backend/secrets_app.py and fill in at minimum ANTHROPIC_API_KEY
 
 # Run Flask dev server with auth bypass
-DEV_AUTH_BYPASS=1 DEV_USER=kla uv run flask --app backend.app run --debug
+DEV_AUTH_BYPASS=1 DEV_USER=admin uv run flask --app backend.app run --debug
 # Flask available at http://127.0.0.1:5000
 ```
 
@@ -381,7 +381,7 @@ The Vite proxy configuration means the frontend dev server transparently forward
 cd /path/to/repo/code/
 
 # Run the worker process (needs same secrets_app.py as backend)
-DEV_AUTH_BYPASS=1 DEV_USER=kla uv run python -m backend.worker
+DEV_AUTH_BYPASS=1 DEV_USER=admin uv run python -m backend.worker
 ```
 
 The worker uses APScheduler and runs continuously. Jobs:
@@ -416,7 +416,7 @@ The backend validates Keycloak JWT tokens on every request:
 
 1. Extract `Bearer` token from the `Authorization` header.
 2. Use `PyJWT`'s `PyJWKClient` to fetch signing keys from the JWKS endpoint.
-3. If `KEYCLOAK_HOST_IP` is set, rewrite the JWKS endpoint URL from the public HTTPS URL to the internal LAN HTTP URL (e.g. `https://sso.mspv.app/realms/Office` → `http://10.24.0.18:8080/realms/Office`). This allows container-to-Keycloak access without going through the reverse proxy.
+3. If `KEYCLOAK_HOST_IP` is set, rewrite the JWKS endpoint URL from the public HTTPS URL to the internal LAN HTTP URL (e.g. `https://sso.example.com/realms/MyRealm` → `http://192.168.1.100:8080/realms/MyRealm`). This allows container-to-Keycloak access without going through the reverse proxy.
 4. Decode with `algorithms=["RS256"]` and `verify_aud=False` (Keycloak sets `aud="account"` which doesn't match the client ID).
 5. Validate `azp` claim matches `KEYCLOAK_CLIENT_ID`.
 6. On decode failure (e.g. key rotation), evict the cached JWKS client and retry once.
@@ -658,13 +658,13 @@ uv run python common/release.py -m    # minor release
 
 ### Shared Tooling Sync
 
-`tooling/common/sync_common.py` pulls shared files from the `smtwkla/smtw-common` GitHub repo:
+`tooling/common/sync_common.py` pulls shared files from a shared GitHub repository containing common tooling (replace with your own shared tooling repo or omit):
 
-| Source file in smtw-common       | Destination in this repo         |
-|-----------------------------------|----------------------------------|
-| `claude-code/CLAUDE-COMMON.md`    | `.claude/CLAUDE-COMMON.md`       |
-| `tooling/common/bump_ver.py`      | `tooling/common/bump_ver.py`     |
-| `tooling/common/release.py`       | `tooling/common/release.py`      |
+| Source file in shared repo            | Destination in this repo         |
+|---------------------------------------|----------------------------------|
+| `claude-code/CLAUDE-COMMON.md`        | `.claude/CLAUDE-COMMON.md`       |
+| `tooling/common/bump_ver.py`          | `tooling/common/bump_ver.py`     |
+| `tooling/common/release.py`           | `tooling/common/release.py`      |
 
 Requires a GitHub PAT in `tooling/common/.env-common` (gitignored).
 
@@ -672,10 +672,10 @@ Requires a GitHub PAT in `tooling/common/.env-common` (gitignored).
 
 ## Production URL and Networking
 
-- **Public URL**: `https://pma.mspv.app` (proxied via existing nginx + Certbot on `*.mspv.app`)
+- **Public URL**: `https://pma.example.com` (proxied via existing nginx + Certbot on `*.example.com`)
 - **Caddy**: handles HTTPS termination and Let's Encrypt cert renewal inside the Docker compose stack
-- **Keycloak**: `https://sso.mspv.app/realms/Office` — reuses the existing `Office` realm; PMA uses a `pma` public client with PKCE S256
-- **Internal Keycloak access**: `http://10.24.0.18:8080` — backend accesses Keycloak directly by LAN IP for JWKS fetching, bypassing the reverse proxy
+- **Keycloak**: `https://sso.example.com/realms/MyRealm` — reuses the existing realm `MyRealm`; PMA uses a `pma` public client with PKCE S256
+- **Internal Keycloak access**: `http://192.168.1.100:8080` — backend accesses Keycloak directly by LAN IP for JWKS fetching, bypassing the reverse proxy
 
 ### Security Posture
 

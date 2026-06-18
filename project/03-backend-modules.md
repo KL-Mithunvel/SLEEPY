@@ -194,7 +194,7 @@ class CurrentUser:
 |---------------|--------------------------------------------|-------------------------------------------|
 | `data_root`   | `Path(DATA_ROOT) / username`               | Per-user data directory root              |
 | `md_root`     | `data_root / "md"`                         | Git-tracked Markdown corpus root          |
-| `db_path`     | `data_root / "db" / "pma.sqlite3"`         | SQLite database (chat history, queue)     |
+| `db_path`     | `data_root / "db" / "sqlite" / "app.db"`         | SQLite database (chat history, queue)     |
 | `v_db_path`   | `data_root / "db" / "chroma"`              | ChromaDB vector store directory           |
 
 All properties return `pathlib.Path` objects.
@@ -227,7 +227,7 @@ All resolved via `_get()`.
 |-----------------------------|--------|-----------------------------------------------------------------|
 | `EMBED_MODEL`               | `str`  | `"BAAI/bge-small-en-v1.5"` — embedding model for ChromaDB      |
 | `DEV_AUTH_BYPASS`           | `bool` | If `True`, reads user from `X-Dev-User` header (dev only)       |
-| `KEYCLOAK_REALM_URL`        | `str`  | e.g. `https://sso.mspv.app/realms/Office`                       |
+| `KEYCLOAK_REALM_URL`        | `str`  | e.g. `https://sso.example.com/realms/MyRealm`                       |
 | `ANTHROPIC_API_KEY`         | `str`  | Anthropic API key for Claude                                    |
 | `O365_CLIENT_ID`            | `str`  | Microsoft 365 OAuth client ID (email integration)               |
 | `O365_CLIENT_SECRET`        | `str`  | Microsoft 365 OAuth client secret                               |
@@ -264,15 +264,15 @@ def _make_internal_url(url: str) -> str:
     ...
 ```
 
-**Problem**: The public Keycloak URL (`https://sso.mspv.app/realms/Office`) is routed through
+**Problem**: The public Keycloak URL (`https://sso.example.com/realms/MyRealm`) is routed through
 Caddy reverse proxy. Backend containers cannot reach Caddy — they need to hit Keycloak directly
 on the Docker network.
 
 **Solution**: Rewrites the URL:
 
 ```
-Input:  https://sso.mspv.app/realms/Office
-Output: http://<KEYCLOAK_HOST_IP>:8080/realms/Office
+Input:  https://sso.example.com/realms/MyRealm
+Output: http://<KEYCLOAK_HOST_IP>:8080/realms/MyRealm
 ```
 
 `KEYCLOAK_HOST_IP` is read from config/env. Used internally in `decode_token` so that JWKS
@@ -570,8 +570,8 @@ file: <path-relative-to-md_root>
 ### `Actor` Named Tuple / Dataclass
 
 ```python
-ASSISTANT_AUTHOR = Actor("Arivu Baalan", "arivu@smtw.in")
-MCP_AUTHOR       = Actor("Arivu Baalan", "mcp@smtw.in")
+ASSISTANT_AUTHOR = Actor("PMA Bot", "assistant@company.com")
+MCP_AUTHOR       = Actor("PMA Bot", "mcp@company.com")
 ```
 
 Used as the git `--author` when committing AI-originated changes. Differentiates human edits
@@ -618,7 +618,7 @@ def apply_reply_if_edit(
    a. Write each new_content to disk (md_root / path).
    b. Git commit all modified files:
       - Message: "AI: <commit_summary>" or "AI: edit" if no summary.
-      - Author: ASSISTANT_AUTHOR (Arivu Baalan <arivu@smtw.in>).
+      - Author: ASSISTANT_AUTHOR (PMA Bot <assistant@company.com>).
    c. Return list of modified paths.
 
 4. If ANY block fails (at step 2):
@@ -669,7 +669,7 @@ changes.
 
 1. `git -C md_root add -A` — stage all changes.
 2. Check if there is anything to commit (`git status --porcelain`).
-3. If yes: `git commit -m "batch: <ISO timestamp>" --author "Arivu Baalan <arivu@smtw.in>"`.
+3. If yes: `git commit -m "batch: <ISO timestamp>" --author "PMA Bot <assistant@company.com>"`.
 4. If nothing staged: no-op.
 
 ---

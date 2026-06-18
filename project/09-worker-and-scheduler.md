@@ -89,7 +89,7 @@ signal.signal(signal.SIGINT, handle_shutdown)
 - **What it does**:
   - `git add -A` in md_root
   - If there are staged changes: commits as `batch: <ISO timestamp>`
-  - Git author: `Arivu Baalan <arivu@smtw.in>`
+  - Git author: `PMA Bot <assistant@company.com>`
 - **Purpose**: user file saves via PUT /api/corpus/file are written to disk immediately but NOT committed. The hourly job commits them in batch.
 
 ### 5. `housekeeping_job` — Nightly Cleanup

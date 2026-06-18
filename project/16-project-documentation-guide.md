@@ -26,7 +26,7 @@ key: PROJ-KEY             # Short unique identifier (e.g. IT-DOM25, MKT-Q3CAM)
 title: Full Project Title
 status: active            # active | paused | complete | archived
 priority: P1              # P1 | P2 | P3
-owner: "@KLA"             # @nick from People.md
+owner: "@ADMIN"             # @nick from People.md
 flag: important           # (optional) star | important | urgent  — affects news budget
 news_topics:              # (optional) list of news search topics
   - topic one
@@ -64,7 +64,7 @@ what problem does this solve? who benefits? what is the goal?
 - title: Monthly status report
   cadence: monthly
   schedule: day:last-week
-  owner: "@KLA"
+  owner: "@ADMIN"
 
 ## Notes
 Freeform notes about the project. Context, decisions, constraints, risks.
@@ -95,7 +95,7 @@ key: IT-DOM25
 title: Domain Migration 2025
 status: active
 priority: P2
-owner: "@KLA"
+owner: "@ADMIN"
 flag: important
 news_topics:
   - DNS migration enterprise
@@ -208,7 +208,7 @@ This is where work happens. Key rules:
 ```
 - [ ] Deploy staging environment start:2026-07-01
 - [ ] Complete UAT due:2026-08-15
-- [ ] Write runbook @KLA due:Jun-30
+- [ ] Write runbook @ADMIN due:Jun-30
 - [ ] Create Jira epic JIRA:IT-89
 - [ ] Migrate pilot group of 20 users P1 due:2026-07-15
 ```
@@ -217,7 +217,7 @@ This is where work happens. Key rules:
 |-----------|--------|---------|
 | `start:` | `start:YYYY-MM-DD` or `start:Mmm-DD` | Plan pipe activates this task on start date |
 | `due:` | `due:YYYY-MM-DD` or `due:Mmm-DD` | Plan pipe activates this task on due date |
-| `@nick` | `@KLA`, `@JD` | Assigned to person (nick from People.md) |
+| `@nick` | `@ADMIN`, `@JD` | Assigned to person (nick from People.md) |
 | `JIRA:KEY` | `JIRA:IT-89` | Linked Jira issue — synced by jira_sync_job |
 | `P1/P2/P3` | `P1` | Priority override for this task |
 
@@ -234,8 +234,8 @@ Tasks marked `[>]` were moved there by the materialiser's plan pipe (they have a
 ```markdown
 ## Recurring
 
-- [ ] Monthly status report @KLA due:Jun-30 SMTW/Recur/status-report.md ^P:status-report-M06
-- [ ] Quarterly OKR review due:2026-06-30 SMTW/Recur/okr-review.md ^P:okr-review-Q2
+- [ ] Monthly status report @ADMIN due:Jun-30 ACME/Recur/status-report.md ^P:status-report-M06
+- [ ] Quarterly OKR review due:2026-06-30 ACME/Recur/okr-review.md ^P:okr-review-Q2
 ```
 
 ### `## Playbook` Section (Optional)
@@ -248,13 +248,13 @@ Define project-specific recurring tasks here. Unlike `<OU>/Recur/` files (which 
 - title: Monthly status report
   cadence: monthly
   schedule: day:last-week
-  owner: "@KLA"
+  owner: "@ADMIN"
   priority: P2
 
 - title: Quarterly steering committee deck
   cadence: quarterly
   schedule: m3-day:last-week
-  owner: "@KLA"
+  owner: "@ADMIN"
   priority: P1
   body: |
     Prepare slides covering: progress vs. goals, blockers, budget status,
@@ -357,9 +357,9 @@ Every nightly materialiser run rebuilds `<OU>/Projects/Index.md`:
 
 | Key | Title | Status | Priority | Owner |
 |-----|-------|--------|----------|-------|
-| IT-DOM25 | Domain Migration 2025 | active | P1 | @KLA |
-| IT-MON26 | Monitoring Overhaul | active | P2 | @JD |
-| IT-NET24 | Network Refresh | complete | P2 | @KLA |
+| INFRA-MIG25 | Infrastructure Migration 2025 | active | P1 | @ADMIN |
+| INFRA-MON26 | Monitoring Overhaul | active | P2 | @JANE |
+| INFRA-NET24 | Network Refresh | complete | P2 | @ADMIN |
 ```
 
 **Do not edit `Index.md`** — it is overwritten on every run. All project metadata comes from individual project file frontmatter.
@@ -401,7 +401,7 @@ The AI's `search_corpus` tool queries ChromaDB and retrieves relevant chunks fro
 - Don't edit `Index.md` (auto-generated)
 - Don't put sensitive secrets in project files (they are git-committed)
 - Don't nest subfolders inside `Projects/` — materialiser expects flat structure
-- Don't use `@` in frontmatter without quoting: use `"@KLA"` not `@KLA`
+- Don't use `@` in frontmatter without quoting: use `"@ADMIN"` not `@ADMIN`
 
 ## Example: Minimal vs Full Project File
 

@@ -385,7 +385,7 @@ Both the SEARCH text and the file content are normalized CRLF → LF before matc
 
 ### Git Commit After Edit
 ```python
-ASSISTANT_AUTHOR = Actor("Arivu Baalan", "arivu@smtw.in")
+ASSISTANT_AUTHOR = Actor("PMA Bot", "assistant@company.com")
 
 # After successful pma-edit application:
 repo.index.add([str(file_path)])
@@ -509,7 +509,7 @@ results = collection.query(
 
 ## Chat History Persistence
 
-Chat history is stored in SQLite (`DATA_ROOT/<user>/db/pma.sqlite3`):
+Chat history is stored in SQLite (`DATA_ROOT/<user>/db/sqlite/app.db`):
 
 ```sql
 CREATE TABLE chat_history (
@@ -539,7 +539,7 @@ The MCP server exposes a subset of tools for external access (e.g. Claude.ai):
 7. `read_src` — read code/src resources
 8. `list_src` — list code/src resources
 
-MCP author for git commits: `Arivu Baalan <mcp@smtw.in>` (different email from chat AI edits)
+MCP author for git commits: `PMA Bot <mcp@company.com>` (different email from chat AI edits)
 
 ## News Watch (Anthropic Message Batches)
 

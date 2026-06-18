@@ -166,7 +166,7 @@ Write content to a corpus file (creates or overwrites).
 }
 ```
 
-Git commit: uses `MCP_AUTHOR = Actor("Arivu Baalan", "mcp@smtw.in")`
+Git commit: uses `MCP_AUTHOR = Actor("PMA Bot", "mcp@company.com")`
 
 ### 6. `apply_edit`
 Apply a pma-edit SEARCH/REPLACE block.
@@ -264,9 +264,9 @@ Skills are exposed as MCP prompts. Each skill becomes a prompt:
 Returns OAuth 2.0 authorization server metadata:
 ```json
 {
-  "issuer": "https://pma.mspv.app",
-  "authorization_endpoint": "https://pma.mspv.app/authorize",
-  "token_endpoint": "https://pma.mspv.app/token",
+  "issuer": "https://pma.example.com",
+  "authorization_endpoint": "https://pma.example.com/authorize",
+  "token_endpoint": "https://pma.example.com/token",
   "response_types_supported": ["code"],
   "code_challenge_methods_supported": ["S256"],
   "scopes_supported": ["openid", "profile"]
@@ -277,8 +277,8 @@ Returns OAuth 2.0 authorization server metadata:
 Returns protected resource metadata:
 ```json
 {
-  "resource": "https://pma.mspv.app/mcp",
-  "authorization_servers": ["https://pma.mspv.app"]
+  "resource": "https://pma.example.com/mcp",
+  "authorization_servers": ["https://pma.example.com"]
 }
 ```
 
@@ -294,14 +294,14 @@ Exchanges authorization code for access token via Keycloak.
 2. **API key required**: `MCP_API_KEY` must be configured
 3. **Path validation**: all file paths validated (no `..`, must be within md_root)
 4. **No auth bypass**: DEV_AUTH_BYPASS does not apply to MCP paths
-5. **Git attribution**: MCP writes use different email (`mcp@smtw.in`) vs chat AI (`arivu@smtw.in`) for audit trail
+5. **Git attribution**: MCP writes use different email (`mcp@company.com`) vs chat AI (`assistant@company.com`) for audit trail
 
 ## MCP Client Configuration (Claude.ai)
 
 To connect Claude.ai to PMA's MCP server:
 
 1. In Claude.ai: Settings → MCP Servers → Add Server
-2. URL: `https://pma.mspv.app/mcp`
+2. URL: `https://pma.example.com/mcp`
 3. Auth method: OAuth 2.0 (Claude.ai will discover endpoints via `/.well-known/`)
 4. Or: add API key header `X-API-Key: <your-mcp-api-key>`
 

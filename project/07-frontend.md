@@ -436,7 +436,7 @@ while (true) {
 ## Authentication Flow (Frontend)
 
 1. App loads → fetch `/api/auth/config` (public endpoint) to get `realm_url`, `client_id`, `dev_bypass`
-2. Initialize Keycloak: `new Keycloak({ url: realm_url, realm: 'Office', clientId: client_id })`
+2. Initialize Keycloak: `new Keycloak({ url: realm_url, realm: 'MyRealm', clientId: client_id })`
 3. Call `keycloak.init({ onLoad: 'login-required', pkceMethod: 'S256' })`
 4. Not authenticated → Keycloak redirects to SSO login page
 5. After login → redirected back; Keycloak exchanges code for tokens (PKCE S256)

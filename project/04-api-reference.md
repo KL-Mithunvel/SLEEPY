@@ -3,7 +3,7 @@
 > **Purpose**: Complete API reference for every HTTP endpoint in the Project-Management-Assistant
 > (PMA) backend. This document is authoritative for a from-scratch rebuild.
 >
-> **Base URL**: `https://pa.mspv.app` (production) or `http://localhost:5000` (dev).
+> **Base URL**: `https://pa.example.com` (production) or `http://localhost:5000` (dev).
 >
 > **Authentication**: Unless marked **(public)**, all endpoints require a valid Keycloak-issued
 > JWT in the `Authorization: Bearer <token>` header. In development, set `DEV_AUTH_BYPASS=true`
@@ -77,7 +77,7 @@ OIDC client. Called once at frontend startup before any authenticated requests a
 
 ```json
 {
-    "realm_url": "https://sso.mspv.app/realms/Office",
+    "realm_url": "https://sso.example.com/realms/MyRealm",
     "client_id": "pma"
 }
 ```
@@ -256,7 +256,7 @@ For each `/api/ai/chat` request:
 #### Chat History Persistence
 
 - **Before** building the API call: read the user's full chat history from their per-user
-  SQLite database (`data/<user>/db/pma.sqlite3`).
+  SQLite database (`data/<user>/db/sqlite/app.db`).
 - The history is prepended to the `messages` array from the request.
 - **Before** starting streaming: persist the new user message to history.
 - **After** streaming completes: persist the assistant reply to history.
@@ -952,13 +952,13 @@ Returns the git commit log for the user's `md_root` corpus repository.
         {
             "sha":     "a1b2c3d4",
             "message": "AI: updated Acme daily tasks",
-            "author":  "Arivu Baalan",
+            "author":  "PMA Bot",
             "date":    "2026-06-18T08:45:12+05:30"
         },
         {
             "sha":     "e5f6a7b8",
             "message": "batch: 2026-06-18T08:00:00",
-            "author":  "Arivu Baalan",
+            "author":  "PMA Bot",
             "date":    "2026-06-18T08:00:02+05:30"
         }
     ]
@@ -1143,9 +1143,9 @@ token exchange.
 
 ```json
 {
-    "issuer": "https://pa.mspv.app",
-    "authorization_endpoint": "https://pa.mspv.app/authorize",
-    "token_endpoint": "https://pa.mspv.app/token",
+    "issuer": "https://pa.example.com",
+    "authorization_endpoint": "https://pa.example.com/authorize",
+    "token_endpoint": "https://pa.example.com/token",
     "response_types_supported": ["code"],
     "grant_types_supported": ["authorization_code"],
     "code_challenge_methods_supported": ["S256"]
@@ -1165,8 +1165,8 @@ discovery of the full OAuth flow.
 
 ```json
 {
-    "resource": "https://pa.mspv.app",
-    "authorization_servers": ["https://pa.mspv.app"]
+    "resource": "https://pa.example.com",
+    "authorization_servers": ["https://pa.example.com"]
 }
 ```
 
@@ -1262,7 +1262,7 @@ followed by the SSE stream closing.
 ### Authenticated request (curl)
 
 ```bash
-curl -X GET "https://pa.mspv.app/api/corpus/ous" \
+curl -X GET "https://pa.example.com/api/corpus/ous" \
      -H "Authorization: Bearer $ACCESS_TOKEN"
 ```
 

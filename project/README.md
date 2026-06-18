@@ -4,7 +4,7 @@ This folder contains exhaustive documentation of the **PMA (ProjectManagementAss
 
 ## What is PMA?
 
-PMA (`pa.mspv.app`) is a self-hosted personal AI project assistant:
+PMA (`pma.example.com`) is a self-hosted personal AI project assistant:
 - **Flask** backend + **Vue 3** frontend + **Anthropic Claude API**
 - **Markdown + Git** as the single source of truth for all user content
 - Per-user data isolation (each user gets their own corpus, vector store, and database)
@@ -32,7 +32,7 @@ PMA (`pa.mspv.app`) is a self-hosted personal AI project assistant:
 | [15-news-watch.md](15-news-watch.md) | Complete news watch system: two-stage async pipeline, topics config, dedup, feedback, ABOUT.md |
 | [16-project-documentation-guide.md](16-project-documentation-guide.md) | How to document each project: frontmatter fields, every section, best practices, examples |
 | [17-recurring-tasks-and-progress-tracking.md](17-recurring-tasks-and-progress-tracking.md) | Full recurring task system: Recur files, plan hierarchy, carry-forward, materialiser stages, Govern |
-| [18-system-prompt.md](18-system-prompt.md) | AI persona (Arivu Baalan Bot), all behavioral rules, log/note shortcuts, -QUEUE- pattern, inline progress annotation, pma-edit rules as instructed to the AI |
+| [18-system-prompt.md](18-system-prompt.md) | AI persona (PMA Bot), all behavioral rules, log/note shortcuts, -QUEUE- pattern, inline progress annotation, pma-edit rules as instructed to the AI |
 | [19-housekeeping.md](19-housekeeping.md) | Corpus health checker system: 4 checkers (project hygiene, frontmatter, owner validation, date validation), archive_old_daily action, inbox integration |
 
 ## Quick Start for Rebuilding
@@ -74,7 +74,7 @@ TODO.md             # Pending features
 15. `code/frontend/src/views/TodayView.vue` — primary interface
 
 ### 3. Non-Negotiable Design Rules
-- AI edits committed as `Arivu Baalan <arivu@smtw.in>` with `AI:` prefix
+- AI edits committed as `PMA Bot <assistant@company.com>` with `AI:` prefix
 - pma-edit SEARCH/REPLACE (not unified diff) — see [10-ai-pipeline.md](10-ai-pipeline.md)
 - Per-user data at `DATA_ROOT/<username>/` — never mix user data
 - No LLM calls in materialiser — must be deterministic
@@ -86,7 +86,7 @@ TODO.md             # Pending features
 ```python
 # secrets_app.py (never committed, mounted :ro in Docker)
 ANTHROPIC_API_KEY = "sk-ant-..."
-KEYCLOAK_REALM_URL = "https://sso.mspv.app/realms/Office"
+KEYCLOAK_REALM_URL = "https://sso.example.com/realms/MyRealm"
 DATA_ROOT = "/data"
 ```
 
@@ -95,7 +95,7 @@ DATA_ROOT = "/data"
 DATA_ROOT/<username>/
   md/                    # Git repo: markdown corpus (Projects, Daily, Plans, Recur, Govern)
   db/
-    pma.sqlite3          # Operational: chat history, settings, news feedback
+    sqlite/app.db        # Operational: chat history, settings, news feedback
     chroma/              # ChromaDB: vector index (collection: md_corpus)
 DATA_ROOT/
   queue.sqlite3          # Shared: task queue for email/telegram/jira/news

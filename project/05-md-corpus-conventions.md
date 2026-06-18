@@ -39,7 +39,7 @@ md/                                    # root of the corpus git repo (DATA_ROOT/
   <anything-else>.md                   # other files allowed at root
 ```
 
-**OU (Organizational Unit):** Each top-level folder under `md/` is an OU. Examples: `SMTW`, `MSPVL`, `Personal`, `HRAdmin`. Users typically have 3–8 OUs. The OU name becomes a metadata field in ChromaDB for scoped RAG queries.
+**OU (Organizational Unit):** Each top-level folder under `md/` is an OU. Examples: `ACME`, `INFRA`, `Personal`, `HRAdmin`. Users typically have 3–8 OUs. The OU name becomes a metadata field in ChromaDB for scoped RAG queries.
 
 **Key design rule:** Every piece of user-generated content (projects, daily logs, recurring tasks, governance) lives inside a named OU. Only `People.md` and `Inbox.md` live at the corpus root because they are cross-OU by nature.
 
@@ -57,15 +57,15 @@ Project files use YAML frontmatter for structured metadata:
 ---
 status: active          # active | on_hold | blocked | completed | archived
 priority: P2            # P1 | P2 | P3 | P4
-key: SMTW-PROJ-01       # optional short key for cross-references (e.g. Jira project key prefix)
-owner: "@KLA"           # @nick from People.md (note: @ values must be quoted in YAML)
+key: ACME-PROJ-01       # optional short key for cross-references (e.g. Jira project key prefix)
+owner: "@ADMIN"         # @nick from People.md (note: @ values must be quoted in YAML)
 started: 2026-04-01
 target: 2026-Q3         # ISO date or quarter string
-jira_project: SMTW      # optional: links to Jira project for sync
+jira_project: ACME      # optional: links to Jira project for sync
 ---
 ```
 
-**PyYAML note:** YAML reserves `@` as a reserved indicator. The materialiser auto-quotes `owner: @KLA` → `owner: "@KLA"` before parsing. Do not rely on unquoted `@` in frontmatter persisting through any YAML round-trip.
+**PyYAML note:** YAML reserves `@` as a reserved indicator. The materialiser auto-quotes `owner: @ADMIN` → `owner: "@ADMIN"` before parsing. Do not rely on unquoted `@` in frontmatter persisting through any YAML round-trip.
 
 ### Full Project File Template
 
@@ -73,10 +73,10 @@ jira_project: SMTW      # optional: links to Jira project for sync
 ---
 status: active
 priority: P2
-owner: "@KLA"
+owner: "@ADMIN"
 started: 2026-04-01
 target: 2026-Q3
-jira_project: SMTW
+jira_project: ACME
 ---
 
 # <Project Name>
@@ -169,7 +169,7 @@ date: YYYY-MM-DD <DayOfWeek>
 
 - [ ] ↳ Carry-forward task from yesterday (prefixed with ↳ by materialiser)
 - [ ] PROJ-KEY: Plan pipe task (prefixed with project key if heading had key)
-- [ ] Weekly recurring task due:Jun-18 SMTW/Recur/weekly-standup.md
+- [ ] Weekly recurring task due:Jun-18 ACME/Recur/weekly-standup.md
 - [x] Completed task
 
 ## Daily checklist
@@ -188,7 +188,7 @@ The materialiser populates the daily file from four sources, in this order:
 
 1. **Carry-forward** (`↳` prefix): unchecked tasks from the `## Tasks` section of the most recent previous daily file. Only carries from `## Tasks`, not from `## Daily checklist`. Re-running strips stacked `↳ ↳` prefixes.
 
-2. **Plan pipe** (`start:` / `due:` matching): scans three plan files — `<OU>/Plans/<YYYY>.md`, `<OU>/Plans/<YYYY>-Q<n>.md`, `<OU>/Plans/<YYYY>-<MM>.md` — for `- [ ]` lines whose `start:<today>` or `due:<today>` token matches today (both ISO `YYYY-MM-DD` and short `Mon-DD` forms accepted). Each matched plan line is rewritten to `- [>]` in the plan file (scheduled marker). The bullet inserted in the daily file is prefixed with the project key if the task appeared under a heading with a key like `## Kiln Arch Repair (KILN-AR26)`.
+2. **Plan pipe** (`start:` / `due:` matching): scans three plan files — `<OU>/Plans/<YYYY>.md`, `<OU>/Plans/<YYYY>-Q<n>.md`, `<OU>/Plans/<YYYY>-<MM>.md` — for `- [ ]` lines whose `start:<today>` or `due:<today>` token matches today (both ISO `YYYY-MM-DD` and short `Mon-DD` forms accepted). Each matched plan line is rewritten to `- [>]` in the plan file (scheduled marker). The bullet inserted in the daily file is prefixed with the project key if the task appeared under a heading with a key like `## Infrastructure Upgrade (INFRA-UP26)`.
 
 3. **Weekly recur** (`Recur/` files with `cadence: weekly` that fire today): task inserted with source path appended.
 
@@ -213,12 +213,12 @@ Plan files hold forward-planned tasks for a period. They are the intermediate la
 ### Plan File Format
 
 ```markdown
-# SMTW — 2026-Q2
+# ACME — 2026-Q2
 
 ## Recurring
 
-- [ ] Monthly review @KLA due:Jun-30 MEDIUM ^R:a1b2c3d4-Q2
-- [>] Payroll processing @KLA due:Jun-20 ^R:e5f6g7h8-M06
+- [ ] Monthly review @ADMIN due:Jun-30 MEDIUM ^R:a1b2c3d4-Q2
+- [>] Payroll processing @ADMIN due:Jun-20 ^R:e5f6g7h8-M06
 
 ## <Project Name> (PROJ-KEY)
 
@@ -279,7 +279,7 @@ title: Monthly Project Review
 cadence: monthly           # daily | weekly | monthly | quarterly | yearly
 schedule: day:last         # schedule within the period (see below)
 owners:
-  - KLA                    # list of usernames (without @; @ in task lines only)
+  - ADMIN                    # list of usernames (without @; @ in task lines only)
 priority: medium           # high | medium | low (default: medium)
 ---
 
@@ -363,7 +363,7 @@ Governance files track team-delegated recurring tasks — tasks owned by team me
 ### Format
 
 ```markdown
-# SMTW — Govern — June 2026
+# ACME — Govern — June 2026
 
 ## Carry-overs
 
@@ -404,11 +404,11 @@ A single file at the corpus root (`md/People.md`) containing a profile section f
 
 ## Full Name
 
-- **Nick**: KLA
+- **Nick**: ADMIN
 - **Role**: Director of Operations
-- **OU**: SMTW
+- **OU**: ACME
 - **Relationship**: Self | Reportee | Peer | Vendor | Client
-- **Contact**: email@domain.com / +91-XXXXXXXXXX / @TelegramHandle
+- **Contact**: admin@company.com / +1-555-0100 / @TelegramHandle
 - **Responsibilities**: What they own and are accountable for.
 - **Traits**: How to work with them — communication style, strengths, quirks,
   preferred tone for messages drafted by the AI.
@@ -419,7 +419,7 @@ A single file at the corpus root (`md/People.md`) containing a profile section f
 ...
 ```
 
-**Nick resolution:** When the AI encounters `@KLA` in a task line, it searches `People.md` for `- **Nick**: KLA` (case-insensitive) in any H2 section, then uses the full `## Full Name` heading as the person's identity.
+**Nick resolution:** When the AI encounters `@ADMIN` in a task line, it searches `People.md` for `- **Nick**: ADMIN` (case-insensitive) in any H2 section, then uses the full `## Full Name` heading as the person's identity.
 
 ---
 
@@ -467,13 +467,13 @@ Tasks are GitHub-style checklist items. The full syntax for a task line:
 | Annotation          | Format                                   | Example                         |
 |---------------------|------------------------------------------|---------------------------------|
 | Carry-forward       | `↳ ` prefix (Unicode U+21B3)             | `- [ ] ↳ Review invoice`        |
-| Project key prefix  | `<KEY>: ` at start of description        | `- [ ] KILN-AR26: Update docs`  |
+| Project key prefix  | `<KEY>: ` at start of description        | `- [ ] INFRA-UP26: Update docs` |
 | Due date            | `due:<date>`                             | `due:2026-06-30` or `due:Jun-30`|
 | Done date           | `done:<date>`                            | `done:2026-06-15`               |
-| Owner               | `@<nick>`                                | `@KLA` or `@ITTeam`             |
+| Owner               | `@<nick>`                                | `@ADMIN` or `@ITTeam`           |
 | Priority (inline)   | `P1` / `P2` / `P3` / `P4`               | `P1` at end of line             |
 | Priority (words)    | `HIGH` / `MEDIUM` / `LOW`               | `HIGH` at end of line           |
-| Recur source ref    | posix path relative to md_root           | `SMTW/Recur/weekly-review.md`   |
+| Recur source ref    | posix path relative to md_root           | `ACME/Recur/weekly-review.md`   |
 | Recur idempotency   | `^R:<hash8>-<period>`                    | `^R:a1b2c3d4-M06`               |
 | Playbook idempotency| `^P:<slug>-<period-key>`                 | `^P:gst-payment-2026-06`        |
 
@@ -507,7 +507,7 @@ Priority can appear:
 ## OU (Organizational Unit) Conventions
 
 - Each OU maps to exactly one top-level folder under `md/` and one subfolder under `Projects/` and `Plans/`.
-- OU name is a simple string. Recommended: no spaces, use CamelCase or hyphens (e.g. `SMTW`, `MSPVL`, `HRAdmin`, `Personal`).
+- OU name is a simple string. Recommended: no spaces, use CamelCase or hyphens (e.g. `ACME`, `INFRA`, `HRAdmin`, `Personal`).
 - Users typically have 3–8 OUs representing major project areas, teams, or life domains.
 - The `ou` field is extracted from the folder path when building ChromaDB metadata for each indexed chunk.
 - There is no nested domain layer inside an OU. If a large OU needs sub-categorisation, express it via filename prefix (`sales-campaign-q3.md`) or frontmatter tags, not subfolders. The materialiser expects a flat `Projects/` directory inside each OU.
@@ -520,9 +520,9 @@ The MD repo uses a structured commit message format. Every commit is authored wi
 
 | Commit author identity           | When used                                          |
 |----------------------------------|----------------------------------------------------|
-| `Arivu Baalan <arivu@smtw.in>`   | AI-originated edits (chat UI SEARCH/REPLACE flow)  |
-| `Arivu Baalan <mcp@smtw.in>`     | MCP server edits (Claude Desktop, external LLMs)   |
-| `<username> <<username>@pma.local>` | User-authored saves (batch commits)             |
+| `PMA Bot <assistant@company.com>`   | AI-originated edits (chat UI SEARCH/REPLACE flow)  |
+| `PMA Bot <mcp@company.com>`         | MCP server edits (Claude Desktop, external LLMs)   |
+| `<username> <<username>@pma.local>` | User-authored saves (batch commits)                |
 
 ### Commit Message Prefixes
 
@@ -684,8 +684,8 @@ Each chunk in the vector index carries the following metadata:
 
 ```python
 {
-    "ou": "SMTW",              # organizational unit (top-level folder name)
-    "path": "SMTW/Projects/kiln-maintenance.md",  # posix path relative to md_root
+    "ou": "ACME",              # organizational unit (top-level folder name)
+    "path": "ACME/Projects/infrastructure-upgrade.md",  # posix path relative to md_root
     "mtime": 1718700000.0,     # file modification time (Unix timestamp float)
     "archived": "false",       # "true" or "false" as string (ChromaDB limitation)
 }

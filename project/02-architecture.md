@@ -28,7 +28,7 @@ Caddy (host, reverse proxy, Let's Encrypt)
 
 pma-backend:5000
   ├── uses: Anthropic Claude API (HTTPS, external)
-  ├── uses: Keycloak sso.mspv.app (LAN, extra_hosts rewrite)
+  ├── uses: Keycloak sso.example.com (LAN, extra_hosts rewrite)
   └── shares: DATA_ROOT volume with pma-worker
 
 pma-worker (same image as pma-backend)
@@ -41,7 +41,7 @@ pma-worker (same image as pma-backend)
 ```
            ┌─────────────────────────────────┐
            │          Caddy (host)            │
-           │  pa.mspv.app / sso.mspv.app      │
+           │  pma.example.com / sso.example.com      │
            └────────────┬────────────────────┘
                         │
           ┌─────────────┴──────────────┐
@@ -73,10 +73,10 @@ pma-worker (same image as pma-backend)
 
 ```
 1. Browser sends:
-   GET /api/corpus/file?path=Projects/KILN/ar26.md
+   GET /api/corpus/file?path=Projects/INFRA/up26.md
    Authorization: Bearer <keycloak-jwt>
 
-2. Caddy receives on pa.mspv.app:443
+2. Caddy receives on pma.example.com:443
    → proxies to pma-backend:5000
 
 3. Flask before_request hooks (in order):
@@ -85,16 +85,16 @@ pma-worker (same image as pma-backend)
       → calls _resolve_user()
          → auth_utils.extract_bearer(header)   → raw JWT string
          → auth_utils.decode_token(jwt)
-            → PyJWKClient fetches JWKS from http://<KEYCLOAK_HOST_IP>:8080/realms/Office/protocol/openid-connect/certs
+            → PyJWKClient fetches JWKS from http://<KEYCLOAK_HOST_IP>:8080/realms/MyRealm/protocol/openid-connect/certs
             → jwt.decode(token, key, algorithms=["RS256"], options={"verify_aud": False}, issuer=<public_realm_url>)
             → checks azp == KEYCLOAK_CLIENT_ID
          → config.cur_user_from_token(claims)
-            → strips "@office.smtw.in" from username claim → e.g. "kla"
-            → returns CurrentUser(username="kla", email="kla@smtw.in")
+            → strips "@company.com" from username claim → e.g. "admin"
+            → returns CurrentUser(username="admin", email="admin@company.com")
          → sets g.cur_user, g.roles
 
 4. Blueprint handler (corpus.py) runs
-   → reads g.cur_user.md_root / "Projects/KILN/ar26.md"
+   → reads g.cur_user.md_root / "Projects/INFRA/up26.md"
    → returns JSON response
 
 5. Flask after_request hook:
@@ -207,17 +207,17 @@ _SLOW_SKIP_PATHS = {
 ```python
 @dataclass(frozen=True)
 class CurrentUser:
-    username: str    # e.g. "kla"
-    email: str = "" # e.g. "kla@smtw.in"
+    username: str    # e.g. "admin"
+    email: str = "" # e.g. "admin@company.com"
 
     @property
-    def data_root(self) -> Path:  # DATA_ROOT / "kla"
+    def data_root(self) -> Path:  # DATA_ROOT / "admin"
     @property
-    def md_root(self) -> Path:    # DATA_ROOT / "kla" / "md"
+    def md_root(self) -> Path:    # DATA_ROOT / "admin" / "md"
     @property
-    def db_path(self) -> Path:    # DATA_ROOT / "kla" / "db" / "pma.sqlite3"
+    def db_path(self) -> Path:    # DATA_ROOT / "admin" / "db" / "pma.sqlite3"
     @property
-    def v_db_path(self) -> Path:  # DATA_ROOT / "kla" / "db" / "chroma"
+    def v_db_path(self) -> Path:  # DATA_ROOT / "admin" / "db" / "chroma"
 ```
 
 Available as `g.cur_user` in all request handlers after auth.
@@ -236,8 +236,8 @@ Content-Type: application/json
 Authorization: Bearer <jwt>
 
 {
-  "messages": [{"role": "user", "content": "What's the status of KILN-AR26?"}],
-  "ou": "KILN",
+  "messages": [{"role": "user", "content": "What's the status of INFRA-UP26?"}],
+  "ou": "ACME",
   "purpose_context": "Review meeting prep",
   "gist_summary": "...",
   "toc": [...]
@@ -257,8 +257,8 @@ Block 1: SystemPrompt.MD content
 
 Block 2: Current context (date/time/OU/user)
          → "Today is Wednesday, 18 June 2026. Time: 10:30 AM. ISO week: 2026-W25. Quarter: Q2."
-         → "Current user: KLA (admin)."
-         → if ou provided: "Active OU: KILN. Project index at KILN/Projects/Index.md."
+         → "Current user: ADMIN (admin)."
+         → if ou provided: "Active OU: ACME. Project index at ACME/Projects/Index.md."
 
 Block 3: Active OU context (if ou provided)
          → OU name and instruction to tag items with this OU
@@ -368,7 +368,7 @@ Currently `TOOL_REGISTRY` contains one handler: `"md-edit": handle_md_edit`.
 
 ```
 ```pma-edit
-file: Projects/KILN/ar26.md
+file: Projects/INFRA/up26.md
 <<<<<<< SEARCH
 - [ ] Review proposal by 2026-06-20
 =======
@@ -401,7 +401,7 @@ file: Projects/KILN/ar26.md
    f. If any edit fails → roll back all previous edits in this batch
 
 3. Commit all edited files as single git commit:
-   - Author: ASSISTANT_AUTHOR = Actor("Arivu Baalan", "arivu@smtw.in")
+   - Author: ASSISTANT_AUTHOR = Actor("PMA Bot", "assistant@company.com")
    - Committer: same
    - Message: "AI: <prose_summary>" where prose_summary is extracted from
      the non-fence-block text of the LLM reply
@@ -558,10 +558,10 @@ The sha1 is computed from the task text. The period is the materialisation perio
 ```
 DATA_ROOT/                          # e.g. /data
   queue.sqlite3                     # Shared task queue (keyed by user column)
-  <username>/                       # e.g. kla/
+  <username>/                       # e.g. admin/
     md/                             # Git repo — single source of truth
       Projects/
-        <OU>/                       # e.g. KILN/
+        <OU>/                       # e.g. ACME/
           <project>.md              # e.g. ar26.md
           Index.md                  # Project index for OU (auto-rebuilt)
       Daily/
@@ -597,7 +597,7 @@ The `md/` directory is initialised as a Git repository on user onboarding. Every
 
 The commit messages follow the convention:
 - AI edits: `AI: <prose summary from LLM reply>`
-- MCP edits: `AI: <summary>` (author email `mcp@smtw.in`)
+- MCP edits: `AI: <summary>` (author email `mcp@company.com`)
 - User edits (via API): `edit: <summary>` (author: user's Keycloak email)
 - Worker/materialiser: `materialise: <description>`
 
@@ -616,7 +616,7 @@ Browser                    Keycloak                   pma-backend
    │                          │                            │
    │  1. App loads            │                            │
    │  2. keycloak-js init     │                            │
-   │  3. redirect to /realms/Office/protocol/openid-connect/auth
+   │  3. redirect to /realms/MyRealm/protocol/openid-connect/auth
    │─────────────────────────►│                            │
    │  4. User authenticates   │                            │
    │◄─────────────────────────│                            │
@@ -641,12 +641,12 @@ Browser                    Keycloak                   pma-backend
 
 | Setting | Value |
 |---|---|
-| Realm | `Office` |
+| Realm | `MyRealm` (any name you choose) |
 | Client ID | `pma` |
 | Flow | Authorization Code + PKCE S256 |
-| Token endpoint | `https://sso.mspv.app/realms/Office/protocol/openid-connect/token` |
-| Auth endpoint | `https://sso.mspv.app/realms/Office/protocol/openid-connect/auth` |
-| JWKS endpoint | `https://sso.mspv.app/realms/Office/protocol/openid-connect/certs` |
+| Token endpoint | `https://sso.example.com/realms/MyRealm/protocol/openid-connect/token` |
+| Auth endpoint | `https://sso.example.com/realms/MyRealm/protocol/openid-connect/auth` |
+| JWKS endpoint | `https://sso.example.com/realms/MyRealm/protocol/openid-connect/certs` |
 
 ### JWT Validation (`auth_utils.py`)
 
@@ -663,14 +663,14 @@ def decode_token(token: str) -> dict:
 **JWKS URL rewrite (LAN bypass):**
 
 ```
-Public URL:   https://sso.mspv.app/realms/Office/protocol/openid-connect/certs
-Internal URL: http://<KEYCLOAK_HOST_IP>:8080/realms/Office/protocol/openid-connect/certs
+Public URL:   https://sso.example.com/realms/MyRealm/protocol/openid-connect/certs
+Internal URL: http://<KEYCLOAK_HOST_IP>:8080/realms/MyRealm/protocol/openid-connect/certs
 ```
 
 This rewrite is required because:
 - The backend container cannot resolve the public HTTPS certificate for a LAN IP
-- DNS hairpin (sso.mspv.app → public IP → NAT → LAN IP) is unreliable in the container network
-- The `extra_hosts` in docker-compose maps `sso.mspv.app → KEYCLOAK_HOST_IP` for issuer validation, but JWKS fetch still goes to internal HTTP
+- DNS hairpin (sso.example.com → public IP → NAT → LAN IP) is unreliable in the container network
+- The `extra_hosts` in docker-compose maps `sso.example.com → KEYCLOAK_HOST_IP` for issuer validation, but JWKS fetch still goes to internal HTTP
 
 **Key rotation handling:**
 
@@ -690,8 +690,8 @@ def roles_from_claims(claims: dict) -> list[str]:
 **Username extraction:**
 
 ```python
-# Keycloak sends: username = "kla@office.smtw.in"
-# PMA uses only the local part: "kla"
+# Keycloak sends: username = "admin@company.com"
+# PMA uses only the local part: "admin"
 raw = claims.get("username", "")
 username = raw.split("@", 1)[0].strip().lower()
 ```
@@ -976,10 +976,10 @@ services:
       - ${DATA_ROOT}:/data
     environment:
       DATA_ROOT: /data
-      CORS_ORIGINS: https://pa.mspv.app
+      CORS_ORIGINS: https://pma.example.com
       TZ: Asia/Kolkata
     extra_hosts:
-      - "sso.mspv.app:${KEYCLOAK_HOST_IP}"   # LAN IP rewrite for Keycloak JWT validation
+      - "sso.example.com:${KEYCLOAK_HOST_IP}"   # LAN IP rewrite for Keycloak JWT validation
 
   worker:
     image: REGISTRY/pma-backend:latest        # same image as backend
@@ -993,7 +993,7 @@ services:
       DATA_ROOT: /data
       TZ: Asia/Kolkata
     extra_hosts:
-      - "sso.mspv.app:${KEYCLOAK_HOST_IP}"
+      - "sso.example.com:${KEYCLOAK_HOST_IP}"
 
   frontend:
     image: REGISTRY/pma-frontend:latest
@@ -1025,7 +1025,7 @@ services:
 
 Caddy is the public-facing TLS terminator. It is **not** inside the Docker Compose network — it runs on the host and proxies to the frontend container (port 80) and directly to the backend container (port 5000 for `/api` paths if needed).
 
-- Auto-HTTPS via Let's Encrypt for `pa.mspv.app`
+- Auto-HTTPS via Let's Encrypt for `pma.example.com`
 - Proxies `/` → `pma-frontend:80`
 - Proxies `/api/*` → `pma-backend:5000` (or via frontend nginx)
 
@@ -1044,14 +1044,14 @@ Required at deploy time (set via `docker-compose.yml` `environment:` or `.env` f
 |---|---|---|
 | `DATA_ROOT` | compose env | Host path for user data (mounted as `/data`) |
 | `KEYCLOAK_HOST_IP` | compose/secrets | LAN IP of Keycloak host |
-| `CORS_ORIGINS` | compose env | `https://pa.mspv.app` |
+| `CORS_ORIGINS` | compose env | `https://pma.example.com` |
 | `TZ` | compose env | `Asia/Kolkata` |
 
 Secrets (in `secrets_app.py`, not in compose env):
 
 ```python
 ANTHROPIC_API_KEY = "sk-ant-..."
-KEYCLOAK_REALM_URL = "https://sso.mspv.app/realms/Office"
+KEYCLOAK_REALM_URL = "https://sso.example.com/realms/MyRealm"
 KEYCLOAK_CLIENT_ID = "pma"
 KEYCLOAK_HOST_IP = "192.168.x.x"
 O365_TENANT_ID = "..."
@@ -1064,7 +1064,7 @@ JIRA_BASE_URL = "https://your-org.atlassian.net"
 JIRA_USER_EMAIL = "..."
 JIRA_API_TOKEN = "..."
 MCP_API_KEY = "..."
-MCP_USER = "kla"
+MCP_USER = "admin"
 MCP_OAUTH_CLIENT_ID = "pma-mcp"
 MCP_OAUTH_CLIENT_SECRET = "..."
 ```

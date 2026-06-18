@@ -29,8 +29,8 @@ Findings are written to `inbox.md` under `## Housekeeping` with exact-line dedup
 
 For example:
 ```
-- [ ] 🔎SMTW/Projects/Kiln-Arch.md — KILN-AR26: all tasks done — mark `status: completed` or add next-step tasks
-- [ ] 🔎SMTW/Projects/Budget.md:14 — unknown owner @RAVI — add to People/ or fix typo
+- [ ] 🔎ACME/Projects/Infra-Upgrade.md — INFRA-UP26: all tasks done — mark `status: completed` or add next-step tasks
+- [ ] 🔎ACME/Projects/Budget.md:14 — unknown owner @RAVI — add to People/ or fix typo
 ```
 
 ---
@@ -72,7 +72,7 @@ def register_checker(name: str):
 
 **Finding format:**
 ```
-KILN-AR26: all tasks done — mark `status: completed` or add next-step tasks
+INFRA-UP26: all tasks done — mark `status: completed` or add next-step tasks
 ```
 
 ### 2. `missing_frontmatter`
@@ -90,8 +90,8 @@ KILN-AR26: all tasks done — mark `status: completed` or add next-step tasks
 
 **Finding format:**
 ```
-missing `key:` in project frontmatter     → location: SMTW/Projects/Budget.md
-missing `cadence:` in recur frontmatter   → location: SMTW/Recur/weekly-review.md
+missing `key:` in project frontmatter     → location: ACME/Projects/Budget.md
+missing `cadence:` in recur frontmatter   → location: ACME/Recur/weekly-review.md
 ```
 
 ### 3. `unknown_owner`
@@ -107,7 +107,7 @@ missing `cadence:` in recur frontmatter   → location: SMTW/Recur/weekly-review
 
 **Finding format:**
 ```
-unknown owner @RAVI — add to People/ or fix typo    → location: SMTW/Projects/Budget.md:14
+unknown owner @RAVI — add to People/ or fix typo    → location: ACME/Projects/Budget.md:14
 ```
 
 ### 4. `invalid_dates`
@@ -129,8 +129,8 @@ unknown owner @RAVI — add to People/ or fix typo    → location: SMTW/Project
 
 **Finding format:**
 ```
-invalid due:'Jun-35'        → location: SMTW/Projects/Budget.md:22
-invalid start:'2026-13-01'  → location: SMTW/Plans/2026-06.md:8
+invalid due:'Jun-35'        → location: ACME/Projects/Budget.md:22
+invalid start:'2026-13-01'  → location: ACME/Plans/2026-06.md:8
 ```
 
 ---
@@ -161,7 +161,7 @@ def archive_old_daily(
 
 **Return value:**
 ```python
-{"moved": 5, "by_ou": {"SMTW": 3, "MSPVL": 2}}
+{"moved": 5, "by_ou": {"ACME": 3, "INFRA": 2}}
 ```
 
 **Error handling:**
@@ -211,7 +211,7 @@ def run_housekeeping(user: CurrentUser, today: date | None = None) -> dict:
     "findings_added_to_inbox": 4,  # after exact-line dedup
     "archive": {
         "moved": 5,
-        "by_ou": {"SMTW": 3, "MSPVL": 2}
+        "by_ou": {"ACME": 3, "INFRA": 2}
     }
 }
 ```
@@ -296,7 +296,7 @@ After a housekeeping run, `inbox.md` has this structure:
 ```markdown
 # Inbox
 
-- 2026-06-18 `HIGH` `SMTW` — Follow up on kiln repair quote · KLA to action
+- 2026-06-18 `HIGH` `ACME` — Follow up on infrastructure maintenance update · ADMIN to action
 
 ## News
 
@@ -304,8 +304,8 @@ After a housekeeping run, `inbox.md` has this structure:
 
 ## Housekeeping
 
-- [ ] 🔎SMTW/Projects/Budget.md — BUDGET-Q2: all tasks done — mark `status: completed` or add next-step tasks
-- [ ] 🔎SMTW/Projects/NewProject.md — missing `owner:` in project frontmatter
+- [ ] 🔎ACME/Projects/Budget.md — BUDGET-Q2: all tasks done — mark `status: completed` or add next-step tasks
+- [ ] 🔎ACME/Projects/NewProject.md — missing `owner:` in project frontmatter
 ```
 
 The `## Housekeeping` section accumulates over time. Users check off items when resolved. The exact-line dedup prevents the same finding from appearing twice on repeated runs.

@@ -186,12 +186,12 @@ Set `NEWS_WATCH_CRON_DISABLED=True` to disable nightly submission.
 Single Sign-On for PMA using Keycloak as OIDC provider.
 
 ### Keycloak Setup Requirements
-1. **Realm**: `Office`
-2. **Client**: `pma`
+1. **Realm**: any name (e.g. `MyRealm`) — must match realm in `KEYCLOAK_REALM_URL`
+2. **Client**: `pma` (must match `KEYCLOAK_CLIENT_ID`)
    - Client protocol: `openid-connect`
    - Access type: `public` (PKCE, no client secret)
-   - Valid redirect URIs: `https://pma.mspv.app/*`
-   - Web origins: `https://pma.mspv.app`
+   - Valid redirect URIs: `https://pma.example.com/*`
+   - Web origins: `https://pma.example.com`
    - Standard flow: enabled
    - PKCE challenge method: `S256`
 3. **Users**: Keycloak users whose username maps to `DATA_ROOT/<username>/`
@@ -199,14 +199,14 @@ Single Sign-On for PMA using Keycloak as OIDC provider.
 
 ### Configuration
 ```python
-KEYCLOAK_REALM_URL = "https://sso.mspv.app/realms/Office"
+KEYCLOAK_REALM_URL = "https://sso.example.com/realms/MyRealm"
 KEYCLOAK_HOST_IP = "192.168.1.xxx"   # for Docker container direct access
 ```
 
 ### Internal URL Rewrite
 Docker containers cannot access Keycloak via the public URL (Caddy). The backend rewrites:
 ```
-https://sso.mspv.app/realms/Office → http://<KEYCLOAK_HOST_IP>:8080/realms/Office
+https://sso.example.com/realms/MyRealm → http://<KEYCLOAK_HOST_IP>:8080/realms/MyRealm
 ```
 via `auth_utils._make_internal_url()`. This is why `KEYCLOAK_HOST_IP` + `extra_hosts` in docker-compose are needed.
 
@@ -214,7 +214,7 @@ via `auth_utils._make_internal_url()`. This is why `KEYCLOAK_HOST_IP` + `extra_h
 
 Not in docker-compose (runs separately on host). Example config:
 ```
-pma.mspv.app {
+pma.example.com {
     reverse_proxy /api/* pma-backend:5000
     reverse_proxy /mcp/* pma-backend:5000
     reverse_proxy /.well-known/* pma-backend:5000

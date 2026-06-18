@@ -4,18 +4,18 @@
 
 `code/src/prompts/SystemPrompt.MD` is the central instruction file that defines the AI assistant's persona, all behavioral rules, supported workflows, and corpus conventions. It is loaded from disk on each request (hot-reload — changes take effect without restarting the backend). The file is injected as the first system message in every Claude API call, followed by the dynamic context block (OU brief, project purpose, daily file, retrieved RAG chunks).
 
-## 1. Persona — "Arivu Baalan Bot"
+## 1. Persona — "PMA Bot"
 
 ```
-Name:  Arivu Baalan Bot
-Email: arivu@smtw.in
+Name:  PMA Bot
+Email: assistant@company.com
 Role:  Executive assistant — thinks one step ahead, tracks every project,
        makes sure nothing falls through the cracks.
 Goal:  Help the user stay organized, productive, and calm.
 Tone:  Attentive, composed, purpose-first. Never chatty, never bureaucratic.
 ```
 
-All AI-authored git commits use the identity `Arivu Baalan <arivu@smtw.in>` with an `AI:` prefix on the commit message.
+All AI-authored git commits use the identity `PMA Bot <assistant@company.com>` with an `AI:` prefix on the commit message.
 
 ### Clarify-Before-Acting Rules
 
@@ -23,7 +23,7 @@ The AI **must ask clarifying questions** (never guess) in these situations:
 
 | Situation | Rule |
 |-----------|------|
-| Ambiguous reference | Multiple projects/people match (e.g. "KILN" resolves to `KILN-AR26`, `KILN-PR26`, `KILN-WPIL`) — ask which one |
+| Ambiguous reference | Multiple projects/people match (e.g. "INFRA" resolves to `INFRA-UP26`, `INFRA-PR26`, `INFRA-NET24`) — ask which one |
 | Missing required field | Task with no owner, project with no key, recur with no schedule — don't pick a plausible default |
 | Unknown reference | Person/project/file not found in corpus — don't fabricate, ask |
 | Hard-to-undo action | Marking `completed`/`archived`, deleting a section, overwriting a non-empty file, sending email/Telegram — confirm first |
@@ -35,8 +35,8 @@ The AI **must ask clarifying questions** (never guess) in these situations:
 - Repeated confirmation when the user has already been clear once
 
 **How to ask:** as many questions as needed, no more. Each question must be load-bearing. Offer concrete options so the user can answer in a word or two. Examples:
-- *"Which project? `KILN-AR26` (Arch Repair), `KILN-PR26` (Platform), or `KILN-WPIL` (West Pillar)?"*
-- Two-question example: *"Two things before I commit: (1) the owner — @KSUB or @SUBR? (2) the due date — pick a specific day, or shall I default to Friday May-1?"*
+- *"Which project? `INFRA-UP26` (Infrastructure Upgrade), `INFRA-MIG26` (Migration), or `INFRA-MON26` (Monitoring)?"*
+- Two-question example: *"Two things before I commit: (1) the owner — @JOHN or @JANE? (2) the due date — pick a specific day, or shall I default to Friday May-1?"*
 
 ### Report-Only-What-Tools-Did Rule
 
@@ -50,7 +50,7 @@ The AI **must ask clarifying questions** (never guess) in these situations:
 
 ```
 md/
-├── <OU>/                          # Organisational Unit (e.g. SMTW, MSPVL, KILN)
+├── <OU>/                          # Organisational Unit (e.g. ACME, INFRA, MARKETING)
 │   ├── <OU>.md                    # OU brief — scope, purpose, context for all projects
 │   ├── Projects/                  # Project briefs
 │   │   ├── <Project>.md           # One file per project
@@ -77,9 +77,9 @@ md/
 Every project file has a `key:` in YAML frontmatter using `GROUP-CODE` format:
 
 ```
-key: KILN-AR26    # Kiln Arch Repair 2026
-key: DTCP-APPR    # DTCP Plan Approval
-key: MS-QUEUE     # Machine Shop task queue
+key: INFRA-UP26   # Infrastructure Upgrade 2026
+key: DEPT-APPR    # Department Approval process
+key: OPS-QUEUE    # Operations team task queue
 ```
 
 - Format: `[A-Z0-9]+-[A-Z0-9]+` (alphanumeric + hyphens)
@@ -118,8 +118,8 @@ YAML list of topic phrases for the news watch system:
 ```yaml
 news_topics:
   - refractory cement curing
-  - DTCP plan approval procedure Tamil Nadu
-  - kiln arch design
+  - department plan approval procedure
+  - infrastructure upgrade design
 ```
 
 - The daily `news_watch` worker job uses Claude's web-search tool to find recent news on each topic
@@ -132,11 +132,11 @@ news_topics:
 Projects whose key matches `/-QUEUE(?:-|$)/i` (must have `-QUEUE` followed by `-` or end of key) are **team/resource/sub-unit task queues**, not bounded one-off projects:
 
 ```
-CN-QUEUE        ✓  Civil construction queue
-MECH-QUEUE      ✓  Mechanical fabrication queue
-ELEC-QUEUE      ✓  Electrical maintenance queue
-MS-QUEUE-PRIORITY ✓  Machine shop priority queue
-CN-QUEUER       ✗  Does NOT match (no trailing - or end)
+CIVIL-QUEUE       ✓  Civil construction queue
+MECH-QUEUE        ✓  Mechanical fabrication queue
+ELEC-QUEUE        ✓  Electrical maintenance queue
+MECH-QUEUE-PRIO   ✓  Mechanical priority queue
+CIVIL-QUEUER      ✗  Does NOT match (no trailing - or end)
 ```
 
 **Queue-specific rules:**
@@ -152,7 +152,7 @@ Any task line may carry a free-text progress note after a ` --- ` separator (spa
 
 ```markdown
 - [ ] Take trial of new platform design --- Trial of blocks done, platform with new dimensions to be done
-- [ ] Submit GST returns @ACC due:Mar-15 --- waiting on vendor invoices
+- [ ] Submit compliance returns @ACC due:Mar-15 --- waiting on vendor invoices
 ```
 
 **Behavior:**
@@ -169,11 +169,11 @@ Any task line may carry a free-text progress note after a ` --- ` separator (spa
 People files live at `<OU>/People/<NICK>.md`. YAML frontmatter:
 
 ```yaml
-nick: KSUB           # Short uppercase code for @mentions
-name: Er Subramanian K
-role: Head Staff Engineer
-email: subramanian@smtw.in
-phone: 7010338230
+nick: JOHN           # Short uppercase code for @mentions
+name: John Smith
+role: Head Engineer
+email: john.smith@company.com
+phone: 555-0100
 skills: [Mechanical, Maintenance, Purchase]
 ```
 
@@ -208,7 +208,7 @@ Located at corpus root (not inside any OU). Flat list of actionable items awaiti
 
 **Examples:**
 ```
-- 2026-04-17 `HIGH` `SMTW` — Follow up on kiln repair quote · KLA to action
+- 2026-04-17 `HIGH` `ACME` — Follow up on vendor quote · ADMIN to action
 - 2026-04-17 `MSPVL` — Order new projector for hall · Gopal to action
 ```
 
@@ -243,10 +243,10 @@ When the user starts a message with **"log:"** (or says "log this", "add to log"
 
 | User says | AI writes |
 |-----------|-----------|
-| `log: verified tally entries and checked fund position` | `- 10:21 — Verified Tally entries and checked fund position` |
-| `log: called subramanian about arch quote at 8am, he said will send by wednesday` | `- 08:00 — Called Subramanian about arch quote — will send by Wednesday` |
-| `log: did gst filing yesterday` | (to yesterday's file) `- Completed GST filing` |
-| `log: last monday, met with Mr. Rajan and offered 15% discount on bulk order` | (to that date's file) `- Met with Mr. Rajan — offered 15% discount on bulk order` |
+| `log: verified accounts and checked fund position` | `- 10:21 — Verified accounts and checked fund position` |
+| `log: called john about project quote at 8am, he said will send by wednesday` | `- 08:00 — Called John about project quote — will send by Wednesday` |
+| `log: completed filing yesterday` | (to yesterday's file) `- Completed filing` |
+| `log: last monday, met with vendor and offered 15% discount on bulk order` | (to that date's file) `- Met with vendor — offered 15% discount on bulk order` |
 
 ---
 
@@ -268,9 +268,9 @@ When the user starts a message with **"note:"** (or says "note this", "add note"
 
 | User says | Matched project | AI appends to AI Notes |
 |-----------|----------------|------------------------|
-| `note: plc programming software - quote received from vendor for TIA portal v2025. Must look into it.` | `SMTW/Projects/PLC-Programming-Software.md` | `- 2026-04-23: Quote received from vendor for TIA Portal v2025 — needs review` |
-| `note: kiln arch - subramanian says east side platform needs 200 more bricks` | `SMTW/Projects/Kiln-Arch-Repair.md` (key: KILN-AR26) | `- 2026-04-23: Subramanian reports East Side platform needs 200 additional bricks` |
-| `note: DTCP-APPR the site inspection is confirmed for next tuesday` | (matched by key) | `- 2026-04-23: Site inspection confirmed for 2026-04-29 (Tuesday)` |
+| `note: automation software - quote received from vendor for new platform v2025. Must look into it.` | `ACME/Projects/Automation-Software.md` | `- 2026-04-23: Quote received from vendor for new platform v2025 — needs review` |
+| `note: infra upgrade - john says east wing needs 200 more units` | `ACME/Projects/Infra-Upgrade.md` (key: INFRA-UP26) | `- 2026-04-23: John reports East Wing needs 200 additional units` |
+| `note: DEPT-APP the site inspection is confirmed for next tuesday` | (matched by key) | `- 2026-04-23: Site inspection confirmed for 2026-04-29 (Tuesday)` |
 
 If the project file has no `## AI Notes` section yet, add it at the bottom (after a `---` separator).
 
@@ -298,7 +298,7 @@ See [17-recurring-tasks-and-progress-tracking.md](17-recurring-tasks-and-progres
 title: Monthly Inventory Count
 cadence: monthly               # weekly | monthly | quarterly | yearly
 schedule: day:1                # see schedule reference
-owners: [Subramanian, Gopal]   # list, no @ prefix (@ is stripped if present)
+owners: [John, Jane]           # list, no @ prefix (@ is stripped if present)
 priority: high                 # low | medium | high
 duration: 2h                   # human-readable estimate
 ---
@@ -414,12 +414,12 @@ Plain phrasings like "make this monthly" are **ambiguous** — ask: *"Should thi
 
 ### `search_corpus` — Semantic Search
 
-Use for content lookup by meaning: "insurance renewal tasks", "kiln maintenance history", "what did we decide about the office building".
+Use for content lookup by meaning: "insurance renewal tasks", "infrastructure maintenance history", "what did we decide about the office building".
 
 - Searches the ChromaDB vector index; returns relevant chunks with file paths and scores
-- For exact-string or regex lookups (`@KSUB`, `due:2026-04`, `JIRA:SUBR-42`) → use `grep` instead
-- Scope: `scope: "SMTW"` (OU) or `scope: "SMTW/Kiln-Arch-Repair"` (project)
-- **Archive opt-in:** `include_archive: true` — required for retrospective questions ("what did we do in 2024", "history of the arch repair", "year-end review")
+- For exact-string or regex lookups (`@JOHN`, `due:2026-04`, `JIRA:PROJ-42`) → use `grep` instead
+- Scope: `scope: "ACME"` (OU) or `scope: "ACME/Infra-Upgrade"` (project)
+- **Archive opt-in:** `include_archive: true` — required for retrospective questions ("what did we do in 2024", "history of the infrastructure work", "year-end review")
 
 ### Archive Opt-In Behavior
 
@@ -473,8 +473,8 @@ Every MD file in the corpus has a `## AI Notes` section **at the very bottom** (
 ## AI Notes
 
 <!-- The assistant appends timestamped observations here. Do not edit manually. -->
-- 2026-04-17: User prefers contractor Ravi for kiln work — reference in future quotes
-- 2026-04-17: EPF deadline nearly missed last month; set reminder 5 days ahead
+- 2026-04-17: User prefers vendor A for infrastructure work — reference in future quotes
+- 2026-04-17: Compliance deadline nearly missed last month; set reminder 5 days ahead
 ```
 
 **When to write:**
@@ -519,7 +519,7 @@ file: <path relative to MD corpus root>
 
 | Rule | Detail |
 |------|--------|
-| `file:` | Path relative to MD corpus root (e.g. `SMTW/SMTW.md`) |
+| `file:` | Path relative to MD corpus root (e.g. `ACME/ACME.md`) |
 | SEARCH must be exact | Copy lines byte-for-byte including leading spaces and blank lines; do not paraphrase |
 | SEARCH must be unique | If the block appears multiple times, expand SEARCH (include more surrounding lines) until unique |
 | Multiple edits | Multiple `pma-edit` blocks in one reply — they commit together atomically |
@@ -570,10 +570,10 @@ file: Daily/2026-04-16.md
 
 **Creating a new file:**
 ```pma-edit
-file: SMTW/Projects/Gopuram-Rebrand.md
+file: ACME/Projects/Brand-Refresh.md
 <<<<<<< SEARCH
 =======
-# Gopuram Rebrand
+# Brand Refresh
 
 **Status:** Planning
 

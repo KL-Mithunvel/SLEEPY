@@ -50,7 +50,7 @@ title: Monthly Infrastructure Review
 cadence: monthly
 schedule: day:last-week
 owners:
-  - KLA
+  - ADMIN
   - JD
 priority: P2
 ---
@@ -126,7 +126,7 @@ Controls whether the task goes to user's Daily/Plans or to `Govern/`:
 
 # Specific owners list → only these users get it in their Daily/Plans
 owners:
-  - KLA              # nick, not @nick (no @ prefix)
+  - ADMIN              # nick, not @nick (no @ prefix)
   - JD
 
 # Task goes to Govern if current user is NOT in owners list
@@ -169,7 +169,7 @@ For each recur file in `<OU>/Recur/`:
 
 **Idempotency marker**: `^R:<sha1[:8]>-<period>` appended to each bullet:
 ```
-- [ ] Monthly Infrastructure Review @KLA due:Jun-30 SMTW/Recur/infra-review.md ^R:a3f8b2c1-M06
+- [ ] Monthly Infrastructure Review @ADMIN due:Jun-30 ACME/Recur/infra-review.md ^R:a3f8b2c1-M06
 ```
 - `a3f8b2c1` = first 8 hex chars of SHA-1 of the recur file's stem ("infra-review")
 - `M06` = period suffix (M=monthly, month 06; Q2 = quarterly Q2; Y = yearly)
@@ -210,13 +210,13 @@ For each matching `- [ ]` line in any plan file:
 
 ```
 # In Plans/2026-Q2.md before plan pipe:
-- [ ] Quarterly security audit m3-last SMTW/Recur/security-audit.md ^R:b4a1c2d3-Q2
+- [ ] Quarterly security audit m3-last ACME/Recur/security-audit.md ^R:b4a1c2d3-Q2
 
 # After plan pipe (plan file is rewritten):
-- [>] Quarterly security audit m3-last SMTW/Recur/security-audit.md ^R:b4a1c2d3-Q2
+- [>] Quarterly security audit m3-last ACME/Recur/security-audit.md ^R:b4a1c2d3-Q2
 
 # Added to Daily/2026-06-30.md → ## Tasks:
-- [ ] PROJ-IT: Quarterly security audit m3-last SMTW/Recur/security-audit.md ^R:b4a1c2d3-Q2
+- [ ] PROJ-IT: Quarterly security audit m3-last ACME/Recur/security-audit.md ^R:b4a1c2d3-Q2
 ```
 
 The `[>]` marker in the plan file means: "this task has been scheduled into a daily file; don't schedule it again."
@@ -225,7 +225,7 @@ The `[>]` marker in the plan file means: "this task has been scheduled into a da
 Reads all `<OU>/Recur/*.md` files (except Daily.md) with `cadence: weekly`. For each that matches today's weekday schedule:
 
 ```
-- [ ] Weekly team standup @KLA @JD due:Jun-18 SMTW/Recur/standup.md
+- [ ] Weekly team standup @ADMIN @JD due:Jun-18 ACME/Recur/standup.md
 ```
 
 Slug-based idempotency: `_recur_slug(p)` generates a stable slug from the path, checked against existing daily file content to prevent double-insertion.
@@ -264,12 +264,12 @@ Structure:
 
 ## @JD
 
-- [ ] Monthly deployment review @JD due:Jun-30 SMTW/Recur/deploy-review.md ^R:c5d2e3f4-M06
-- [ ] Weekly release notes @JD due:Jun-18 SMTW/Recur/release-notes.md
+- [ ] Monthly deployment review @JD due:Jun-30 ACME/Recur/deploy-review.md ^R:c5d2e3f4-M06
+- [ ] Weekly release notes @JD due:Jun-18 ACME/Recur/release-notes.md
 
 ## @SJ
 
-- [ ] Monthly marketing report @SJ due:Jun-last SMTW/Recur/mkt-report.md ^R:d6e3f4g5-M06
+- [ ] Monthly marketing report @SJ due:Jun-last ACME/Recur/mkt-report.md ^R:d6e3f4g5-M06
 ```
 
 **Carry-overs**: On the 1st of each month, unchecked tasks from the previous month's Govern file are carried forward:
@@ -310,8 +310,8 @@ ou: Infrastructure
 
 ## Recurring
 
-- [ ] Quarterly security audit due:2026-06-30 SMTW/Recur/security-audit.md ^R:b4a1c2d3-Q2
-- [>] Team OKR review due:2026-04-01 SMTW/Recur/okr-review.md ^R:a1b2c3d4-Q2  ← already scheduled
+- [ ] Quarterly security audit due:2026-06-30 ACME/Recur/security-audit.md ^R:b4a1c2d3-Q2
+- [>] Team OKR review due:2026-04-01 ACME/Recur/okr-review.md ^R:a1b2c3d4-Q2  ← already scheduled
 ```
 
 ### Adding Tasks to Plan Files
@@ -345,7 +345,7 @@ date: 2026-06-18 Thursday
 
 - [ ] ↳ Deploy staging environment due:Jun-30                    ← carried forward
 - [ ] IT-DOM25: Configure ADConnect sync start:2026-06-18         ← from plan pipe
-- [ ] Weekly standup @KLA due:Jun-18 SMTW/Recur/standup.md       ← from weekly recur
+- [ ] Weekly standup @ADMIN due:Jun-18 ACME/Recur/standup.md       ← from weekly recur
 
 ## Daily checklist
 
@@ -420,14 +420,14 @@ The entire materialiser pipeline is idempotent — safe to run multiple times pe
 
 ### 1. Define the recurring task
 
-Create `<md_root>/SMTW/Recur/monthly-cost-review.md`:
+Create `<md_root>/ACME/Recur/monthly-cost-review.md`:
 ```yaml
 ---
 title: Monthly cloud cost review
 cadence: monthly
 schedule: day:last-week
 owners:
-  - KLA
+  - ADMIN
 priority: P2
 ---
 ```
@@ -435,15 +435,15 @@ priority: P2
 ### 2. Materialiser runs (1st of June)
 
 Materialiser runs `materialise_non_daily`, sees this recur file:
-- Cadence: monthly → target: `SMTW/Plans/2026-06.md`
+- Cadence: monthly → target: `ACME/Plans/2026-06.md`
 - Due date: day:last-week = June 24 (first day of last 7 of June)
 - Generates idempotency marker: `^R:f2a9b8c7-M06`
 
-Appends to `SMTW/Plans/2026-06.md`:
+Appends to `ACME/Plans/2026-06.md`:
 ```markdown
 ## Recurring
 
-- [ ] Monthly cloud cost review @KLA due:2026-06-24 SMTW/Recur/monthly-cost-review.md ^R:f2a9b8c7-M06
+- [ ] Monthly cloud cost review @ADMIN due:2026-06-24 ACME/Recur/monthly-cost-review.md ^R:f2a9b8c7-M06
 ```
 
 ### 3. Plan pipe fires (June 24)
@@ -453,19 +453,19 @@ Materialiser runs `materialise_daily` → `_due_today_from_plans()` scans plan f
 - Rewrites plan file: `- [ ]` → `- [>]`
 - Adds to today's daily file under `## Tasks`:
   ```
-  - [ ] Monthly cloud cost review @KLA due:2026-06-24 SMTW/Recur/monthly-cost-review.md ^R:f2a9b8c7-M06
+  - [ ] Monthly cloud cost review @ADMIN due:2026-06-24 ACME/Recur/monthly-cost-review.md ^R:f2a9b8c7-M06
   ```
 
 ### 4. User completes the task (June 24)
 
 User opens Today view, sees the task, completes it:
 ```
-- [x] Monthly cloud cost review @KLA due:2026-06-24 SMTW/Recur/monthly-cost-review.md ^R:f2a9b8c7-M06
+- [x] Monthly cloud cost review @ADMIN due:2026-06-24 ACME/Recur/monthly-cost-review.md ^R:f2a9b8c7-M06
 ```
 
 ### 5. Next month (July 1)
 
-Materialiser runs again. Checks `SMTW/Plans/2026-07.md`:
+Materialiser runs again. Checks `ACME/Plans/2026-07.md`:
 - No `^R:f2a9b8c7-M07` marker → not yet materialised for July
 - Due date for July: day:last-week = July 24
 - Appends new bullet with `^R:f2a9b8c7-M07` to July plan file
@@ -480,7 +480,7 @@ The corpus API `POST /api/corpus/move-line` lets users move a task line from one
 ```
 Source: inbox.md
 Line: "- [ ] Evaluate new monitoring vendor"
-Target: SMTW/Plans/2026-Q3.md
+Target: ACME/Plans/2026-Q3.md
 Action: move
 ```
 
@@ -503,6 +503,6 @@ The `GET /api/corpus/govern?ou=&month=&include_done=` endpoint returns structure
   "recur_tasks": [{"owner": "JD", "task": "...", "done": false}],
   "project_tasks": [...],
   "daily_tasks": [...],
-  "people_nicks": ["KLA", "JD", "SJ"]
+  "people_nicks": ["ADMIN", "JD", "SJ"]
 }
 ```
