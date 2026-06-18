@@ -29,6 +29,9 @@ PMA (`pa.mspv.app`) is a self-hosted personal AI project assistant:
 | [12-dependencies.md](12-dependencies.md) | All Python and npm dependencies with purposes and versions |
 | [13-integrations.md](13-integrations.md) | Jira, Office 365 email, Telegram, Keycloak, Caddy, git remote |
 | [14-todo-and-pending.md](14-todo-and-pending.md) | Pending features, known limitations, settled design decisions |
+| [15-news-watch.md](15-news-watch.md) | Complete news watch system: two-stage async pipeline, topics config, dedup, feedback, ABOUT.md |
+| [16-project-documentation-guide.md](16-project-documentation-guide.md) | How to document each project: frontmatter fields, every section, best practices, examples |
+| [17-recurring-tasks-and-progress-tracking.md](17-recurring-tasks-and-progress-tracking.md) | Full recurring task system: Recur files, plan hierarchy, carry-forward, materialiser stages, Govern |
 
 ## Quick Start for Rebuilding
 
