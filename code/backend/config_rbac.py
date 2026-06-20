@@ -17,6 +17,11 @@ PERMISSIONS = {
     "logs:read":       ("owner",),
     "logs:write":      ("owner",),
 
+    # Corpus actions
+    "corpus:news_watch":   ("owner",),
+    "corpus:materialise":  ("owner",),
+    "corpus:move_line":    ("owner",),
+
     # Admin
     "admin:reindex":   ("owner",),
 }

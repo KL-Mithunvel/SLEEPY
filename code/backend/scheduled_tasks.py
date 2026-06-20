@@ -65,6 +65,16 @@ SCHEDULED_TASKS = [
     },
 
     # ------------------------------------------------------------------
+    # Nightly materialiser at 00:05 IST (5 min after midnight)
+    # ------------------------------------------------------------------
+    {
+        "task_type": "materialise",
+        "trigger": "cron",
+        "trigger_kwargs": {"hour": 0, "minute": 5},
+        "payload": {},
+    },
+
+    # ------------------------------------------------------------------
     # News Watch — nightly batch submission at midnight IST
     # Disabled when PMA_NEWS_WATCH_CRON_DISABLED=1 (manual trigger still works)
     # ------------------------------------------------------------------

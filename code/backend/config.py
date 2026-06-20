@@ -134,6 +134,18 @@ INDEX_SYNC_INTERVAL_SEC: int = int(_get("INDEX_SYNC_INTERVAL_SEC", 300))
 # When "1", skip registering the midnight news-watch cron (manual triggers still work)
 NEWS_WATCH_CRON_DISABLED: bool = str(_get("PMA_NEWS_WATCH_CRON_DISABLED", "0")).strip() in ("1", "true", "yes")
 
+# When "1", news watch runs all active projects every day (ignores day-of-week rotation)
+NEWS_RUN_ALL: bool = str(_get("PMA_NEWS_RUN_ALL", "0")).strip() in ("1", "true", "yes")
+
+# Projects edited within this many days count as "recently active" (→ 5 items/topic)
+RECENCY_DAYS: int = int(_get("RECENCY_DAYS", 14))
+
+# Anthropic SDK retry count for batch-create and LLM-dedup calls
+NEWS_MAX_RETRIES: int = int(_get("NEWS_MAX_RETRIES", 8))
+
+# Current user's nick for owner-filtering in recur files (must match owners: values in frontmatter)
+USER_NICK: str = _get("USER_NICK", "ADMIN")
+
 # ---------------------------------------------------------------------------
 # Per-user path helper
 # ---------------------------------------------------------------------------

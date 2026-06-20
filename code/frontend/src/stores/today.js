@@ -9,6 +9,12 @@ export const useTodayStore = defineStore('today', {
     loadingToday: false,
     loadingBriefing: false,
     error: null,
+
+    // News panel
+    newsItems: [],
+    loadingNews: false,
+    newsError: null,
+    newsWatchStatus: null,   // null | 'queued' | 'error'
   }),
 
   actions: {
@@ -39,6 +45,36 @@ export const useTodayStore = defineStore('today', {
       } finally {
         this.loadingBriefing = false
       }
+    },
+
+    async fetchNews() {
+      this.loadingNews = true
+      this.newsError = null
+      try {
+        const data = await apiGet('/api/corpus/news-items?limit=15')
+        this.newsItems = data.items || []
+      } catch (e) {
+        this.newsError = e.message
+      } finally {
+        this.loadingNews = false
+      }
+    },
+
+    async triggerNewsWatch() {
+      this.newsWatchStatus = 'queued'
+      try {
+        await apiPost('/api/corpus/news-watch', {})
+      } catch (e) {
+        this.newsWatchStatus = 'error'
+      }
+    },
+
+    async submitFeedback(bullet, feedback) {
+      try {
+        await apiPost('/api/corpus/news-feedback', { bullet, feedback })
+        const item = this.newsItems.find(n => n.bullet === bullet)
+        if (item) item.feedback = feedback
+      } catch { /* silent */ }
     },
   },
 })

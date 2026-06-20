@@ -12,7 +12,6 @@ const ai = useAiStore()
 const now = new Date()
 const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
 
-// Last message pair for the mini chat display
 const lastUserMsg = computed(() => {
   const u = [...ai.messages].reverse().find(m => m.role === 'user')
   return u || null
@@ -50,7 +49,17 @@ function truncate(text, max = 180) {
   return flat.length > max ? flat.slice(0, max) + '…' : flat
 }
 
-onMounted(() => today.fetchToday())
+// News helpers
+function newsIcon(feedback) {
+  if (feedback === '+1') return '👍'
+  if (feedback === '-1') return '👎'
+  return null
+}
+
+onMounted(() => {
+  today.fetchToday()
+  today.fetchNews()
+})
 </script>
 
 <template>
@@ -66,48 +75,164 @@ onMounted(() => today.fetchToday())
       <i class="bi bi-exclamation-triangle me-1"></i>{{ today.error }}
     </div>
 
-    <!-- Morning Briefing -->
-    <div class="card p-3 mb-3">
-      <div class="d-flex align-items-center justify-content-between mb-2">
-        <div class="d-flex align-items-center gap-2">
-          <i class="bi bi-stars text-accent"></i>
-          <span class="fw-semibold" style="font-size: 0.85rem;">Morning Briefing</span>
-          <span v-if="today.briefingAt" style="font-size: 0.72rem; color: var(--text-muted-custom);">
-            {{ today.briefingAt }}
-          </span>
+    <!-- TOP ROW: Morning Briefing + News Feed side-by-side -->
+    <div class="row g-3 mb-3">
+
+      <!-- Morning Briefing -->
+      <div class="col-12 col-xl-7">
+        <div class="card p-3 h-100">
+          <div class="d-flex align-items-center justify-content-between mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-stars text-accent"></i>
+              <span class="fw-semibold" style="font-size: 0.85rem;">Morning Briefing</span>
+              <span v-if="today.briefingAt" style="font-size: 0.72rem; color: var(--text-muted-custom);">
+                {{ today.briefingAt }}
+              </span>
+            </div>
+            <button
+              class="btn btn-sm"
+              :class="today.briefing ? 'btn-outline-secondary' : 'btn-outline-primary'"
+              :disabled="today.loadingBriefing || today.loadingToday"
+              style="font-size: 0.78rem;"
+              @click="today.generateBriefing()"
+            >
+              <span v-if="today.loadingBriefing" class="spinner-border spinner-border-sm me-1" role="status"></span>
+              <i v-else class="bi bi-lightning-charge me-1"></i>
+              {{ today.briefing ? 'Regenerate' : 'Generate Briefing' }}
+            </button>
+          </div>
+
+          <div v-if="today.loadingToday" class="py-2">
+            <div class="placeholder-glow">
+              <span class="placeholder col-10 mb-1 d-block" style="height: 0.8rem; border-radius: 4px;"></span>
+              <span class="placeholder col-8 mb-1 d-block" style="height: 0.8rem; border-radius: 4px;"></span>
+              <span class="placeholder col-6 d-block" style="height: 0.8rem; border-radius: 4px;"></span>
+            </div>
+          </div>
+
+          <div
+            v-else-if="today.briefing"
+            style="font-size: 0.84rem; white-space: pre-wrap; line-height: 1.6; color: var(--text-main, #e0e0e0);"
+          >{{ today.briefing }}</div>
+
+          <div v-else class="text-center py-3" style="color: var(--text-muted-custom); font-size: 0.84rem;">
+            <i class="bi bi-moon-stars d-block mb-2" style="font-size: 1.8rem; opacity: 0.35;"></i>
+            No briefing yet — click Generate to ask the AI what to focus on.
+          </div>
         </div>
-        <button
-          class="btn btn-sm"
-          :class="today.briefing ? 'btn-outline-secondary' : 'btn-outline-primary'"
-          :disabled="today.loadingBriefing || today.loadingToday"
-          style="font-size: 0.78rem;"
-          @click="today.generateBriefing()"
-        >
-          <span v-if="today.loadingBriefing" class="spinner-border spinner-border-sm me-1" role="status"></span>
-          <i v-else class="bi bi-lightning-charge me-1"></i>
-          {{ today.briefing ? 'Regenerate' : 'Generate Briefing' }}
-        </button>
       </div>
 
-      <!-- Loading skeleton -->
-      <div v-if="today.loadingToday" class="py-2">
-        <div class="placeholder-glow">
-          <span class="placeholder col-10 mb-1 d-block" style="height: 0.8rem; border-radius: 4px;"></span>
-          <span class="placeholder col-8 mb-1 d-block" style="height: 0.8rem; border-radius: 4px;"></span>
-          <span class="placeholder col-6 d-block" style="height: 0.8rem; border-radius: 4px;"></span>
+      <!-- News Feed -->
+      <div class="col-12 col-xl-5">
+        <div class="card p-3 h-100 d-flex flex-column">
+          <!-- Header -->
+          <div class="d-flex align-items-center justify-content-between mb-2" style="flex-shrink:0;">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-newspaper text-accent"></i>
+              <span class="fw-semibold" style="font-size: 0.85rem;">News</span>
+              <span
+                v-if="!today.loadingNews && today.newsItems.length"
+                class="badge rounded-pill"
+                style="background: var(--accent, #6ea8fe20); color: var(--accent, #6ea8fe); font-size: 0.7rem;"
+              >{{ today.newsItems.length }}</span>
+            </div>
+            <div class="d-flex gap-1">
+              <button
+                class="btn btn-sm btn-outline-secondary"
+                style="font-size: 0.72rem;"
+                :disabled="today.loadingNews"
+                title="Refresh news"
+                @click="today.fetchNews()"
+              >
+                <i class="bi bi-arrow-clockwise"></i>
+              </button>
+              <button
+                class="btn btn-sm btn-outline-primary"
+                style="font-size: 0.72rem;"
+                :disabled="today.newsWatchStatus === 'queued'"
+                title="Run news watch now"
+                @click="today.triggerNewsWatch()"
+              >
+                <i class="bi bi-broadcast me-1"></i>
+                {{ today.newsWatchStatus === 'queued' ? 'Queued…' : 'Watch' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Error -->
+          <div v-if="today.newsError" class="text-danger" style="font-size: 0.78rem; flex-shrink:0;">
+            <i class="bi bi-exclamation-triangle me-1"></i>{{ today.newsError }}
+          </div>
+
+          <!-- Loading -->
+          <div v-if="today.loadingNews" class="py-2 flex-grow-1">
+            <div v-for="i in 4" :key="i" class="placeholder-glow mb-2">
+              <span class="placeholder col-9 mb-1 d-block" style="height: 0.72rem; border-radius: 3px;"></span>
+              <span class="placeholder col-6 d-block" style="height: 0.65rem; border-radius: 3px;"></span>
+            </div>
+          </div>
+
+          <!-- News items list -->
+          <div
+            v-else-if="today.newsItems.length"
+            class="news-list flex-grow-1"
+          >
+            <div
+              v-for="(item, i) in today.newsItems"
+              :key="i"
+              class="news-item"
+              :class="{ 'news-item--liked': item.feedback === '+1', 'news-item--disliked': item.feedback === '-1' }"
+            >
+              <!-- Title row -->
+              <div class="d-flex align-items-start gap-1">
+                <span class="news-emoji">📰</span>
+                <a
+                  :href="item.url || '#'"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="news-title"
+                >{{ item.title || item.bullet }}</a>
+              </div>
+
+              <!-- Meta row -->
+              <div class="news-meta">
+                <span v-if="item.domain">{{ item.domain }}</span>
+                <span v-if="item.pub_date" class="ms-1" style="opacity:0.6;">{{ item.pub_date }}</span>
+                <span v-if="item.topic" class="ms-2 news-topic">{{ item.topic }}</span>
+                <span v-if="item.feedback" class="ms-auto">{{ newsIcon(item.feedback) }}</span>
+              </div>
+
+              <!-- Reason (truncated) -->
+              <div v-if="item.reason" class="news-reason">{{ item.reason }}</div>
+
+              <!-- Feedback buttons -->
+              <div class="news-actions">
+                <button
+                  class="btn-feedback"
+                  :class="{ active: item.feedback === '+1' }"
+                  title="Relevant"
+                  @click="today.submitFeedback(item.bullet, item.feedback === '+1' ? null : '+1')"
+                >👍</button>
+                <button
+                  class="btn-feedback"
+                  :class="{ active: item.feedback === '-1' }"
+                  title="Not relevant"
+                  @click="today.submitFeedback(item.bullet, item.feedback === '-1' ? null : '-1')"
+                >👎</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Empty state -->
+          <div v-else class="text-center py-4 flex-grow-1 d-flex flex-column align-items-center justify-content-center"
+               style="color: var(--text-muted-custom); font-size: 0.82rem;">
+            <i class="bi bi-newspaper d-block mb-2" style="font-size: 1.8rem; opacity: 0.25;"></i>
+            No news yet.<br>
+            <span style="font-size: 0.76rem;">
+              Add <code>news_topics:</code> to a project file,<br>then click Watch to run a search.
+            </span>
+          </div>
         </div>
-      </div>
-
-      <!-- Briefing text -->
-      <div
-        v-else-if="today.briefing"
-        style="font-size: 0.84rem; white-space: pre-wrap; line-height: 1.6; color: var(--text-main, #e0e0e0);"
-      >{{ today.briefing }}</div>
-
-      <!-- Empty state -->
-      <div v-else class="text-center py-3" style="color: var(--text-muted-custom); font-size: 0.84rem;">
-        <i class="bi bi-moon-stars d-block mb-2" style="font-size: 1.8rem; opacity: 0.35;"></i>
-        No briefing yet — click Generate to ask the AI what to focus on.
       </div>
     </div>
 
@@ -133,7 +258,6 @@ onMounted(() => today.fetchToday())
         </button>
       </div>
 
-      <!-- Loading skeleton -->
       <div v-if="today.loadingToday">
         <div v-for="i in 3" :key="i" class="placeholder-glow mb-2 p-2 rounded" style="background: var(--bg-card, #1e1e2e);">
           <span class="placeholder col-4 mb-1 d-block" style="height: 0.7rem; border-radius: 3px;"></span>
@@ -141,7 +265,6 @@ onMounted(() => today.fetchToday())
         </div>
       </div>
 
-      <!-- Task chunks -->
       <div v-else-if="today.tasks.length">
         <div
           v-for="(task, i) in today.tasks"
@@ -164,7 +287,6 @@ onMounted(() => today.fetchToday())
         </div>
       </div>
 
-      <!-- Empty state -->
       <div v-else class="text-center py-3" style="color: var(--text-muted-custom); font-size: 0.84rem;">
         <i class="bi bi-inbox d-block mb-2" style="font-size: 1.8rem; opacity: 0.35;"></i>
         No tasks found in the corpus.<br>
@@ -172,7 +294,7 @@ onMounted(() => today.fetchToday())
       </div>
     </div>
 
-    <!-- AI Assistant (mini chat) -->
+    <!-- AI Assistant mini-chat -->
     <div class="card p-3">
       <div class="d-flex align-items-center gap-2 mb-2">
         <i class="bi bi-stars text-accent"></i>
@@ -183,16 +305,13 @@ onMounted(() => today.fetchToday())
         >Full chat →</RouterLink>
       </div>
 
-      <!-- Last AI response -->
       <div v-if="lastAiMsg" class="mb-2">
-        <!-- Answer -->
         <div
           v-if="lastAiMsg.type === 'answer'"
           class="p-2 rounded"
           style="background: var(--bg-app, #13131f); border: 1px solid var(--border-color, rgba(255,255,255,0.07)); font-size: 0.81rem; color: var(--text-main, #e0e0e0); white-space: pre-wrap; max-height: 120px; overflow-y: auto;"
         >{{ lastAiMsg.content }}</div>
 
-        <!-- Edit proposal -->
         <div
           v-else-if="lastAiMsg.type === 'edit'"
           class="rounded"
@@ -213,7 +332,6 @@ onMounted(() => today.fetchToday())
             </template>
           </div>
 
-          <!-- Compact diff (collapsed, scrollable) -->
           <div
             v-if="!lastAiMsg.settled"
             style="font-family: monospace; font-size: 0.72rem; max-height: 100px; overflow-y: auto; background: var(--bg-app);"
@@ -225,7 +343,6 @@ onMounted(() => today.fetchToday())
             >{{ line }}</div>
           </div>
 
-          <!-- Apply / Discard -->
           <div v-if="!lastAiMsg.settled" class="d-flex gap-2 px-2 py-1" style="border-top: 1px solid var(--border-color);">
             <button class="btn btn-success btn-sm py-0" style="font-size: 0.74rem;" @click="ai.confirmEdit(ai.messages.length - 1)">
               <i class="bi bi-check-lg me-1"></i>Apply
@@ -239,7 +356,6 @@ onMounted(() => today.fetchToday())
           </div>
         </div>
 
-        <!-- Error -->
         <div
           v-else-if="lastAiMsg.type === 'error'"
           class="p-2 rounded"
@@ -249,7 +365,6 @@ onMounted(() => today.fetchToday())
         </div>
       </div>
 
-      <!-- Input -->
       <div class="input-group">
         <input
           v-model="ai.inputText"
@@ -277,6 +392,7 @@ onMounted(() => today.fetchToday())
 </template>
 
 <style scoped>
+/* ---- Diff ---- */
 .diff-line-sm {
   display: block;
   padding: 0 0.5rem;
@@ -288,4 +404,89 @@ onMounted(() => today.fetchToday())
 .diff-hunk   { color: #6ea8fe; opacity: 0.75; }
 .diff-header { color: var(--text-muted-custom); opacity: 0.5; }
 .diff-context{ color: var(--text-muted-custom); }
+
+/* ---- News panel ---- */
+.news-list {
+  overflow-y: auto;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.news-item {
+  padding: 0.45rem 0.6rem;
+  border-radius: 7px;
+  background: var(--bg-app, #13131f);
+  border: 1px solid var(--border-color, rgba(255,255,255,0.07));
+  font-size: 0.79rem;
+}
+
+.news-item--liked  { border-color: rgba(117,183,152,0.3); }
+.news-item--disliked { opacity: 0.55; }
+
+.news-emoji {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.news-title {
+  color: var(--accent, #6ea8fe);
+  text-decoration: none;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.news-title:hover { text-decoration: underline; }
+
+.news-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.15rem;
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  color: var(--text-muted-custom);
+}
+
+.news-topic {
+  background: rgba(110,168,254,0.1);
+  border: 1px solid rgba(110,168,254,0.2);
+  border-radius: 10px;
+  padding: 0 0.4rem;
+  font-size: 0.66rem;
+}
+
+.news-reason {
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  color: var(--text-muted-custom);
+  opacity: 0.75;
+  line-height: 1.35;
+
+  /* clamp to 2 lines */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.news-actions {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.3rem;
+}
+
+.btn-feedback {
+  background: none;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.07));
+  border-radius: 5px;
+  padding: 0 0.35rem;
+  font-size: 0.72rem;
+  line-height: 1.6;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-feedback:hover { background: rgba(255,255,255,0.07); }
+.btn-feedback.active { background: rgba(110,168,254,0.15); border-color: rgba(110,168,254,0.4); }
 </style>

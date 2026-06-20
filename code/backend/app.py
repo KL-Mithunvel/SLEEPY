@@ -97,11 +97,13 @@ def auth_me():
 # Blueprints
 # ---------------------------------------------------------------------------
 from ai_bp import ai_bp                # noqa: E402
+from corpus_bp import corpus_bp        # noqa: E402
 from today_bp import today_bp          # noqa: E402
 from projects_bp import projects_bp    # noqa: E402
 from logs_bp import logs_bp            # noqa: E402
 
 app.register_blueprint(ai_bp)
+app.register_blueprint(corpus_bp)
 app.register_blueprint(today_bp)
 app.register_blueprint(projects_bp)
 app.register_blueprint(logs_bp)
