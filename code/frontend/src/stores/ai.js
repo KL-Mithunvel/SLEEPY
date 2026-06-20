@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { apiPost } from '../api.js'
+import { apiPost, apiStream } from '../api.js'
 
 export const useAiStore = defineStore('ai', {
   state: () => ({
@@ -7,15 +7,23 @@ export const useAiStore = defineStore('ai', {
     loading: false,
     error: null,
     inputText: '',
+    contentVersion: 0,  // incremented on each delta; watch in view for scroll
   }),
 
   getters: {
-    // Serialised history for the backend — keeps the LLM aware of prior turns
+    // Conversation history for the backend in Anthropic message format.
+    // Excludes in-progress streaming placeholders (incomplete content).
     history(state) {
-      return state.messages.map(m => ({
-        role: m.role,
-        content: m.historyContent ?? m.content,
-      }))
+      return state.messages
+        .filter(m => !m.streaming)
+        .map(m => ({
+          role: m.role,
+          content: m.historyContent ?? m.content,
+        }))
+    },
+
+    hasStreamingContent(state) {
+      return state.messages.some(m => m.streaming && m.content.length > 0)
     },
   },
 
@@ -29,38 +37,70 @@ export const useAiStore = defineStore('ai', {
       this.loading = true
       this.error = null
 
-      try {
-        const data = await apiPost('/api/ai/chat', {
-          message: trimmed,
-          history: this.history.slice(0, -1), // exclude the message we just pushed
-        })
+      // Capture history before pushing placeholder so it's not included
+      const historyForApi = this.history
 
-        if (data.type === 'edit') {
-          this.messages.push({
-            role: 'assistant',
-            type: 'edit',
-            content: `I'll update \`${data.rel_path}\` — ${data.summary}`,
-            historyContent: `[Proposed edit to ${data.rel_path}: ${data.summary}]`,
-            edit: data,
-            settled: false,
-            confirmed: false,
-          })
-        } else {
-          this.messages.push({
-            role: 'assistant',
-            type: 'answer',
-            content: data.content,
-            historyContent: data.content,
-          })
-        }
+      const placeholderIdx = this.messages.length
+      this.messages.push({
+        role: 'assistant',
+        type: 'answer',
+        content: '',
+        historyContent: '',
+        streaming: true,
+        toolProgress: null,
+      })
+
+      try {
+        await apiStream(
+          '/api/ai/chat',
+          { messages: historyForApi },
+          (event) => {
+            if (event.type === 'delta') {
+              this.messages[placeholderIdx].content += event.text
+              this.contentVersion++
+
+            } else if (event.type === 'tool_progress') {
+              const e = event.event
+              if (e.type === 'tool_start') {
+                this.messages[placeholderIdx].toolProgress = e.name
+              } else if (e.type === 'tool_end') {
+                this.messages[placeholderIdx].toolProgress = null
+              }
+
+            } else if (event.type === 'done') {
+              const result = event.result
+              this.messages[placeholderIdx].streaming = false
+              this.messages[placeholderIdx].toolProgress = null
+              this.messages[placeholderIdx].historyContent =
+                this.messages[placeholderIdx].content
+
+              for (const action of (result.actions || [])) {
+                this.messages.push({
+                  role: 'assistant',
+                  type: 'edit',
+                  content: `I'll update \`${action.rel_path}\` — ${action.summary}`,
+                  historyContent: `[Proposed edit to ${action.rel_path}: ${action.summary}]`,
+                  edit: action,
+                  settled: false,
+                  confirmed: false,
+                })
+              }
+
+            } else if (event.type === 'error') {
+              this.messages[placeholderIdx].type = 'error'
+              this.messages[placeholderIdx].content = event.message
+              this.messages[placeholderIdx].streaming = false
+              this.messages[placeholderIdx].toolProgress = null
+              this.error = event.message
+            }
+          }
+        )
       } catch (e) {
+        this.messages[placeholderIdx].type = 'error'
+        this.messages[placeholderIdx].content = e.message
+        this.messages[placeholderIdx].streaming = false
+        this.messages[placeholderIdx].toolProgress = null
         this.error = e.message
-        this.messages.push({
-          role: 'assistant',
-          type: 'error',
-          content: e.message,
-          historyContent: `[Error: ${e.message}]`,
-        })
       } finally {
         this.loading = false
       }
@@ -98,6 +138,7 @@ export const useAiStore = defineStore('ai', {
       this.messages = []
       this.error = null
       this.inputText = ''
+      this.contentVersion = 0
     },
   },
 })

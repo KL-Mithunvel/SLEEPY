@@ -15,6 +15,7 @@ function scrollToBottom() {
 }
 
 watch(() => ai.messages.length, scrollToBottom)
+watch(() => ai.contentVersion, scrollToBottom)
 
 function onKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -34,6 +35,22 @@ function diffLineClass(line) {
   if (line.startsWith('-')) return 'diff-remove'
   if (line.startsWith('@@')) return 'diff-hunk'
   return 'diff-context'
+}
+
+const TOOL_LABELS = {
+  load_skill:    'Loading skill',
+  grep:          'Searching files',
+  read_file:     'Reading file',
+  read_src:      'Reading docs',
+  list_src:      'Listing docs',
+  list_files:    'Listing files',
+  search_corpus: 'Searching corpus',
+  send_email:    'Sending email',
+  send_telegram: 'Sending message',
+}
+
+function toolLabel(name) {
+  return TOOL_LABELS[name] || `Using ${name}`
 }
 </script>
 
@@ -74,10 +91,23 @@ function diffLineClass(line) {
           <div class="msg-bubble msg-bubble--user">{{ msg.content }}</div>
         </div>
 
-        <!-- AI answer -->
+        <!-- AI answer (streaming or complete) -->
         <div v-else-if="msg.type === 'answer'" class="msg-row msg-row--ai">
           <div class="msg-bubble msg-bubble--ai">
-            <div class="msg-content" style="white-space: pre-wrap;">{{ msg.content }}</div>
+            <!-- Tool progress pill -->
+            <div v-if="msg.toolProgress" class="msg-tool-pill">
+              <span class="spinner-border spinner-border-sm me-1"
+                    style="width:9px;height:9px;border-width:1.5px;"></span>
+              {{ toolLabel(msg.toolProgress) }}…
+            </div>
+            <!-- Thinking dots when connected but no content yet -->
+            <div v-else-if="msg.streaming && !msg.content" class="msg-thinking" style="padding:0;">
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+              <span class="thinking-dot"></span>
+            </div>
+            <!-- Text content -->
+            <div v-if="msg.content" class="msg-content" style="white-space: pre-wrap;">{{ msg.content }}<span v-if="msg.streaming" class="msg-cursor">█</span></div>
           </div>
         </div>
 
@@ -145,8 +175,8 @@ function diffLineClass(line) {
         </div>
       </template>
 
-      <!-- Thinking indicator -->
-      <div v-if="ai.loading" class="msg-row msg-row--ai">
+      <!-- Thinking indicator — shown only before the streaming placeholder appears -->
+      <div v-if="ai.loading && !ai.messages.some(m => m.streaming)" class="msg-row msg-row--ai">
         <div class="msg-bubble msg-bubble--ai msg-thinking">
           <span class="thinking-dot"></span>
           <span class="thinking-dot"></span>
@@ -317,6 +347,34 @@ function diffLineClass(line) {
 .diff-hunk   { color: #6ea8fe; opacity: 0.75; }
 .diff-header { color: var(--text-muted-custom); opacity: 0.6; }
 .diff-context{ color: var(--text-muted-custom); }
+
+/* Tool progress pill */
+.msg-tool-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  color: var(--text-muted-custom);
+  background: rgba(110,168,254,0.08);
+  border: 1px solid rgba(110,168,254,0.18);
+  border-radius: 20px;
+  padding: 0.2rem 0.6rem;
+  margin-bottom: 0.35rem;
+}
+
+/* Blinking cursor during streaming */
+.msg-cursor {
+  display: inline-block;
+  opacity: 0.7;
+  animation: blink-cursor 0.9s step-end infinite;
+  font-size: 0.75em;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 0; }
+}
 
 /* Thinking dots */
 .msg-thinking {

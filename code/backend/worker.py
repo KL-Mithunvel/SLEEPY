@@ -1,6 +1,6 @@
 """
 Separate worker process: APScheduler + task_queue drainer.
-Start with: uv run python worker.py
+Start with: uv run python worker.py  (from repo root via bat wrapper)
 Never run inside the web process.
 """
 
@@ -48,20 +48,37 @@ def _drain_once():
         local_db.return_db(conn)
 
 
+def _register_jobs(scheduler: BackgroundScheduler):
+    """Register all enabled jobs from the scheduled_tasks registry."""
+    registered = 0
+    for entry in sched_registry.SCHEDULED_TASKS:
+        if not entry.get("enabled", True):
+            logger.info("Skipping disabled job: %s", entry["task_type"])
+            continue
+
+        trigger = entry.get("trigger", "cron")
+        trigger_kwargs = entry.get("trigger_kwargs") or entry.get("cron", {})
+
+        scheduler.add_job(
+            _enqueue_scheduled,
+            trigger,
+            kwargs={"task_type": entry["task_type"], "payload": entry.get("payload", {})},
+            **trigger_kwargs,
+        )
+        logger.info("Registered %s job: %s %s", trigger, entry["task_type"], trigger_kwargs)
+        registered += 1
+
+    return registered
+
+
 def main():
     local_db.init_db()
     logger.info("Worker started")
 
     scheduler = BackgroundScheduler()
-    for entry in sched_registry.SCHEDULED_TASKS:
-        scheduler.add_job(
-            _enqueue_scheduled,
-            "cron",
-            kwargs={"task_type": entry["task_type"], "payload": entry["payload"]},
-            **entry["cron"],
-        )
+    count = _register_jobs(scheduler)
     scheduler.start()
-    logger.info("Scheduler started with %d jobs", len(sched_registry.SCHEDULED_TASKS))
+    logger.info("Scheduler started with %d jobs", count)
 
     try:
         while True:

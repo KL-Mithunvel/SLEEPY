@@ -8,21 +8,164 @@ Endpoints:
   POST /api/ai/edit                 propose an AI MD edit (returns diff, requires confirm)
   POST /api/ai/edit/<id>/confirm    apply a pending edit
   POST /api/ai/edit/<id>/reject     cancel a pending edit
+  POST /api/ai/chat                 streaming chat (text/event-stream SSE)
 """
 
+import json
 import logging
+import os
+import re
+from datetime import datetime, timedelta, timezone
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 import ai_client
+import llm
 import md_editor
 import md_indexer
+import skills
 import task_queue
+import tools_registry
 from auth_utils import require_perm
 
 logger = logging.getLogger(__name__)
 
 ai_bp = Blueprint("ai", __name__)
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+# ---------------------------------------------------------------------------
+# System prompt — hot-reloaded from disk each request
+# ---------------------------------------------------------------------------
+
+def _load_system_prompt() -> str:
+    import config
+    path = config.SYSTEM_PROMPT_PATH
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        logger.warning("SystemPrompt.MD not found at %s — using fallback", path)
+        return "You are a calm personal project-management assistant."
+
+
+def _build_system(last_user_msg: str, ou: str) -> list[dict]:
+    """Build the 4-block system prompt with cache control on the last block."""
+    now = datetime.now(_IST)
+    date_str = now.strftime("%d-%m-%Y")
+    time_str = now.strftime("%H:%M IST")
+    weekday = now.strftime("%A")
+
+    ctx_lines = [
+        "## Current Context",
+        "",
+        f"Date: {date_str} ({weekday})",
+        f"Time: {time_str}",
+    ]
+    if ou:
+        ctx_lines.append(f"Active OU: {ou}")
+    ctx_block = "\n".join(ctx_lines)
+
+    # RAG context from semantic search
+    try:
+        rag_text = ai_client.build_rag_context(last_user_msg)
+    except Exception:
+        rag_text = ""
+
+    if rag_text:
+        rag_block = f"## Corpus Context (semantic search results)\n\n{rag_text}"
+    else:
+        rag_block = (
+            "## Corpus Context\n\n"
+            "(No indexed content available — run a reindex if the corpus is empty, "
+            "or go ahead and create new files if the user is asking you to create something.)"
+        )
+
+    # Skills manifest
+    try:
+        manifest = skills.get_manifest()
+        skills_block = f"## Available Skills\n\n{manifest}"
+    except Exception:
+        skills_block = "## Available Skills\n\n(No skills loaded)"
+
+    blocks = [
+        {"type": "text", "text": _load_system_prompt()},
+        {"type": "text", "text": ctx_block},
+        {"type": "text", "text": rag_block},
+        {"type": "text", "text": skills_block},
+    ]
+    return llm._apply_cache_control(blocks)
+
+
+# ---------------------------------------------------------------------------
+# pma-edit block parsing
+# ---------------------------------------------------------------------------
+
+_PMA_EDIT_RE = re.compile(
+    r"```pma-edit\s*\n"
+    r"file:\s*([^\n]+)\n"
+    r"<{7}\s*SEARCH\s*\n"
+    r"(.*?)"
+    r"={7}[^\n]*\n"
+    r"(.*?)"
+    r">{7}\s*REPLACE\s*\n?"
+    r"```",
+    re.DOTALL,
+)
+
+
+def _stage_pma_edits(text: str, conn) -> list[dict]:
+    """
+    Parse pma-edit blocks from AI response text and stage each one as a
+    pending ai_events row. Returns a list of propose_edit result dicts.
+    """
+    import config
+    actions = []
+    for m in _PMA_EDIT_RE.finditer(text):
+        file_path = m.group(1).strip()
+        search_content = m.group(2)
+        replace_content = m.group(3)
+
+        try:
+            # Validate path early
+            md_editor.validate_edit(file_path, replace_content or " ")
+        except ValueError as e:
+            logger.warning("pma-edit skipped — validation error: %s", e)
+            continue
+
+        norm = file_path.replace("\\", "/").lstrip("/")
+        abs_path = os.path.join(config.USER_DATA_ROOT, norm)
+
+        if os.path.isfile(abs_path):
+            with open(abs_path, encoding="utf-8", errors="replace") as f:
+                current = f.read()
+        else:
+            current = ""
+
+        # Apply SEARCH/REPLACE
+        if search_content.strip() == "":
+            # New file: replace content IS the new content
+            new_content = replace_content
+        else:
+            if search_content not in current:
+                logger.warning("pma-edit SEARCH not found in %s — skipping", file_path)
+                continue
+            if current.count(search_content) > 1:
+                logger.warning("pma-edit SEARCH matches >1 times in %s — skipping", file_path)
+                continue
+            new_content = current.replace(search_content, replace_content, 1)
+
+        if not new_content or not new_content.strip():
+            continue
+
+        summary = f"Edit {norm}"
+        try:
+            result = md_editor.propose_edit(file_path, new_content, summary, conn)
+            actions.append(result)
+        except ValueError as e:
+            logger.warning("pma-edit propose_edit failed for %s: %s", file_path, e)
+
+    return actions
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +197,7 @@ def query():
 
 
 # ---------------------------------------------------------------------------
-# AI suggest (RAG + LLM)
+# AI suggest (RAG + LLM — legacy JSON endpoint, kept for internal use)
 # ---------------------------------------------------------------------------
 
 @ai_bp.post("/api/ai/suggest")
@@ -104,26 +247,6 @@ def suggest():
 @ai_bp.post("/api/ai/edit")
 @require_perm("ai:edit_md")
 def edit_propose():
-    """
-    Ask the AI to edit a specific MD file based on an instruction.
-    The AI returns a proposed new file content; we compute the diff and
-    return it for user confirmation before writing anything to disk.
-
-    Request body:
-        {
-          "file_path": "SMTW/project.md",    relative to USER_DATA_ROOT
-          "instruction": "Add task: review budget due 2026-06-30"
-        }
-
-    Response:
-        {
-          "event_id": 42,
-          "diff": "...",
-          "rel_path": "SMTW/project.md",
-          "summary": "...",
-          "is_new": false
-        }
-    """
     body = request.get_json(silent=True) or {}
     rel_path = (body.get("file_path") or "").strip()
     instruction = (body.get("instruction") or "").strip()
@@ -133,7 +256,6 @@ def edit_propose():
     if not instruction:
         return jsonify({"error": "instruction is required"}), 400
 
-    import os
     abs_path = os.path.join(__import__("config").USER_DATA_ROOT, rel_path.replace("\\", "/").lstrip("/"))
     if os.path.isfile(abs_path):
         with open(abs_path, encoding="utf-8", errors="replace") as f:
@@ -208,177 +330,106 @@ def edit_reject(event_id: int):
 
 
 # ---------------------------------------------------------------------------
-# AI Chat — natural language interface that routes to answer or edit
+# AI Chat — SSE streaming with tool use
 # ---------------------------------------------------------------------------
-
-_CHAT_SYSTEM = """\
-You are a calm, precise personal project-management assistant for KL Mithunvel (klm@smtw.in).
-
-## Data layout
-All project data lives as Markdown files under the user's data root. The structure is:
-
-  <OU>/<project-slug>.md        — one file per project (e.g. SMTW/finance-review.md)
-  logs/YYYY-MM-DD.md            — daily log files
-  logs/YYYY-WNN.md              — weekly review files
-  inbox.md                      — quick captures and unprocessed items
-  ABOUT.md                      — user profile
-  People.md                     — contacts
-
-OU (Organisational Unit) is a top-level folder grouping related projects.
-You may encounter OUs such as SMTW, Infra, Personal, or others the user mentions.
-When creating a NEW project, pick a sensible OU and slug from the user's instruction.
-
-## Standard project file format
-A new project file should follow this structure:
-
-  # <Project Title>
-
-  **Status:** Active | On Hold | Complete
-  **OU:** <OU name>
-  **Started:** <DD-MM-YYYY>
-
-  ## Overview
-  <one paragraph describing the project>
-
-  ## Tasks
-  - [ ] <task description>  <!-- due: DD-MM-YYYY -->
-  - [x] <completed task>
-
-  ## Notes
-  <any other context>
-
-## Classify every message as QUESTION or INSTRUCTION
-
-QUESTION — user wants information (status, summary, what's due, who is working on what, etc.)
-Reply with:
-INTENT: answer
-RESPONSE:
-[concise answer using only what is in the context; if the corpus is empty say so clearly]
-
-INSTRUCTION — user wants to create, update, or capture something
-Reply with:
-INTENT: edit
-FILE: <relative path, e.g. SMTW/finance-review.md or inbox.md>
-SUMMARY: <one-line description of the change>
-CONTENT:
-<the COMPLETE new content of the file — every single line>
-
-## Rules
-- For INTENT: edit, always output the COMPLETE file content after CONTENT: — never a partial snippet
-- You MAY create new files that do not yet exist — set FILE to the correct new path
-- If you cannot determine the right OU or file, use INTENT: answer to ask one clarifying question
-- Never fabricate tasks, people, or decisions not stated by the user or present in the context
-- Dates are formatted DD-MM-YYYY\
-"""
-
-
-def _parse_chat_response(raw: str) -> dict:
-    lines = raw.strip().split("\n")
-    intent = "answer"
-    file_path = summary = ""
-    content_lines: list[str] = []
-    response_lines: list[str] = []
-    content_started = response_started = False
-
-    for line in lines:
-        s = line.strip()
-        if s == "INTENT: edit":
-            intent = "edit"
-        elif s == "INTENT: answer":
-            intent = "answer"
-        elif s.startswith("FILE:") and intent == "edit":
-            file_path = s[5:].strip()
-        elif s.startswith("SUMMARY:") and intent == "edit":
-            summary = s[8:].strip()
-        elif s == "CONTENT:" and intent == "edit":
-            content_started = True
-        elif s == "RESPONSE:" and intent == "answer":
-            response_started = True
-        elif content_started and intent == "edit":
-            content_lines.append(line)
-        elif response_started and intent == "answer":
-            response_lines.append(line)
-
-    if intent == "edit":
-        return {"intent": "edit", "file_path": file_path,
-                "summary": summary, "content": "\n".join(content_lines)}
-
-    answer = "\n".join(response_lines).strip() if response_lines else raw.strip()
-    return {"intent": "answer", "content": answer}
-
 
 @ai_bp.post("/api/ai/chat")
 @require_perm("ai:suggest")
 def chat_endpoint():
     """
-    Natural-language chat endpoint.
+    SSE streaming chat with tool use and pma-edit block parsing.
 
     Request:
-        { "message": "...", "history": [{"role": "user"|"assistant", "content": "..."}] }
+        {
+          "messages": [{"role": "user"|"assistant", "content": "..."}],
+          "ou": "SMTW"   (optional — active organisational unit)
+        }
 
-    Response (answer):
-        { "type": "answer", "content": "..." }
-
-    Response (edit proposal):
-        { "type": "edit", "event_id": 42, "rel_path": "...", "diff": "...", "summary": "..." }
+    SSE event types:
+        {"type": "delta",        "text": "..."}
+        {"type": "tool_progress","event": {"type": "tool_start"|"tool_end", "name": ..., "id": ...}}
+        {"type": "done",         "result": {text, model, tokens, actions: [...]}}
+        {"type": "error",        "message": "..."}
     """
     body = request.get_json(silent=True) or {}
-    message = (body.get("message") or "").strip()
-    history = body.get("history") or []
+    messages = body.get("messages") or []
+    ou = (body.get("ou") or "").strip()
 
-    if not message:
-        return jsonify({"error": "message is required"}), 400
+    if not messages or not any(m.get("role") == "user" for m in messages):
+        return jsonify({"error": "messages must contain at least one user message"}), 400
 
-    context = ai_client.build_rag_context(message)
+    # Extract last user message for RAG context
+    last_user_msg = next(
+        (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
+    )
 
-    messages = [{"role": "system", "content": _CHAT_SYSTEM}]
-    for h in history[-8:]:
-        if h.get("role") in ("user", "assistant") and h.get("content"):
-            messages.append({"role": h["role"], "content": h["content"]})
-
-    if context:
-        user_content = f"{message}\n\n{context}"
-    else:
-        # No indexed content — AI can still CREATE new files; it just cannot query existing ones.
-        # Do not block the request: let the AI decide based on intent.
-        user_content = (
-            f"{message}\n\n"
-            "[System note: The project corpus index is currently empty — no existing Markdown "
-            "files have been indexed yet. If the user is asking about existing projects or tasks, "
-            "tell them nothing is indexed and they should run a reindex. If the user is asking you "
-            "to CREATE something new, go ahead and create it using the file layout described in "
-            "your system prompt.]"
-        )
-    messages.append({"role": "user", "content": user_content})
-
+    # Get DB connection before entering generator (avoids g teardown issues)
     db = _db()
-    try:
-        resp = ai_client.chat(messages, event_type="ai_chat", conn=db)
-    except Exception as exc:
-        logger.exception("Chat LLM call failed")
-        return jsonify({"error": str(exc)}), 502
 
-    parsed = _parse_chat_response(resp["content"])
-
-    if parsed["intent"] == "edit":
-        if not parsed["file_path"] or not parsed["content"]:
-            return jsonify({"type": "answer",
-                            "content": "I couldn't determine which file to edit. Could you be more specific?"})
+    def generate():
         try:
-            result = md_editor.propose_edit(parsed["file_path"], parsed["content"], parsed["summary"], db)
-        except ValueError as exc:
-            return jsonify({"type": "answer", "content": f"I couldn't apply that edit: {exc}"})
+            system_blocks = _build_system(last_user_msg, ou)
+            llm_tools = tools_registry.build_tools(conn=db)
+            result = None
 
-        return jsonify({
-            "type": "edit",
-            "event_id": result["event_id"],
-            "rel_path": result["rel_path"],
-            "diff": result["diff"],
-            "summary": result["summary"],
-            "is_new": result.get("is_new", False),
-        })
+            for chunk in llm.chat_stream(
+                messages,
+                system=system_blocks,
+                tools=llm_tools,
+            ):
+                if isinstance(chunk, str):
+                    yield f"data: {json.dumps({'type': 'delta', 'text': chunk})}\n\n"
+                elif isinstance(chunk, dict):
+                    yield f"data: {json.dumps({'type': 'tool_progress', 'event': chunk})}\n\n"
+                elif isinstance(chunk, llm.ChatResult):
+                    result = chunk
 
-    return jsonify({"type": "answer", "content": parsed["content"]})
+            if result:
+                # Parse and stage any pma-edit blocks
+                actions = _stage_pma_edits(result.text, db)
+
+                # Log to ai_events
+                try:
+                    db.execute(
+                        """
+                        INSERT INTO ai_events
+                            (event_type, model, input_tokens, output_tokens, accepted)
+                        VALUES ('ai_chat', ?, ?, ?, 1)
+                        """,
+                        (result.model, result.input_tokens, result.output_tokens),
+                    )
+                    db.commit()
+                except Exception:
+                    logger.exception("Failed to log ai_event for chat")
+
+                done_payload = {
+                    "text": result.text,
+                    "model": result.model,
+                    "input_tokens": result.input_tokens,
+                    "output_tokens": result.output_tokens,
+                    "cache_read_tokens": result.cache_read_tokens,
+                    "cache_write_tokens": result.cache_write_tokens,
+                    "stop_reason": result.stop_reason,
+                    "tool_calls": [
+                        {"name": tc["name"], "id": tc.get("id", "")}
+                        for tc in result.tool_calls
+                    ],
+                    "actions": actions,
+                }
+                yield f"data: {json.dumps({'type': 'done', 'result': done_payload})}\n\n"
+
+        except Exception as exc:
+            logger.exception("Chat stream error")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +437,5 @@ def chat_endpoint():
 # ---------------------------------------------------------------------------
 
 def _db():
-    """Return the per-request DB connection from Flask g."""
     from app import get_db
     return get_db()

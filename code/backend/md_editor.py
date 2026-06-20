@@ -47,8 +47,10 @@ def validate_edit(rel_path: str, new_content: str) -> None:
     if not rel_path or not rel_path.strip():
         raise ValueError("rel_path is empty")
 
-    # Absolute paths are always a traversal attempt — check before lstrip strips the evidence
-    if os.path.isabs(rel_path):
+    # Absolute and drive-relative paths (e.g. /etc/passwd on Windows) are always rejected.
+    # os.path.isabs() returns False for drive-relative paths on Windows Python 3.12+,
+    # so we also check for a leading slash/backslash explicitly.
+    if os.path.isabs(rel_path) or rel_path[:1] in ("/", "\\"):
         raise ValueError(f"Path traversal detected: {rel_path!r}")
 
     # Normalise to forward slashes, then resolve absolute
