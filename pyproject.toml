@@ -13,6 +13,7 @@ dependencies = [
     "litellm>=1.89.0",
     "llama-index>=0.14.22",
     "pyjwt[crypto]>=2.13.0",
+    "msal>=1.31.0",
 ]
 
 [dependency-groups]

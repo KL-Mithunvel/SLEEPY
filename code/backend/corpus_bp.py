@@ -1,8 +1,10 @@
 """
-Corpus Blueprint — endpoints for news watch, materialiser, and corpus management.
+Corpus Blueprint — endpoints for news watch, materialiser, housekeeping, and corpus management.
 
 Endpoints:
   POST /api/corpus/materialise               — manually trigger materialise_all
+  POST /api/corpus/housekeeping              — manually trigger run_housekeeping
+  GET  /api/corpus/housekeeping/results      — last housekeeping result from ai_events
   POST /api/corpus/news-watch                — manually trigger news_watch_submit
   GET  /api/corpus/news-watch/status         — poll current batch status
   GET  /api/corpus/news-items                — recent news items (parsed, for Today view)
@@ -46,6 +48,44 @@ def materialise_now():
     db = _db()
     task_id = task_queue.enqueue(db, "materialise", {"user_nick": config.USER_NICK})
     return jsonify({"task_id": task_id, "message": "Materialise queued"}), 202
+
+
+# ---------------------------------------------------------------------------
+# Housekeeping — manual trigger
+# ---------------------------------------------------------------------------
+
+@corpus_bp.post("/api/corpus/housekeeping")
+@require_perm("corpus:housekeeping")
+def housekeeping_now():
+    """Enqueue an immediate housekeeping task."""
+    db = _db()
+    task_id = task_queue.enqueue(db, "housekeeping", {"user_nick": config.USER_NICK})
+    return jsonify({"task_id": task_id, "message": "Housekeeping queued"}), 202
+
+
+@corpus_bp.get("/api/corpus/housekeeping/results")
+@require_perm("corpus:housekeeping")
+def housekeeping_results():
+    """Return the last housekeeping ai_events log row (if any)."""
+    db = _db()
+    row = db.execute(
+        """
+        SELECT id, prompt_hash, created_at, diff
+        FROM ai_events
+        WHERE event_type = 'housekeeping'
+          AND voided = 0
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return jsonify({"last_run": None})
+    import json
+    try:
+        data = json.loads(row["diff"] or "{}")
+    except Exception:
+        data = {}
+    return jsonify({"last_run": {"id": row["id"], "at": row["created_at"], "result": data}})
 
 
 # ---------------------------------------------------------------------------

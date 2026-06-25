@@ -98,9 +98,11 @@ def _commit_data_root(message: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _handle_housekeeping(payload: dict, conn: sqlite3.Connection):
-    """Nightly corpus health checks and task-queue pruning."""
+    """Nightly corpus health checks, inbox findings, archive old daily, prune task queue."""
+    import housekeeping as hk
     logger.info("housekeeping started")
-    # Prune done/failed task_queue entries older than 14 days
+
+    # Prune done/failed task_queue entries older than 14 days (SQLite — handler may do this)
     conn.execute(
         """
         DELETE FROM task_queue
@@ -109,6 +111,25 @@ def _handle_housekeeping(payload: dict, conn: sqlite3.Connection):
         """
     )
     logger.info("housekeeping: pruned old task_queue rows")
+
+    # Corpus checkers → findings → inbox.md + archive old daily files
+    user_nick = payload.get("user_nick") or config.USER_NICK
+    result = hk.run_housekeeping(config.USER_DATA_ROOT, user_nick=user_nick)
+    logger.info("housekeeping corpus done: %s", result)
+
+    # Commit any inbox.md changes and archive moves
+    if result["findings_added_to_inbox"] > 0 or result["archive"]["moved"] > 0:
+        _commit_data_root("housekeeping: findings + archive")
+
+    # Log result to ai_events for /api/corpus/housekeeping/results
+    import json
+    conn.execute(
+        """
+        INSERT INTO ai_events (event_type, prompt_hash, model, diff, voided, created_at)
+        VALUES ('housekeeping', '', '', ?, 0, datetime('now','localtime'))
+        """,
+        (json.dumps(result),),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -130,23 +151,56 @@ def _handle_news_watch_finalize(payload: dict, conn: sqlite3.Connection):
 
 
 # ---------------------------------------------------------------------------
-# Phase 11 stubs — Integrations
+# Phase 9 — Integrations (Telegram, O365 email, Jira)
 # ---------------------------------------------------------------------------
 
 def _handle_email(payload: dict, conn: sqlite3.Connection):
-    """Send an email via O365 Graph API. Full impl in Phase 11."""
-    logger.info("email stub: to=%s subject=%s", payload.get("to"), payload.get("subject"))
+    """Send an email via O365 Graph API (MSAL client credentials)."""
+    import integrations
+    to = payload.get("to", "")
+    subject = payload.get("subject", "(no subject)")
+    body = payload.get("body", "")
+    body_html = payload.get("body_html")
+    if not to:
+        raise ValueError("email task missing required 'to' field")
+    ok = integrations.send_email(to, subject, body, body_html=body_html)
+    if not ok:
+        raise RuntimeError(f"send_email failed for to={to!r}")
 
 
 def _handle_telegram(payload: dict, conn: sqlite3.Connection):
-    """Send a Telegram message. Full impl in Phase 11."""
-    logger.info("telegram stub: message=%s", str(payload.get("message", ""))[:80])
+    """Send a Telegram message via Bot API."""
+    import integrations
+    message = payload.get("message", "")
+    chat_id = payload.get("chat_id")
+    if not message:
+        raise ValueError("telegram task missing required 'message' field")
+    ok = integrations.send_telegram(message, chat_id=chat_id)
+    if not ok:
+        raise RuntimeError("send_telegram failed")
 
 
 def _handle_jira_create(payload: dict, conn: sqlite3.Connection):
-    """Create a Jira issue. Full impl in Phase 11."""
-    logger.info("jira_create stub: project=%s summary=%s",
-                payload.get("project_key"), payload.get("summary"))
+    """Create a Jira Cloud issue."""
+    import integrations
+    project_key = payload.get("project_key", "")
+    summary = payload.get("summary", "")
+    description = payload.get("description", "")
+    issue_type = payload.get("issue_type", "Task")
+    if not project_key or not summary:
+        raise ValueError("jira_create task missing 'project_key' or 'summary'")
+    key = integrations.jira_create(project_key, summary, description, issue_type)
+    if key is None:
+        raise RuntimeError(f"jira_create failed for project={project_key!r}")
+    logger.info("jira_create: created %s", key)
+
+
+def _handle_jira_sync(payload: dict, conn: sqlite3.Connection):
+    """Sync Jira issue statuses into the MD corpus (close ticked tasks)."""
+    import integrations
+    user_nick = payload.get("user_nick") or config.USER_NICK
+    result = integrations.jira_sync_corpus(config.USER_DATA_ROOT, user_nick=user_nick)
+    logger.info("jira_sync done: %s", result)
 
 
 # ---------------------------------------------------------------------------
@@ -166,10 +220,11 @@ HANDLERS: dict[str, callable] = {
     # Phase 9
     "news_watch_submit":    _handle_news_watch_submit,
     "news_watch_finalize":  _handle_news_watch_finalize,
-    # Phase 11
+    # Phase 9 — Integrations
     "email":                _handle_email,
     "telegram":             _handle_telegram,
     "jira_create":          _handle_jira_create,
+    "jira_sync":            _handle_jira_sync,
 }
 
 
