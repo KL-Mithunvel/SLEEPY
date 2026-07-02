@@ -18,10 +18,11 @@ PERMISSIONS = {
     "logs:write":      ("owner",),
 
     # Corpus actions
-    "corpus:news_watch":    ("owner",),
-    "corpus:materialise":   ("owner",),
-    "corpus:move_line":     ("owner",),
-    "corpus:housekeeping":  ("owner",),
+    "corpus:news_watch":      ("owner",),
+    "corpus:materialise":     ("owner",),
+    "corpus:move_line":       ("owner",),
+    "corpus:housekeeping":    ("owner",),
+    "corpus:weekly_review":   ("owner",),
 
     # Integration actions
     "integrations:send":    ("owner",),

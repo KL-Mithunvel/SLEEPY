@@ -28,8 +28,8 @@ def client(app):
 # ---------------------------------------------------------------------------
 
 def test_get_today_empty_tasks(client, monkeypatch):
-    import md_indexer
-    monkeypatch.setattr(md_indexer, "query", lambda text, k=5: [])
+    import task_scan
+    monkeypatch.setattr(task_scan, "scan_open_tasks", lambda data_root: [])
     resp = client.get("/api/today")
     assert resp.status_code == 200
     data = resp.get_json()
@@ -39,22 +39,22 @@ def test_get_today_empty_tasks(client, monkeypatch):
 
 
 def test_get_today_returns_tasks(client, monkeypatch):
-    import md_indexer
-    fake_chunks = [
-        {"content": "- [ ] Deploy server", "file_path": "SMTW/proj.md", "heading": "Tasks", "score": 0.92},
-        {"content": "- [ ] Review PR", "file_path": "SMTW/proj.md", "heading": "In Progress", "score": 0.88},
+    import task_scan
+    fake_tasks = [
+        {"rel_path": "SMTW/proj.md", "text": "Deploy server", "project_title": "Proj", "due": "2026-07-05"},
+        {"rel_path": "SMTW/proj.md", "text": "Review PR", "project_title": "Proj", "due": None},
     ]
-    monkeypatch.setattr(md_indexer, "query", lambda text, k=5: fake_chunks)
+    monkeypatch.setattr(task_scan, "scan_open_tasks", lambda data_root: fake_tasks)
     resp = client.get("/api/today")
     assert resp.status_code == 200
     data = resp.get_json()
     assert len(data["tasks"]) == 2
-    assert data["tasks"][0]["heading"] == "Tasks"
+    assert data["tasks"][0]["project_title"] == "Proj"
 
 
-def test_get_today_task_query_failure_returns_empty(client, monkeypatch):
-    import md_indexer
-    monkeypatch.setattr(md_indexer, "query", lambda text, k=5: (_ for _ in ()).throw(RuntimeError("chroma down")))
+def test_get_today_task_scan_failure_returns_empty(client, monkeypatch):
+    import task_scan
+    monkeypatch.setattr(task_scan, "scan_open_tasks", lambda data_root: (_ for _ in ()).throw(RuntimeError("scan failed")))
     resp = client.get("/api/today")
     assert resp.status_code == 200
     assert resp.get_json()["tasks"] == []
@@ -184,3 +184,47 @@ def test_capture_appends_to_existing_inbox(client, monkeypatch, tmp_path):
     assert content.count("# Inbox") == 1   # header not duplicated
     assert "Existing item." in content
     assert "New thought" in content
+
+
+# ---------------------------------------------------------------------------
+# POST /api/today/tasks/toggle
+# ---------------------------------------------------------------------------
+
+def test_toggle_task_missing_fields(client):
+    resp = client.post("/api/today/tasks/toggle", json={})
+    assert resp.status_code == 400
+
+
+def test_toggle_task_success(client, monkeypatch, tmp_path):
+    import config
+
+    data_root = str(tmp_path / "corpus_toggle")
+    proj_dir = os.path.join(data_root, "SMTW")
+    os.makedirs(proj_dir)
+    proj_file = os.path.join(proj_dir, "proj.md")
+    with open(proj_file, "w", encoding="utf-8") as f:
+        f.write("---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n- [ ] Deploy server\n")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    resp = client.post("/api/today/tasks/toggle", json={"rel_path": "SMTW/proj.md", "text": "Deploy server"})
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+
+    with open(proj_file, encoding="utf-8") as f:
+        content = f.read()
+    assert "- [x] Deploy server" in content
+    assert "- [ ] Deploy server" not in content
+
+
+def test_toggle_task_not_found(client, monkeypatch, tmp_path):
+    import config
+
+    data_root = str(tmp_path / "corpus_toggle2")
+    proj_dir = os.path.join(data_root, "SMTW")
+    os.makedirs(proj_dir)
+    with open(os.path.join(proj_dir, "proj.md"), "w", encoding="utf-8") as f:
+        f.write("---\nkey: proj\nstatus: active\n---\n\n- [ ] Deploy server\n")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    resp = client.post("/api/today/tasks/toggle", json={"rel_path": "SMTW/proj.md", "text": "Nonexistent task"})
+    assert resp.status_code == 404

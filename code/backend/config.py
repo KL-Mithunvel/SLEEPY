@@ -39,11 +39,50 @@ SYSTEM_PROMPT_PATH = PROMPTS_DIR / "SystemPrompt.MD"          # hot-reloaded per
 # ---------------------------------------------------------------------------
 # AI / LLM
 # ---------------------------------------------------------------------------
-# Accept either key name; ANTHROPIC_API_KEY is preferred going forward.
+import json as _json
+
+def _load_claude_code_token() -> tuple[str, str] | tuple[None, None]:
+    """
+    Read Claude Code's OAuth credentials from ~/.claude/.credentials.json.
+    Returns (token, "oauth") if the file exists and token is present,
+    else (None, None).  Expiry is not enforced here — Claude Code refreshes
+    the file automatically while it is running.
+    """
+    import time as _time
+    try:
+        creds_path = Path.home() / ".claude" / ".credentials.json"
+        if not creds_path.exists():
+            return None, None
+        data = _json.loads(creds_path.read_text(encoding="utf-8"))
+        oauth = data.get("claudeAiOauth", {})
+        token = oauth.get("accessToken", "")
+        expires_at_ms = oauth.get("expiresAt", 0)
+        if not token:
+            return None, None
+        now_ms = _time.time() * 1000
+        if expires_at_ms and now_ms > expires_at_ms:
+            # Expired — warn but still return it; caller handles retry
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "Claude Code OAuth token appears expired. Run any `claude` command to refresh."
+            )
+        return token, "oauth"
+    except Exception:
+        return None, None
+
+# Accept an explicit API key (sk-ant-api03-...) first; fall back to Claude Code OAuth.
 ANTHROPIC_API_KEY: str = _get("ANTHROPIC_API_KEY") or _get("CLAUDE_API_KEY", "")
 CLAUDE_API_KEY: str = ANTHROPIC_API_KEY  # backward-compat alias
 
-LLM_DEFAULT_MODEL: str    = _get("LLM_DEFAULT_MODEL", "claude-sonnet-4-6")
+# OAuth token from Claude Code credentials file (used when API key is absent)
+_cc_token, _cc_mode = (None, None) if ANTHROPIC_API_KEY else _load_claude_code_token()
+ANTHROPIC_AUTH_TOKEN: str = _cc_token or ""   # non-empty means OAuth mode
+ANTHROPIC_AUTH_MODE: str  = _cc_mode or ("apikey" if ANTHROPIC_API_KEY else "")
+
+# OAuth (Claude Code) mode is restricted to Haiku via direct API; Sonnet requires an API key.
+# Allow explicit override via LLM_DEFAULT_MODEL in env/secrets.
+_model_fallback = "claude-haiku-4-5-20251001" if (_cc_token and not ANTHROPIC_API_KEY) else "claude-sonnet-4-6"
+LLM_DEFAULT_MODEL: str    = _get("LLM_DEFAULT_MODEL", _model_fallback)
 LLM_MAX_CONTEXT_CHUNKS: int = int(_get("LLM_MAX_CONTEXT_CHUNKS", 8))
 LLM_MAX_TOKENS: int         = int(_get("LLM_MAX_TOKENS", 4096))
 
@@ -105,18 +144,9 @@ O365_CLIENT_SECRET: str = _get("O365_CLIENT_SECRET", "")
 O365_MAILBOX: str      = _get("O365_MAILBOX", "")
 O365_SENDER_NAME: str  = _get("O365_SENDER_NAME", "PMA Bot")
 
-# ---------------------------------------------------------------------------
-# Integrations — Telegram
-# ---------------------------------------------------------------------------
-TELEGRAM_BOT_TOKEN: str      = _get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_DEFAULT_CHAT_ID: str = _get("TELEGRAM_DEFAULT_CHAT_ID", "")
-
-# ---------------------------------------------------------------------------
-# Integrations — Jira Cloud
-# ---------------------------------------------------------------------------
-JIRA_BASE_URL: str    = _get("JIRA_BASE_URL", "")
-JIRA_USER_EMAIL: str  = _get("JIRA_USER_EMAIL", "")
-JIRA_API_TOKEN: str   = _get("JIRA_API_TOKEN", "")
+# Destination address for scheduled digests (morning briefing + deadlines) — distinct
+# from O365_MAILBOX, which is the bot's send-from mailbox.
+USER_EMAIL: str = _get("USER_EMAIL", "")
 
 # ---------------------------------------------------------------------------
 # MCP server
@@ -142,6 +172,14 @@ RECENCY_DAYS: int = int(_get("RECENCY_DAYS", 14))
 
 # Anthropic SDK retry count for batch-create and LLM-dedup calls
 NEWS_MAX_RETRIES: int = int(_get("NEWS_MAX_RETRIES", 8))
+
+# Standalone NewsWatch.md topics with no recent +1 feedback past this many days from
+# their `added` date are treated as dormant (breakthrough-only, budget=1).
+NEWS_TOPIC_DORMANT_DAYS: int = int(_get("NEWS_TOPIC_DORMANT_DAYS", 30))
+
+# An unclicked news item may resurface in inbox.md up to this many times before
+# being permanently excluded. Clicking excludes it immediately regardless of count.
+NEWS_MAX_RESHOW: int = int(_get("NEWS_MAX_RESHOW", 3))
 
 # Current user's nick for owner-filtering in recur files (must match owners: values in frontmatter)
 USER_NICK: str = _get("USER_NICK", "ADMIN")
@@ -170,7 +208,7 @@ class CurrentUser:
 
     @property
     def db_path(self) -> Path:
-        return self.data_root / "db" / "sqlite" / "app.db"
+        return self.data_root / "db" / "sqlite" / "pma.db"
 
     @property
     def v_db_path(self) -> Path:

@@ -9,13 +9,14 @@ import os
 import re
 
 import config
+import md_editor
 import md_indexer
 import skills
 import task_queue
 from llm import Tool
 
 
-def build_tools(conn) -> list[Tool]:
+def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
     data_root = config.USER_DATA_ROOT
     src_root = str(config.SRC_ROOT)
 
@@ -139,9 +140,21 @@ def build_tools(conn) -> list[Tool]:
         })
         return f"Email queued (task_id={tid})"
 
-    def h_send_telegram(inp: dict) -> str:
-        tid = task_queue.enqueue(conn, "telegram", {"message": inp["message"]})
-        return f"Telegram message queued (task_id={tid})"
+    def h_write_file(inp: dict) -> str:
+        file_path = inp["path"]
+        content = inp["content"]
+        summary = inp.get("summary", "")
+        try:
+            result = md_editor.propose_edit(file_path, content, summary, conn)
+            if staged_actions is not None:
+                staged_actions.append(result)
+            eid = result.get("event_id", "?")
+            return (
+                f"File staged for user review (event_id={eid}). "
+                "Tell the user to look for the diff card in the UI and click Apply to save."
+            )
+        except ValueError as e:
+            return f"[error: {e}]"
 
     return [
         Tool(
@@ -244,15 +257,31 @@ def build_tools(conn) -> list[Tool]:
             handler=h_send_email,
         ),
         Tool(
-            name="send_telegram",
-            description="Queue a Telegram message. Only use when the user explicitly asks to send a Telegram message.",
+            name="write_file",
+            description=(
+                "Create a new markdown file OR completely overwrite an existing one in the user corpus. "
+                "Use this whenever the user asks you to create, write, or save a project file, log entry, "
+                "or any other corpus document. The file is staged for user confirmation — it is NOT written "
+                "immediately. Always use this tool rather than describing what you would write."
+            ),
             input_schema={
                 "type": "object",
                 "properties": {
-                    "message": {"type": "string"},
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path from data root, e.g. 'SMTW/finance-review.md' or 'inbox.md'. Must end in .md.",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full markdown content for the file.",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "One-line description of what this file is / why it was created.",
+                    },
                 },
-                "required": ["message"],
+                "required": ["path", "content"],
             },
-            handler=h_send_telegram,
+            handler=h_write_file,
         ),
     ]

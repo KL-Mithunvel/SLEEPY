@@ -1,0 +1,126 @@
+version: "3.9"
+
+# Production Docker Compose — deploy on Proxmox Ubuntu VM
+# Exposed public URL: https://pa.mspv.app (Caddy handles TLS)
+#
+# Before first deploy:
+#   1. Copy code/backend/example_secrets_app.py → code/backend/secrets_app.py and fill in values
+#   2. Create ./data/kla/ directory tree and ensure it is a git repo
+#   3. `docker compose build` then `docker compose up -d`
+#
+# Keycloak reuses the existing Office.smtw.in realm — no separate keycloak service here.
+# Set KEYCLOAK_PUBLIC_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID in secrets_app.py.
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Backend — Flask / gunicorn
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    environment:
+      - DEV_AUTH_BYPASS=0
+      - SQLITE_DB_PATH=/data/kla/db/sqlite/pma.db
+      - USER_DATA_ROOT=/data/kla
+      - DATA_ROOT=/data
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - CORS_ORIGINS=https://pa.mspv.app
+    volumes:
+      - ./code/backend/secrets_app.py:/app/backend/secrets_app.py:ro
+      - pma_data:/data
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    expose:
+      - "5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ---------------------------------------------------------------------------
+  # Worker — APScheduler + task queue drainer
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    command: ["uv", "run", "python", "code/backend/worker.py"]
+    restart: unless-stopped
+    environment:
+      - DEV_AUTH_BYPASS=0
+      - SQLITE_DB_PATH=/data/kla/db/sqlite/pma.db
+      - USER_DATA_ROOT=/data/kla
+      - DATA_ROOT=/data
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - CORS_ORIGINS=https://pa.mspv.app
+    volumes:
+      - ./code/backend/secrets_app.py:/app/backend/secrets_app.py:ro
+      - pma_data:/data
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # Frontend — static Vite build served by nginx
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  # ---------------------------------------------------------------------------
+  # ChromaDB — vector store
+  # ---------------------------------------------------------------------------
+  chromadb:
+    image: chromadb/chroma:latest
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      - pma_data:/data
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+      - PERSIST_DIRECTORY=/data/kla/db/chroma
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Caddy — HTTPS reverse proxy (auto TLS via Let's Encrypt)
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  pma_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data
+  caddy_data:
+  caddy_config:

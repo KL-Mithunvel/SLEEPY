@@ -13,11 +13,13 @@ import json
 import logging
 import sqlite3
 import time
+from pathlib import Path
 
 import litellm
 
 import config
 import md_indexer
+import task_scan
 
 logger = logging.getLogger(__name__)
 
@@ -162,37 +164,65 @@ def build_rag_context(query: str, k: int | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 _BRIEFING_SYSTEM = """\
-You are a calm, focused personal project assistant. You have access to the user's
-project notes. Generate a concise morning briefing that:
-- Highlights what's due or overdue today
-- Flags any blocked projects
-- Suggests a focus plan with no more than 3 priority items
-- Uses professional, warm, direct language
-- Is formatted in clean Markdown
-Do not invent tasks or people. Only reference what is in the provided context.\
+You are a calm, focused personal project assistant. You have access to a deterministic \
+scan of the user's open tasks (grouped by project) and the raw content of their inbox \
+(quick captures, which is where meeting mentions and other free-text notes land). \
+Generate a concise morning briefing with these sections, in order:
+- ## Today's Schedule — any meetings, calls, or time-bound items you can find in the
+  inbox content or task due-dates. If genuinely nothing time-bound is found, say so
+  briefly rather than omitting the section.
+- ## Due / Overdue — what's due today or overdue, called out by project
+- ## Blocked — any projects that look stalled or blocked, if apparent from the tasks
+- ## Focus Plan — no more than 3 priority items for today
+Use professional, warm, direct language. Format in clean Markdown.
+Do not invent tasks, people, or meetings. Only reference what is in the provided context.\
 """
+
+
+def _build_project_task_summary(data_root: str) -> str:
+    """Deterministic, grouped-by-project open task list (not fuzzy semantic search)."""
+    tasks = task_scan.scan_open_tasks(data_root)
+    if not tasks:
+        return "No open tasks found in any active project."
+
+    by_project: dict[str, list[dict]] = {}
+    for t in tasks:
+        by_project.setdefault(t["project_title"], []).append(t)
+
+    parts = []
+    for title, project_tasks in by_project.items():
+        rel_path = project_tasks[0]["rel_path"]
+        parts.append(f"### {title} ({rel_path}) — {len(project_tasks)} open task(s)")
+        for t in project_tasks:
+            due_str = f" due:{t['due']}" if t["due"] else ""
+            parts.append(f"- {t['text']}{due_str}")
+    return "\n".join(parts)
+
+
+def _load_inbox(data_root: str) -> str:
+    path = Path(data_root) / "inbox.md"
+    if not path.is_file():
+        return ""
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 def generate_morning_briefing(conn: sqlite3.Connection) -> str:
     """
-    Generate today's morning briefing by retrieving active project context
-    and calling the LLM. Logs the result to ai_events.result.
-    Returns the briefing text.
+    Generate today's morning briefing from a deterministic scan of all active
+    projects' open tasks plus the raw inbox (for meeting/schedule visibility) —
+    not fuzzy semantic search, so it can't silently miss things due to embedding
+    relevance. Logs the result to ai_events.result. Returns the briefing text.
     """
     from datetime import date
     today = date.today().isoformat()
 
-    query_text = "active tasks due today overdue blocked projects priority"
-    context = build_rag_context(query_text, k=config.LLM_MAX_CONTEXT_CHUNKS)
+    task_summary = _build_project_task_summary(config.USER_DATA_ROOT)
+    inbox_content = _load_inbox(config.USER_DATA_ROOT)
 
-    if not context:
-        logger.warning("morning_briefing: no indexed content found — run reindex first")
-        result_text = (
-            f"# Morning Briefing — {today}\n\n"
-            "_No project data indexed yet. Run a reindex and try again._"
-        )
-        log_ai_event(conn, event_type="morning_briefing", result=result_text)
-        return result_text
+    context_parts = [f"<open_tasks_by_project>\n{task_summary}\n</open_tasks_by_project>"]
+    if inbox_content:
+        context_parts.append(f"<inbox>\n{inbox_content}\n</inbox>")
+    context = "\n\n".join(context_parts)
 
     messages = [
         {"role": "system", "content": _BRIEFING_SYSTEM},

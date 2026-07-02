@@ -10,6 +10,7 @@ Endpoints:
   GET  /api/corpus/news-items                — recent news items (parsed, for Today view)
   GET  /api/corpus/news-feedback             — list all feedback entries
   POST /api/corpus/news-feedback             — submit +1 / -1 rating for a bullet
+  POST /api/corpus/news-click                — mark a bullet as clicked (stops resurfacing)
 """
 
 import logging
@@ -135,6 +136,7 @@ def news_items():
         parsed = _parse_bullet(bullet)
         parsed["feedback"] = entry.get("feedback")
         parsed["date"] = entry.get("date", "")
+        parsed["clicked"] = entry.get("clicked", False)
         parsed["bullet"] = bullet
         items.append(parsed)
 
@@ -197,3 +199,27 @@ def news_feedback_submit():
         return jsonify({"error": "Bullet not found in seen list"}), 404
 
     return jsonify({"updated": True, "feedback": feedback})
+
+
+# ---------------------------------------------------------------------------
+# News Click — mark clicked (stops resurfacing)
+# ---------------------------------------------------------------------------
+
+@corpus_bp.post("/api/corpus/news-click")
+@require_perm("corpus:news_watch")
+def news_click():
+    """
+    Mark a news bullet as clicked. Clicked items are permanently excluded from
+    future resurfacing; unclicked items resurface up to NEWS_MAX_RESHOW times.
+    Body: {"bullet": "- [ ] 📰 ..."}
+    """
+    body = request.get_json(silent=True) or {}
+    bullet = (body.get("bullet") or "").strip()
+    if not bullet:
+        return jsonify({"error": "bullet is required"}), 400
+
+    updated = news_watch.mark_clicked(config.USER_DATA_ROOT, bullet)
+    if not updated:
+        return jsonify({"error": "Bullet not found in seen list"}), 404
+
+    return jsonify({"updated": True})

@@ -43,12 +43,6 @@ function diffLineClass(line) {
   return 'diff-context'
 }
 
-function truncate(text, max = 180) {
-  if (!text) return ''
-  const flat = text.replace(/\n+/g, ' ').trim()
-  return flat.length > max ? flat.slice(0, max) + '…' : flat
-}
-
 // News helpers
 function newsIcon(feedback) {
   if (feedback === '+1') return '👍'
@@ -181,7 +175,11 @@ onMounted(() => {
               v-for="(item, i) in today.newsItems"
               :key="i"
               class="news-item"
-              :class="{ 'news-item--liked': item.feedback === '+1', 'news-item--disliked': item.feedback === '-1' }"
+              :class="{
+                'news-item--liked': item.feedback === '+1',
+                'news-item--disliked': item.feedback === '-1',
+                'news-item--clicked': item.clicked,
+              }"
             >
               <!-- Title row -->
               <div class="d-flex align-items-start gap-1">
@@ -191,6 +189,8 @@ onMounted(() => {
                   target="_blank"
                   rel="noopener noreferrer"
                   class="news-title"
+                  :class="{ 'news-title--clicked': item.clicked }"
+                  @click="today.markClicked(item.bullet)"
                 >{{ item.title || item.bullet }}</a>
               </div>
 
@@ -199,7 +199,10 @@ onMounted(() => {
                 <span v-if="item.domain">{{ item.domain }}</span>
                 <span v-if="item.pub_date" class="ms-1" style="opacity:0.6;">{{ item.pub_date }}</span>
                 <span v-if="item.topic" class="ms-2 news-topic">{{ item.topic }}</span>
-                <span v-if="item.feedback" class="ms-auto">{{ newsIcon(item.feedback) }}</span>
+                <span v-if="item.clicked" class="ms-auto" title="Opened">
+                  <i class="bi bi-check-circle-fill" style="opacity: 0.5;"></i>
+                </span>
+                <span v-if="item.feedback" :class="item.clicked ? 'ms-1' : 'ms-auto'">{{ newsIcon(item.feedback) }}</span>
               </div>
 
               <!-- Reason (truncated) -->
@@ -269,20 +272,25 @@ onMounted(() => {
         <div
           v-for="(task, i) in today.tasks"
           :key="i"
-          class="mb-2 p-2 rounded"
+          class="d-flex align-items-start gap-2 mb-2 p-2 rounded"
           style="background: var(--bg-app, #13131f); border: 1px solid var(--border-color, rgba(255,255,255,0.07));"
         >
-          <div class="d-flex align-items-center gap-1 mb-1" style="font-size: 0.72rem; color: var(--text-muted-custom);">
-            <i class="bi bi-file-earmark-text"></i>
-            <span>{{ task.file_path }}</span>
-            <span v-if="task.heading" class="ms-1">
-              <i class="bi bi-chevron-right" style="font-size: 0.6rem;"></i>
-              {{ task.heading }}
-            </span>
-            <span class="ms-auto" style="opacity: 0.5;">{{ Math.round(task.score * 100) }}%</span>
-          </div>
-          <div style="font-size: 0.8rem; font-family: monospace; color: var(--text-main, #e0e0e0);">
-            {{ truncate(task.content) }}
+          <input
+            type="checkbox"
+            class="form-check-input mt-1 flex-shrink-0"
+            style="cursor: pointer;"
+            title="Mark done"
+            @change="today.toggleTask(task)"
+          />
+          <div class="flex-grow-1" style="min-width: 0;">
+            <div style="font-size: 0.82rem; color: var(--text-main, #e0e0e0);">{{ task.text }}</div>
+            <div class="d-flex align-items-center gap-1 mt-1" style="font-size: 0.7rem; color: var(--text-muted-custom);">
+              <i class="bi bi-file-earmark-text"></i>
+              <span>{{ task.project_title }}</span>
+              <span v-if="task.due" class="ms-auto flex-shrink-0">
+                <i class="bi bi-calendar-event me-1"></i>{{ task.due }}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -424,6 +432,9 @@ onMounted(() => {
 
 .news-item--liked  { border-color: rgba(117,183,152,0.3); }
 .news-item--disliked { opacity: 0.55; }
+.news-item--clicked { opacity: 0.6; }
+
+.news-title--clicked { color: var(--text-muted-custom); }
 
 .news-emoji {
   flex-shrink: 0;

@@ -63,14 +63,17 @@ def test_list_projects_with_files(client, monkeypatch, tmp_path):
     assert alpha["ou"] == "SMTW"
 
 
-def test_list_projects_skips_logs_and_db(client, monkeypatch, tmp_path):
+def test_list_projects_includes_subfolders_and_root_skips_only_db(client, monkeypatch, tmp_path):
     import config
 
     root = tmp_path / "corpus2"
     (root / "SMTW").mkdir(parents=True)
     (root / "SMTW" / "proj.md").write_text("# Proj\n", encoding="utf-8")
+    (root / "SMTW" / "Research").mkdir()
+    (root / "SMTW" / "Research" / "soft-robotics.md").write_text("# Soft Robotics\n", encoding="utf-8")
     (root / "logs").mkdir()
     (root / "logs" / "2026-06-18.md").write_text("# Log\n", encoding="utf-8")
+    (root / "inbox.md").write_text("# Inbox\n", encoding="utf-8")
     (root / "db").mkdir()
     (root / "db" / "meta.md").write_text("# DB\n", encoding="utf-8")
 
@@ -79,9 +82,14 @@ def test_list_projects_skips_logs_and_db(client, monkeypatch, tmp_path):
     resp = client.get("/api/projects")
     data = resp.get_json()
     paths = [p["rel_path"] for p in data["projects"]]
-    assert any("SMTW" in p for p in paths)
-    assert not any("logs" in p for p in paths)
+    assert any("SMTW/proj.md" == p for p in paths)
+    assert any("SMTW/Research/soft-robotics.md" == p for p in paths)
+    assert any("logs" in p for p in paths)
+    assert "inbox.md" in paths
     assert not any("db" in p for p in paths)
+
+    inbox = next(p for p in data["projects"] if p["rel_path"] == "inbox.md")
+    assert inbox["ou"] == "General"
 
 
 def test_list_projects_fallback_title_from_filename(client, monkeypatch, tmp_path):

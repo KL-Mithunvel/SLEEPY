@@ -15,7 +15,7 @@ from flask import Blueprint, jsonify, request
 import ai_client
 import config
 import md_editor
-import md_indexer
+import task_scan
 from auth_utils import require_perm
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def get_today():
     Returns:
       briefing      — text of the last morning briefing (or null)
       briefing_at   — formatted IST timestamp (DD-MM-YYYY HH:MM) or null
-      tasks         — list of {content, file_path, heading, score} chunks
+      tasks         — list of {rel_path, text, project_title, due} open task lines
     """
     db = _db()
 
@@ -57,11 +57,10 @@ def get_today():
         except (ValueError, TypeError):
             briefing_at = row["created_at"]
 
-    # Active tasks via semantic search — graceful empty if ChromaDB not indexed yet
     try:
-        tasks = md_indexer.query("active tasks due today overdue in progress", k=8)
+        tasks = task_scan.scan_open_tasks(config.USER_DATA_ROOT)
     except Exception as exc:
-        logger.warning("Task query failed (index may be empty): %s", exc)
+        logger.warning("Task scan failed: %s", exc)
         tasks = []
 
     return jsonify({"briefing": briefing, "briefing_at": briefing_at, "tasks": tasks})
@@ -84,6 +83,30 @@ def generate_briefing():
 
     now_str = datetime.now().strftime("%d-%m-%Y %H:%M")
     return jsonify({"briefing": briefing, "generated_at": now_str})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/today/tasks/toggle
+# ---------------------------------------------------------------------------
+
+@today_bp.post("/api/today/tasks/toggle")
+@require_perm("ai:edit_md")
+def toggle_task():
+    """
+    Mark a single task line done (auto-applied, no confirm step).
+    Request body: {"rel_path": "OU/project.md", "text": "exact task text"}
+    """
+    body = request.get_json(silent=True) or {}
+    rel_path = (body.get("rel_path") or "").strip()
+    text = (body.get("text") or "").strip()
+    if not rel_path or not text:
+        return jsonify({"error": "rel_path and text are required"}), 400
+
+    db = _db()
+    ok = task_scan.toggle_task(config.USER_DATA_ROOT, rel_path, text, db)
+    if not ok:
+        return jsonify({"error": "Task line not found — it may have changed, try refreshing"}), 404
+    return jsonify({"ok": True})
 
 
 # ---------------------------------------------------------------------------

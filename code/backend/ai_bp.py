@@ -17,6 +17,7 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 
+import anthropic
 from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 import ai_client
@@ -49,6 +50,24 @@ def _load_system_prompt() -> str:
         return "You are a calm personal project-management assistant."
 
 
+def _list_corpus_files() -> str:
+    """Return a flat list of all .md files in the corpus (excluding db/)."""
+    data_root = config.USER_DATA_ROOT
+    db_dir = os.path.normpath(os.path.join(data_root, "db"))
+    lines = []
+    for root, dirs, files in os.walk(data_root):
+        dirs[:] = sorted(
+            d for d in dirs
+            if not os.path.normpath(os.path.join(root, d)).startswith(db_dir)
+        )
+        rel_root = os.path.relpath(root, data_root).replace("\\", "/")
+        for fname in sorted(files):
+            if fname.endswith(".md"):
+                path = f"{rel_root}/{fname}" if rel_root != "." else fname
+                lines.append(path)
+    return "\n".join(lines) if lines else "(no files yet — corpus is empty)"
+
+
 def _build_system(last_user_msg: str, ou: str) -> list[dict]:
     """Build the 4-block system prompt with cache control on the last block."""
     now = datetime.now(_IST)
@@ -56,14 +75,23 @@ def _build_system(last_user_msg: str, ou: str) -> list[dict]:
     time_str = now.strftime("%H:%M IST")
     weekday = now.strftime("%A")
 
+    try:
+        file_list = _list_corpus_files()
+    except Exception:
+        file_list = "(could not list files)"
+
     ctx_lines = [
         "## Current Context",
         "",
         f"Date: {date_str} ({weekday})",
         f"Time: {time_str}",
+        "",
+        "## Corpus Files",
+        "",
+        file_list,
     ]
     if ou:
-        ctx_lines.append(f"Active OU: {ou}")
+        ctx_lines.append(f"\nActive OU: {ou}")
     ctx_block = "\n".join(ctx_lines)
 
     # RAG context from semantic search
@@ -127,8 +155,7 @@ def _stage_pma_edits(text: str, conn) -> list[dict]:
         replace_content = m.group(3)
 
         try:
-            # Validate path early
-            md_editor.validate_edit(file_path, replace_content or " ")
+            md_editor.validate_path(file_path)
         except ValueError as e:
             logger.warning("pma-edit skipped — validation error: %s", e)
             continue
@@ -256,7 +283,14 @@ def edit_propose():
     if not instruction:
         return jsonify({"error": "instruction is required"}), 400
 
-    abs_path = os.path.join(__import__("config").USER_DATA_ROOT, rel_path.replace("\\", "/").lstrip("/"))
+    # Validate path before reading — prevents path traversal leaking file contents to the LLM
+    try:
+        norm = md_editor.validate_path(rel_path)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    import config as _cfg
+    abs_path = os.path.normpath(os.path.join(_cfg.USER_DATA_ROOT, norm))
     if os.path.isfile(abs_path):
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             current_content = f.read()
@@ -291,9 +325,9 @@ def edit_propose():
             event_type="ai_edit_propose",
             conn=db,
         )
-    except Exception as exc:
+    except Exception:
         logger.exception("LLM call failed during edit proposal")
-        return jsonify({"error": str(exc)}), 502
+        return jsonify({"error": "AI service unavailable — check server logs"}), 502
 
     new_content = resp["content"].strip()
     summary = instruction[:120]
@@ -363,13 +397,14 @@ def chat_endpoint():
         (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
     )
 
-    # Get DB connection before entering generator (avoids g teardown issues)
-    db = _db()
-
     def generate():
+        # Open an independent connection — g.db gets torn down during SSE streaming
+        import local_db as _local_db
+        db = _local_db.get_db()
         try:
             system_blocks = _build_system(last_user_msg, ou)
-            llm_tools = tools_registry.build_tools(conn=db)
+            staged_by_tools: list = []
+            llm_tools = tools_registry.build_tools(conn=db, staged_actions=staged_by_tools)
             result = None
 
             for chunk in llm.chat_stream(
@@ -385,8 +420,8 @@ def chat_endpoint():
                     result = chunk
 
             if result:
-                # Parse and stage any pma-edit blocks
-                actions = _stage_pma_edits(result.text, db)
+                # Collect actions: tool-staged + any pma-edit blocks in response text
+                actions = staged_by_tools + _stage_pma_edits(result.text, db)
 
                 # Log to ai_events
                 try:
@@ -418,9 +453,18 @@ def chat_endpoint():
                 }
                 yield f"data: {json.dumps({'type': 'done', 'result': done_payload})}\n\n"
 
-        except Exception as exc:
+        except anthropic.AuthenticationError:
+            llm.reset_client()
+            logger.warning("Anthropic auth error — Claude Code token may need refresh")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Auth token expired. Run any claude command in your terminal to refresh, then retry.'})}\n\n"
+        except anthropic.RateLimitError:
+            logger.warning("Anthropic rate limit hit (429)")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Rate limit hit — wait a few seconds and try again. (Claude.ai Pro has limited API call bursts.)'})}\n\n"
+        except Exception:
             logger.exception("Chat stream error")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Internal error — check server logs'})}\n\n"
+        finally:
+            _local_db.return_db(db)
 
     return Response(
         stream_with_context(generate()),

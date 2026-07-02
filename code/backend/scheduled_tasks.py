@@ -96,14 +96,4 @@ SCHEDULED_TASKS = [
         "payload": {},
     },
 
-    # ------------------------------------------------------------------
-    # Jira sync every 15 min — only if JIRA_BASE_URL is configured
-    # ------------------------------------------------------------------
-    {
-        "task_type": "jira_sync",
-        "trigger": "interval",
-        "trigger_kwargs": {"seconds": 900},
-        "payload": {},
-        "enabled": bool(config.JIRA_BASE_URL),
-    },
 ]

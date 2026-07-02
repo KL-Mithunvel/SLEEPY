@@ -281,17 +281,16 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | Worker | `uv run python code/backend/worker.py` | Same, as a separate container/process |
 | Auth | `DEV_AUTH_BYPASS=1` | Keycloak `Office.smtw.in` realm, `pma` client |
 | DB | `data/kla/db/sqlite/pma.db` | Same path, Docker bind-mount |
-| Public URL | `localhost:5000` | `pa.mspv.app` via nginx + Certbot |
+| Public URL | `localhost:5000` | `pa.mspv.app` via Caddy (auto TLS) |
 
-**Pre-deploy checklist:** All tests green → `main.py` boots clean locally → `uv export` requirements.txt synced → VERSION bumped.
+**Pre-deploy checklist:** All tests green → `main.py` boots clean locally → `uv export` requirements.txt synced → VERSION bumped → `docker compose build` succeeds → `secrets_app.py` mounted on VM.
 
 ---
 
 ## Known Technical Debt
 
-1. No Jira sync tables or handlers.
-2. `pyproject.toml` still says `name = "backend"` — should be updated to `name = "sleepy"` when renaming matters (non-urgent).
-3. `tooling/` is missing: `run-md-index.bat`, `run-worker.bat`, `run-frontend-build.bat` (referenced in charter §10 but not yet created).
+1. `pyproject.toml` still says `name = "backend"` — should be updated to `name = "sleepy"` when renaming matters (non-urgent).
+2. Keycloak live-auth path is untested locally (only `DEV_AUTH_BYPASS=1` has been exercised). Full OIDC flow needs a live Keycloak instance during Phase 6 deploy.
 
 ---
 
@@ -323,10 +322,14 @@ Legend: 🔴 Bug / rule violation  |  🟡 Incomplete feature  |  🟢 Not start
 - ✅ Phase 4 — Core features: Today View (briefing card, task list, quick capture → inbox.md), Projects view, Logs view, 82/82 tests passing
 - ✅ Nightly scheduled jobs wired: APScheduler in worker enqueues `morning_briefing` (06:30 IST) and `md_reindex` (02:00 IST); handlers call real `ai_client` and `md_indexer` implementations
 - ✅ AI Assistant view (`/ai`): natural-language chat → LLM classifies intent → answer bubble or diff card with Apply/Discard; retry/clarify via conversation history; `POST /api/ai/chat` backend endpoint
+- ✅ Phase 5 — Integrations: Telegram Bot API, O365 Graph API email, WhatsApp Meta Cloud API, Jira Cloud (create + corpus sync); Integrations frontend view (`/integrations`) with status panel + manual send forms; `send_whatsapp` LLM tool; 96/96 tests passing
+- ✅ Phase 6 — Deploy: `docker-compose.yml` (backend/worker/frontend/chromadb/caddy), `Dockerfile.backend`, `Dockerfile.frontend`, `Caddyfile` for `pa.mspv.app`, `tooling/run-frontend-build.bat`; VERSION → 0.5.0; CORS locked to `https://pa.mspv.app` in prod
+- ✅ Phase 7 — Materialiser: nightly Recur → Plans + Daily + Govern; `materialiser.py`, `materialise` handler, 00:05 IST cron
+- ✅ Phase 8 — Housekeeping: `housekeeping.py`, nightly corpus health checks + inbox findings + archive old dailies + task queue prune; 23:00 IST cron
+- ✅ Phase 9 — News Watch: `news_watch.py`, Anthropic Message Batches API for nightly news; `news_watch_submit` (00:00 IST) + `news_watch_finalize` (every 5m); news feed in Today view; corpus_bp endpoints
 
 ### NOT STARTED
-- 🟢 Phase 5 — Integrations: WhatsApp notifications + outbound messaging (Twilio or Meta Cloud API), email support (Gmail MCP or Graph API)
-- 🟢 Phase 6 — Deploy: production Docker Compose, Caddy HTTPS, nginx `pa.mspv.app`, Keycloak `pma` client, mobile PWA test
+- 🟢 Phase 6 final — Live deploy to Proxmox VM: `docker compose up -d`, Keycloak pma client wiring, mobile PWA smoke test on `pa.mspv.app`
 
 ---
 

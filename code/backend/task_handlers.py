@@ -25,10 +25,39 @@ def _handle_md_reindex(payload: dict, conn: sqlite3.Connection):
 
 
 def _handle_morning_briefing(payload: dict, conn: sqlite3.Connection):
-    """Generate the morning briefing and log it to ai_events."""
+    """
+    Refresh project deadline plans, generate the morning briefing, log it to
+    ai_events, and email the combined digest (briefing + deadlines) to the user.
+    """
     logger.info("morning_briefing started")
+
+    digest_lines: list[str] = []
+    try:
+        import goal_planner
+        goal_result = goal_planner.run_goal_planning(config.USER_DATA_ROOT, user_nick=config.USER_NICK)
+        digest_lines = goal_result.get("digest_lines", [])
+        logger.info("morning_briefing: goal_planning done: %s", goal_result)
+    except Exception:
+        logger.exception("morning_briefing: goal_planning failed")
+
     briefing = ai_client.generate_morning_briefing(conn)
     logger.info("morning_briefing done (%d chars)", len(briefing))
+
+    combined_text = briefing
+    if digest_lines:
+        combined_text += "\n\n---\n\n## ⏰ Project Deadlines\n\n" + "\n".join(digest_lines)
+
+    try:
+        import integrations
+        from datetime import date
+        today_str = date.today().strftime("%d-%m-%Y")
+        ok = integrations.send_email(
+            config.USER_EMAIL, f"Morning Briefing — {today_str}", combined_text,
+        )
+        if not ok:
+            logger.warning("morning_briefing: email not sent (integration not configured or failed)")
+    except Exception:
+        logger.exception("morning_briefing: email send failed")
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +180,7 @@ def _handle_news_watch_finalize(payload: dict, conn: sqlite3.Connection):
 
 
 # ---------------------------------------------------------------------------
-# Phase 9 — Integrations (Telegram, O365 email, Jira)
+# Phase 9 — Integrations (O365 email)
 # ---------------------------------------------------------------------------
 
 def _handle_email(payload: dict, conn: sqlite3.Connection):
@@ -166,41 +195,6 @@ def _handle_email(payload: dict, conn: sqlite3.Connection):
     ok = integrations.send_email(to, subject, body, body_html=body_html)
     if not ok:
         raise RuntimeError(f"send_email failed for to={to!r}")
-
-
-def _handle_telegram(payload: dict, conn: sqlite3.Connection):
-    """Send a Telegram message via Bot API."""
-    import integrations
-    message = payload.get("message", "")
-    chat_id = payload.get("chat_id")
-    if not message:
-        raise ValueError("telegram task missing required 'message' field")
-    ok = integrations.send_telegram(message, chat_id=chat_id)
-    if not ok:
-        raise RuntimeError("send_telegram failed")
-
-
-def _handle_jira_create(payload: dict, conn: sqlite3.Connection):
-    """Create a Jira Cloud issue."""
-    import integrations
-    project_key = payload.get("project_key", "")
-    summary = payload.get("summary", "")
-    description = payload.get("description", "")
-    issue_type = payload.get("issue_type", "Task")
-    if not project_key or not summary:
-        raise ValueError("jira_create task missing 'project_key' or 'summary'")
-    key = integrations.jira_create(project_key, summary, description, issue_type)
-    if key is None:
-        raise RuntimeError(f"jira_create failed for project={project_key!r}")
-    logger.info("jira_create: created %s", key)
-
-
-def _handle_jira_sync(payload: dict, conn: sqlite3.Connection):
-    """Sync Jira issue statuses into the MD corpus (close ticked tasks)."""
-    import integrations
-    user_nick = payload.get("user_nick") or config.USER_NICK
-    result = integrations.jira_sync_corpus(config.USER_DATA_ROOT, user_nick=user_nick)
-    logger.info("jira_sync done: %s", result)
 
 
 # ---------------------------------------------------------------------------
@@ -222,9 +216,6 @@ HANDLERS: dict[str, callable] = {
     "news_watch_finalize":  _handle_news_watch_finalize,
     # Phase 9 — Integrations
     "email":                _handle_email,
-    "telegram":             _handle_telegram,
-    "jira_create":          _handle_jira_create,
-    "jira_sync":            _handle_jira_sync,
 }
 
 

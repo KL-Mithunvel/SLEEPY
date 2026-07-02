@@ -1,0 +1,31 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app/frontend
+COPY code/frontend/package*.json ./
+RUN npm ci --prefer-offline
+
+COPY code/frontend/ ./
+RUN npm run build
+
+# Serve with nginx
+FROM nginx:alpine
+
+COPY --from=builder /app/frontend/dist /usr/share/nginx/html
+
+# SPA fallback — all routes serve index.html
+COPY <<'EOF' /etc/nginx/conf.d/default.conf
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;
+}
+EOF
+
+EXPOSE 80

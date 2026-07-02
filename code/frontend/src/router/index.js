@@ -6,7 +6,8 @@ const routes = [
   { path: '/today',    component: TodayView,                                              meta: { title: 'Today',     perm: 'logs:read'    } },
   { path: '/projects', component: () => import('../views/ProjectsView.vue'),              meta: { title: 'Projects',  perm: 'projects:read' } },
   { path: '/logs',     component: () => import('../views/LogsView.vue'),                  meta: { title: 'Logs',      perm: 'logs:read'    } },
-  { path: '/ai',       component: () => import('../views/AiView.vue'),                    meta: { title: 'Assistant', perm: 'ai:suggest'   } },
+  { path: '/ai',             component: () => import('../views/AiView.vue'),             meta: { title: 'Assistant',    perm: 'ai:suggest'        } },
+  { path: '/integrations',   component: () => import('../views/IntegrationsView.vue'),   meta: { title: 'Integrations', perm: 'integrations:send'  } },
 ]
 
 const router = createRouter({

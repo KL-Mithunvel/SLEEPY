@@ -76,5 +76,22 @@ export const useTodayStore = defineStore('today', {
         if (item) item.feedback = feedback
       } catch { /* silent */ }
     },
+
+    async toggleTask(task) {
+      try {
+        await apiPost('/api/today/tasks/toggle', { rel_path: task.rel_path, text: task.text })
+        this.tasks = this.tasks.filter(t => t !== task)
+      } catch (e) {
+        this.error = e.message
+      }
+    },
+
+    async markClicked(bullet) {
+      try {
+        await apiPost('/api/corpus/news-click', { bullet })
+        const item = this.newsItems.find(n => n.bullet === bullet)
+        if (item) item.clicked = true
+      } catch { /* silent — clicking through shouldn't block on tracking */ }
+    },
   },
 })

@@ -81,8 +81,33 @@ _MIGRATIONS = [
         """,
     ]),
     (2, "Add result column to ai_events", [
-        # Stores generated text (briefings, suggestions) separate from the diff field.
         "ALTER TABLE ai_events ADD COLUMN result TEXT",
+    ]),
+    (3, "Add jira_issues and task_context tables", [
+        """
+        CREATE TABLE IF NOT EXISTS jira_issues (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue_key   TEXT NOT NULL UNIQUE,
+            project_key TEXT NOT NULL,
+            summary     TEXT NOT NULL,
+            status      TEXT NOT NULL,
+            assignee    TEXT,
+            priority    TEXT,
+            issue_type  TEXT,
+            url         TEXT,
+            synced_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            raw_json    TEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS task_context (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_hash   TEXT NOT NULL UNIQUE,
+            file_hash   TEXT NOT NULL,
+            why_matters TEXT NOT NULL,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """,
     ]),
 ]
 

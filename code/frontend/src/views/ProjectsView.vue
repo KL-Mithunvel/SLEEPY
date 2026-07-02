@@ -32,7 +32,7 @@ onMounted(() => store.fetchProjects())
       </button>
     </div>
     <p class="mb-3" style="color: var(--text-muted-custom); font-size: 0.85rem;">
-      All active projects across your organisations.
+      Every file in your corpus — projects, research notes, and everything else — grouped by folder.
     </p>
 
     <!-- Filter -->
@@ -67,15 +67,15 @@ onMounted(() => store.fetchProjects())
     <!-- Empty -->
     <div v-else-if="!store.loading && store.projects.length === 0" class="card p-4 text-center" style="color: var(--text-muted-custom);">
       <i class="bi bi-folder2-open d-block mb-2" style="font-size: 2.5rem; opacity: 0.35;"></i>
-      <div style="font-size: 0.85rem;">No project files found in your corpus.</div>
+      <div style="font-size: 0.85rem;">No files found in your corpus.</div>
       <div style="font-size: 0.75rem; margin-top: 0.3rem; opacity: 0.6;">
-        Create <code style="font-size: 0.73rem;">data/kla/&lt;OU&gt;/project.md</code> files to populate this view.
+        Create <code style="font-size: 0.73rem;">data/kla/&lt;OU&gt;/project.md</code> (or any other .md file) to populate this view.
       </div>
     </div>
 
     <!-- No filter results -->
     <div v-else-if="store.projects.length > 0 && store.ouList.length === 0" class="card p-3 text-center" style="color: var(--text-muted-custom); font-size: 0.84rem;">
-      <i class="bi bi-search me-1"></i> No projects match "{{ store.filter }}"
+      <i class="bi bi-search me-1"></i> No files match "{{ store.filter }}"
     </div>
 
     <!-- Projects grouped by OU -->

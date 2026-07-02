@@ -1,0 +1,40 @@
+pa.mspv.app {
+    # Disable Caddy's default buffering so SSE streams reach the browser
+    flush_interval -1
+
+    # API — proxy to Flask backend
+    handle /api/* {
+        reverse_proxy backend:5000 {
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Real-IP {remote_host}
+            # Pass SSE without buffering
+            transport http {
+                response_header_timeout 0
+            }
+        }
+    }
+
+    # Health check — direct to backend
+    handle /healthz {
+        reverse_proxy backend:5000
+    }
+
+    # SPA — proxy to nginx serving the Vite build
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/pa.mspv.app.log
+        format json
+    }
+}

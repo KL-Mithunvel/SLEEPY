@@ -31,7 +31,9 @@ export const useProjectsStore = defineStore('projects', {
       return groups
     },
 
-    ouList: (state, getters) => Object.keys(getters.byOu).sort(),
+    // Pinia option-store getters take a single arg (the store itself, state + other
+    // getters merged) — not Vuex's (state, getters) pair. `state.byOu` resolves fine.
+    ouList: (state) => Object.keys(state.byOu).sort(),
   },
 
   actions: {

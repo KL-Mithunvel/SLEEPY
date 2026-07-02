@@ -1,8 +1,10 @@
 """
-Projects Blueprint — read-only filesystem view of the MD project corpus.
+Projects Blueprint — read-only filesystem view of the entire MD corpus
+(project files, research notes, People/, Recur/, Daily/, Plans/, Govern/,
+root-level files like inbox.md/ABOUT.md — everything except db/).
 
-  GET /api/projects                    list all project files grouped by OU
-  GET /api/projects/content?path=...   raw content of a single project file
+  GET /api/projects                    list all corpus .md files grouped by top folder
+  GET /api/projects/content?path=...   raw content of a single corpus file
 """
 
 import logging
@@ -19,30 +21,31 @@ logger = logging.getLogger(__name__)
 
 projects_bp = Blueprint("projects", __name__)
 
-# OU-level directories that are NOT project folders
-_SKIP_DIRS = {"logs", "archive", "db"}
+# Only internal app data is excluded — everything else in the corpus is shown.
+_SKIP_DIRNAME = "db"
 
 
 # ---------------------------------------------------------------------------
 # Filesystem helpers
 # ---------------------------------------------------------------------------
 
-def _list_project_files() -> list[str]:
-    """Return relative paths (OU/file.md) for all project files, sorted by OU then name."""
+def _list_all_md_files() -> list[str]:
+    """Return relative posix paths for every .md file under the data root (excludes db/)."""
     root = config.USER_DATA_ROOT
+    db_dir = os.path.normpath(os.path.join(root, _SKIP_DIRNAME))
     result = []
-    try:
-        for entry in sorted(os.scandir(root), key=lambda e: e.name):
-            if (entry.is_dir()
-                    and entry.name not in _SKIP_DIRS
-                    and not entry.name.startswith(".")):
-                ou = entry.name
-                for f in sorted(os.scandir(entry.path), key=lambda e: e.name):
-                    if f.is_file() and f.name.endswith(".md"):
-                        result.append(f"{ou}/{f.name}")
-    except FileNotFoundError:
-        pass
-    return result
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if not os.path.normpath(os.path.join(dirpath, d)).startswith(db_dir)
+            and not d.startswith(".")
+        )
+        for fname in sorted(filenames):
+            if fname.endswith(".md"):
+                abs_path = os.path.join(dirpath, fname)
+                rel = os.path.relpath(abs_path, root).replace("\\", "/")
+                result.append(rel)
+    return sorted(result)
 
 
 def _parse_project(rel_path: str) -> dict | None:
@@ -78,7 +81,7 @@ def _parse_project(rel_path: str) -> dict | None:
             snippet = s[:200]
             break
 
-    ou = rel_path.split("/")[0] if "/" in rel_path else ""
+    ou = rel_path.split("/")[0] if "/" in rel_path else "General"
 
     return {
         "rel_path": rel_path,
@@ -109,7 +112,7 @@ def _safe_project_abs(rel_path: str) -> str | None:
 @projects_bp.get("/api/projects")
 @require_perm("projects:read")
 def list_projects():
-    files = _list_project_files()
+    files = _list_all_md_files()
     projects = [p for p in (_parse_project(f) for f in files) if p is not None]
     return jsonify({"projects": projects, "total": len(projects)})
 

@@ -34,15 +34,11 @@ _MAX_EDIT_BYTES = 512 * 1024  # 512 KB
 # Validation
 # ---------------------------------------------------------------------------
 
-def validate_edit(rel_path: str, new_content: str) -> None:
+def validate_path(rel_path: str) -> str:
     """
-    Raise ValueError if the proposed edit violates any safety policy.
-
-    Rules:
-    - rel_path must stay within USER_DATA_ROOT (no path traversal)
-    - rel_path must not write into the db/ subdirectory
-    - rel_path must end in .md
-    - new_content must be a non-empty string under _MAX_EDIT_BYTES
+    Validate that rel_path is a safe .md path inside USER_DATA_ROOT.
+    Returns the normalised relative path (forward slashes, no leading slash).
+    Raises ValueError on any violation.
     """
     if not rel_path or not rel_path.strip():
         raise ValueError("rel_path is empty")
@@ -53,7 +49,6 @@ def validate_edit(rel_path: str, new_content: str) -> None:
     if os.path.isabs(rel_path) or rel_path[:1] in ("/", "\\"):
         raise ValueError(f"Path traversal detected: {rel_path!r}")
 
-    # Normalise to forward slashes, then resolve absolute
     norm = rel_path.replace("\\", "/").lstrip("/")
     abs_path = os.path.normpath(os.path.join(config.USER_DATA_ROOT, norm))
     data_root = os.path.normpath(config.USER_DATA_ROOT)
@@ -67,6 +62,19 @@ def validate_edit(rel_path: str, new_content: str) -> None:
 
     if not norm.endswith(".md"):
         raise ValueError(f"Only .md files may be edited by AI: {rel_path!r}")
+
+    return norm
+
+
+def validate_edit(rel_path: str, new_content: str) -> None:
+    """
+    Raise ValueError if the proposed edit violates any safety policy.
+
+    Rules:
+    - rel_path must pass validate_path()
+    - new_content must be a non-empty string under _MAX_EDIT_BYTES
+    """
+    validate_path(rel_path)
 
     if not new_content or not new_content.strip():
         raise ValueError("new_content is empty")

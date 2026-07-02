@@ -29,19 +29,7 @@ O365_CLIENT_ID     = ""              # Azure app registration client ID
 O365_CLIENT_SECRET = ""              # Azure app registration client secret
 O365_MAILBOX       = ""              # Mailbox the bot sends from, e.g. pmabot@smtw.in
 O365_SENDER_NAME   = "PMA Bot"       # Display name in From: field
-
-# ---------------------------------------------------------------------------
-# Telegram
-# ---------------------------------------------------------------------------
-TELEGRAM_BOT_TOKEN       = ""        # Token from @BotFather
-TELEGRAM_DEFAULT_CHAT_ID = ""        # Fallback chat/group ID
-
-# ---------------------------------------------------------------------------
-# Jira Cloud (read-only sync; leave blank to disable)
-# ---------------------------------------------------------------------------
-JIRA_BASE_URL    = ""                # e.g. https://yourco.atlassian.net
-JIRA_USER_EMAIL  = ""
-JIRA_API_TOKEN   = ""
+USER_EMAIL         = ""              # Where scheduled digests (briefing + deadlines) are sent
 
 # ---------------------------------------------------------------------------
 # MCP server (leave blank to disable)
@@ -55,3 +43,8 @@ MCP_OAUTH_CLIENT_SECRET = ""
 # Worker / indexing
 # ---------------------------------------------------------------------------
 INDEX_SYNC_INTERVAL_SEC = 300        # How often (s) to sync ChromaDB vs MD files
+
+# ---------------------------------------------------------------------------
+# News Watch
+# ---------------------------------------------------------------------------
+PMA_NEWS_RUN_ALL = "0"               # "1" = run every day regardless of rotation (few-projects mode)

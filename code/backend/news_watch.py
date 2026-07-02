@@ -23,7 +23,7 @@ import logging
 import os
 import re
 import urllib.parse
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -159,6 +159,76 @@ def _parse_topics(raw) -> list[str]:
     return []
 
 
+# ---------------------------------------------------------------------------
+# Standalone topics — NewsWatch.md (interests not tied to a project file)
+# ---------------------------------------------------------------------------
+
+_TOPIC_HEADING_RE = re.compile(r"(?m)^##\s+(.+?)\s*$")
+_TOPIC_ADDED_RE = re.compile(r"(?m)^\s*-\s*added:\s*(\d{4}-\d{2}-\d{2})\s*$")
+
+
+def _load_topic_file(data_root: str) -> list[dict]:
+    """
+    Parse NewsWatch.md into [{'topic': str, 'added': date}, ...].
+    One '## <Topic>' section per interest, each with a '- added: YYYY-MM-DD' bullet.
+    Sections missing or with an invalid 'added:' date are skipped (logged, not fatal).
+    """
+    path = Path(data_root) / "NewsWatch.md"
+    if not path.is_file():
+        return []
+    content = path.read_text(encoding="utf-8", errors="replace")
+    headings = list(_TOPIC_HEADING_RE.finditer(content))
+    result = []
+    for i, m in enumerate(headings):
+        topic = m.group(1).strip()
+        if not topic:
+            continue
+        section_end = headings[i + 1].start() if i + 1 < len(headings) else len(content)
+        section = content[m.end():section_end]
+        added_m = _TOPIC_ADDED_RE.search(section)
+        if not added_m:
+            logger.warning("news_watch: NewsWatch.md topic %r missing 'added:' date, skipping", topic)
+            continue
+        try:
+            added = date.fromisoformat(added_m.group(1))
+        except ValueError:
+            logger.warning("news_watch: NewsWatch.md topic %r has invalid added date, skipping", topic)
+            continue
+        result.append({"topic": topic, "added": added})
+    return result
+
+
+def _topic_is_dormant(topic: str, added: date, seen: list[dict], today: date, dormant_days: int) -> bool:
+    """
+    A standalone topic is dormant once it's older than dormant_days AND has no +1
+    feedback tagged with it within the last dormant_days (silence = fading interest;
+    a like resets the clock so a still-wanted topic never goes quiet).
+    """
+    if (today - added).days <= dormant_days:
+        return False
+    tag = f"*topic: {topic}*"
+    cutoff = today - timedelta(days=dormant_days)
+    for entry in seen:
+        if entry.get("feedback") != "+1":
+            continue
+        if tag not in entry.get("bullet", ""):
+            continue
+        try:
+            entry_date = date.fromisoformat(entry.get("date", ""))
+        except ValueError:
+            continue
+        if entry_date >= cutoff:
+            return False
+    return True
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(text: str) -> str:
+    return _SLUG_RE.sub("-", text.strip().lower()).strip("-") or "topic"
+
+
 def _todays_project_keys(all_keys: list[str]) -> set[str]:
     if config.NEWS_RUN_ALL:
         return set(all_keys)
@@ -279,6 +349,28 @@ def _content_user_msg(project_key: str, project_content: str) -> list[dict]:
     ]
 
 
+_DORMANT_SUFFIX = (
+    "This topic has gone quiet — only return an item if it represents a genuinely "
+    "major, breakthrough development (a landmark result, major product launch, or "
+    "field-defining news). Return nothing if in doubt."
+)
+
+
+def _system_blocks_for_topic(base_system_blocks: list[dict], dormant: bool) -> list[dict]:
+    """Append the breakthrough-only instruction for dormant standalone topics."""
+    if not dormant:
+        return base_system_blocks
+    return base_system_blocks + [{"type": "text", "text": _DORMANT_SUFFIX}]
+
+
+def _standalone_topic_user_msg(topic: str, max_items: int) -> list[dict]:
+    ask = (
+        f"Find up to {max_items} recent news article(s) about **{topic}**. "
+        "Return only bullet lines in the required format."
+    )
+    return [{"role": "user", "content": [{"type": "text", "text": ask}]}]
+
+
 # ---------------------------------------------------------------------------
 # Deduplication
 # ---------------------------------------------------------------------------
@@ -297,6 +389,35 @@ def _bullet_key(bullet: str) -> tuple[str, str] | None:
         url = "https://" + m.group(1)
         return ("url", _normalise_url(url))
     return None
+
+
+def _upsert_seen_entries(seen: list[dict], surviving: list[str], today_str: str) -> None:
+    """
+    For each surviving bullet: if its URL key already has a seen entry (a resurfaced,
+    previously-unclicked item), bump shown_count and refresh the bullet text in place
+    (keeping existing feedback/clicked) — else append a fresh entry.
+    """
+    key_to_entry: dict[tuple, dict] = {}
+    for s in seen:
+        k = _bullet_key(s.get("bullet", ""))
+        if k:
+            key_to_entry[tuple(k)] = s
+
+    for bullet in surviving:
+        k = _bullet_key(bullet)
+        key = tuple(k) if k else None
+        existing = key_to_entry.get(key) if key else None
+        if existing:
+            existing["shown_count"] = existing.get("shown_count", 1) + 1
+            existing["bullet"] = bullet
+        else:
+            new_entry = {
+                "bullet": bullet, "key": str(k), "date": today_str,
+                "feedback": None, "clicked": False, "shown_count": 1,
+            }
+            seen.append(new_entry)
+            if key:
+                key_to_entry[key] = new_entry
 
 
 def _server_dedup(bullets: list[str], seen_keys: set) -> list[str]:
@@ -387,12 +508,17 @@ def news_watch_submit_for_user(data_root: str) -> dict:
     system_blocks = _system_prompt(about, liked, disliked, presented)
 
     projects = _scan_active_projects(data_root)
-    all_keys = [p["key"] for p in projects]
+    topics = _load_topic_file(data_root)
+    today = date.today()
+
+    all_keys = [p["key"] for p in projects] + [f"newswatch:{t['topic']}" for t in topics]
     todays_keys = _todays_project_keys(all_keys)
 
     today_projects = [p for p in projects if p["key"] in todays_keys]
-    if not today_projects:
-        logger.info("news_watch_submit: no projects scheduled today")
+    today_topics = [t for t in topics if f"newswatch:{t['topic']}" in todays_keys]
+
+    if not today_projects and not today_topics:
+        logger.info("news_watch_submit: nothing scheduled today")
         return {"status": "no_projects"}
 
     requests = []
@@ -428,6 +554,23 @@ def news_watch_submit_for_user(data_root: str) -> dict:
                 },
             })
 
+    for t in today_topics:
+        topic = t["topic"]
+        dormant = _topic_is_dormant(topic, t["added"], seen, today, config.NEWS_TOPIC_DORMANT_DAYS)
+        max_items = 1 if dormant else 3
+        cid = f"newswatch__{_slugify(topic)}"
+        custom_id_map[cid] = {"project_key": f"newswatch:{topic}", "topic": topic}
+        requests.append({
+            "custom_id": cid,
+            "params": {
+                "model": config.LLM_DEFAULT_MODEL,
+                "max_tokens": 512,
+                "system": _system_blocks_for_topic(system_blocks, dormant),
+                "messages": _standalone_topic_user_msg(topic, max_items),
+                "tools": [_WEB_SEARCH_TOOL],
+            },
+        })
+
     if not requests:
         return {"status": "no_requests"}
 
@@ -443,8 +586,9 @@ def news_watch_submit_for_user(data_root: str) -> dict:
         "custom_id_map": custom_id_map,
         "metadata": {
             "scanned": len(projects),
+            "topics_scanned": len(topics),
             "scheduled_keys": list(todays_keys),
-            "weekday": date.today().weekday(),
+            "weekday": today.weekday(),
         },
         "finalized": False,
     }
@@ -493,8 +637,12 @@ def news_watch_finalize_for_user(data_root: str) -> dict:
 
     # Batch has ended — process results
     seen = _load_news_seen(data_root)
+    # Only permanently exclude items that were clicked, or have resurfaced enough
+    # times without a click — everything else stays eligible to resurface.
     seen_keys: set = set()
     for s in seen:
+        if not (s.get("clicked") or s.get("shown_count", 1) >= config.NEWS_MAX_RESHOW):
+            continue
         k = _bullet_key(s["bullet"])
         if k:
             seen_keys.add(tuple(k))
@@ -536,10 +684,10 @@ def news_watch_finalize_for_user(data_root: str) -> dict:
     if surviving:
         _write_news_to_inbox(data_root, surviving)
 
-    # Update seen state
+    # Update seen state — resurfacing items get their shown_count bumped in place
+    # (keeping existing feedback/clicked) instead of a duplicate seen entry.
     today_str = date.today().strftime("%Y-%m-%d")
-    for bullet in surviving:
-        seen.append({"bullet": bullet, "key": str(_bullet_key(bullet)), "date": today_str, "feedback": None})
+    _upsert_seen_entries(seen, surviving, today_str)
     _save_news_seen(data_root, seen)
 
     # Mark finalized
@@ -623,6 +771,20 @@ def submit_feedback(data_root: str, bullet: str, feedback: str) -> bool:
     for entry in seen:
         if entry["bullet"].strip() == bullet.strip():
             entry["feedback"] = feedback
+            _save_news_seen(data_root, seen)
+            return True
+    return False
+
+
+def mark_clicked(data_root: str, bullet: str) -> bool:
+    """
+    Mark a news bullet as clicked — permanently excludes it from future resurfacing
+    regardless of NEWS_MAX_RESHOW. Returns True if found and updated, False otherwise.
+    """
+    seen = _load_news_seen(data_root)
+    for entry in seen:
+        if entry["bullet"].strip() == bullet.strip():
+            entry["clicked"] = True
             _save_news_seen(data_root, seen)
             return True
     return False

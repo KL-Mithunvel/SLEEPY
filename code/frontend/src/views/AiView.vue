@@ -46,7 +46,6 @@ const TOOL_LABELS = {
   list_files:    'Listing files',
   search_corpus: 'Searching corpus',
   send_email:    'Sending email',
-  send_telegram: 'Sending message',
 }
 
 function toolLabel(name) {
