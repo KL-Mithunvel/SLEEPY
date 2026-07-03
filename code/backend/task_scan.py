@@ -3,7 +3,8 @@ Deterministic active-project task scan — used by the Today view's click-to-che
 task list and the morning briefing's project summary.
 
 Public API:
-    scan_open_tasks(data_root) -> list[dict]
+    scan_open_tasks(data_root) -> list[dict]     all open tasks across active projects
+    scan_todays_tasks(data_root) -> list[dict]   curated: today's materialised Daily files only
     toggle_task(data_root, rel_path, text, conn) -> bool
 """
 
@@ -103,6 +104,56 @@ def scan_open_tasks(data_root: str) -> list[dict]:
                     })
             except Exception:
                 logger.exception("task_scan: error reading %s", f)
+
+    tasks.sort(key=lambda t: (t["due"] is None, t["due"] or ""))
+    return tasks[:_MAX_TASKS]
+
+
+def _extract_section(content: str, heading: str) -> str:
+    """Body text between '## <heading>' and the next '## ' heading (or EOF)."""
+    marker_re = re.compile(rf"(?m)^## {re.escape(heading)}\s*$")
+    m = marker_re.search(content)
+    if not m:
+        return ""
+    rest = content[m.end():]
+    next_m = re.search(r"(?m)^## ", rest)
+    return rest[:next_m.start()] if next_m else rest
+
+
+def scan_todays_tasks(data_root: str) -> list[dict]:
+    """
+    Read <OU>/Daily/<today>.md's '## Tasks' section for every OU that has one today.
+    This is the curated view: materialiser.py owns populating it (carry-forward of
+    unfinished items, due-date promotion, daily/weekly Recur items) and the chat AI
+    only adds to it on explicit request — unlike scan_open_tasks, this does NOT pull
+    in every open checklist item from every project file. OUs with no Daily file yet
+    (materialise hasn't run) contribute nothing — not an error.
+    Returns {rel_path, text, ou, due}, same sort order as scan_open_tasks.
+    """
+    today_str = date.today().strftime("%Y-%m-%d")
+    tasks: list[dict] = []
+    for ou, ou_dir in _find_ous(data_root):
+        daily_path = ou_dir / "Daily" / f"{today_str}.md"
+        if not daily_path.is_file():
+            continue
+        try:
+            content = daily_path.read_text(encoding="utf-8", errors="replace")
+            section = _extract_section(content, "Tasks")
+            rel_path = f"{ou}/Daily/{today_str}.md"
+            for line in section.splitlines():
+                m = _TASK_LINE_RE.match(line)
+                if not m or m.group(2) not in (" ", ">"):
+                    continue
+                text = m.group(3).strip()
+                due = _extract_due(text)
+                tasks.append({
+                    "rel_path": rel_path,
+                    "text": text,
+                    "ou": ou,
+                    "due": due.isoformat() if due else None,
+                })
+        except Exception:
+            logger.exception("task_scan: error reading %s", daily_path)
 
     tasks.sort(key=lambda t: (t["due"] is None, t["due"] or ""))
     return tasks[:_MAX_TASKS]

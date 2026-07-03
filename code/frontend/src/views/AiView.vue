@@ -1,6 +1,7 @@
 <script setup>
 import { ref, nextTick, watch } from 'vue'
 import { useAiStore } from '../stores/ai.js'
+import { renderMd } from '../mdRender.js'
 
 const ai = useAiStore()
 const messagesEl = ref(null)
@@ -16,6 +17,18 @@ function scrollToBottom() {
 
 watch(() => ai.messages.length, scrollToBottom)
 watch(() => ai.contentVersion, scrollToBottom)
+
+const MAX_INPUT_HEIGHT = 200 // px — beyond this it scrolls instead of growing further
+
+function autoGrowInput() {
+  const el = inputEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, MAX_INPUT_HEIGHT) + 'px'
+}
+
+// Covers both typing (v-model) and the textarea clearing itself after send
+watch(() => ai.inputText, () => nextTick(autoGrowInput))
 
 function onKey(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -106,7 +119,8 @@ function toolLabel(name) {
               <span class="thinking-dot"></span>
             </div>
             <!-- Text content -->
-            <div v-if="msg.content" class="msg-content" style="white-space: pre-wrap;">{{ msg.content }}<span v-if="msg.streaming" class="msg-cursor">█</span></div>
+            <div v-if="msg.content" class="msg-content md-rendered" v-html="renderMd(msg.content)"></div>
+            <span v-if="msg.content && msg.streaming" class="msg-cursor">█</span>
           </div>
         </div>
 
@@ -194,8 +208,9 @@ function toolLabel(name) {
           rows="2"
           placeholder="Ask a question or give an instruction… (Enter to send, Shift+Enter for newline)"
           :disabled="ai.loading"
-          style="resize: none; font-size: 0.85rem; background: var(--bg-card); border-color: var(--border-color); color: var(--text-main);"
+          style="resize: none; overflow-y: auto; font-size: 0.85rem; background: var(--bg-card); border-color: var(--border-color); color: var(--text-main);"
           @keydown="onKey"
+          @input="autoGrowInput"
         ></textarea>
         <button
           class="btn btn-primary btn-sm px-3"
@@ -396,5 +411,29 @@ function toolLabel(name) {
 @keyframes blink {
   0%, 80%, 100% { opacity: 0.2; transform: scale(0.85); }
   40%           { opacity: 1;   transform: scale(1); }
+}
+
+/* ---- Rendered markdown ---- */
+.md-rendered :deep(h1),
+.md-rendered :deep(h2),
+.md-rendered :deep(h3) {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0.9em 0 0.4em;
+}
+.md-rendered :deep(h1:first-child),
+.md-rendered :deep(h2:first-child),
+.md-rendered :deep(h3:first-child) { margin-top: 0; }
+.md-rendered :deep(p) { margin: 0 0 0.6em; }
+.md-rendered :deep(p:last-child) { margin-bottom: 0; }
+.md-rendered :deep(ul),
+.md-rendered :deep(ol) { margin: 0 0 0.6em; padding-left: 1.3em; }
+.md-rendered :deep(li) { margin-bottom: 0.2em; }
+.md-rendered :deep(hr) { border: none; border-top: 1px solid var(--border-color, rgba(255,255,255,0.1)); margin: 0.8em 0; }
+.md-rendered :deep(code) {
+  background: rgba(255,255,255,0.08);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  font-size: 0.9em;
 }
 </style>

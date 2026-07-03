@@ -280,3 +280,36 @@ def test_clicked_item_excluded_immediately(tmp_path, monkeypatch):
 
     result = _finalize_with_fake_batch(tmp_path, monkeypatch, BULLET_TEXT)
     assert result["appended"] == 0  # clicked -> excluded even though shown_count is well under cap
+
+
+# ---------------------------------------------------------------------------
+# write_stats_file
+# ---------------------------------------------------------------------------
+
+def test_write_stats_file_empty_corpus(tmp_path):
+    news_watch.write_stats_file(str(tmp_path))
+    content = (tmp_path / "NewsStats.md").read_text(encoding="utf-8")
+    assert "# News Stats" in content
+    assert "No topics tracked yet." in content
+    assert "Total items seen: 0" in content
+
+
+def test_write_stats_file_reflects_topic_and_activity(tmp_path):
+    today = date.today().isoformat()
+    (tmp_path / "NewsWatch.md").write_text(
+        f"# News Watch\n\n## Soft Robotics\n- added: {today}\n", encoding="utf-8",
+    )
+    bullet = "- [ ] 📰 [Title](https://x.com/a) — x.com (2026-07-01) | *topic: Soft Robotics*"
+    news_watch._save_news_seen(str(tmp_path), [
+        {"bullet": bullet, "date": today, "feedback": "+1", "clicked": True, "shown_count": 1},
+    ])
+
+    news_watch.write_stats_file(str(tmp_path))
+    content = (tmp_path / "NewsStats.md").read_text(encoding="utf-8")
+
+    assert "**Soft Robotics**" in content
+    assert "active" in content
+    assert "1 shown / 1 clicked / 1 liked" in content
+    assert "Total items seen: 1" in content
+    assert "Clicked: 1" in content
+    assert "Liked: 1" in content

@@ -114,3 +114,50 @@ def test_toggle_task_missing_file_returns_false(tmp_path, conn, monkeypatch):
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
     ok = task_scan.toggle_task(str(tmp_path), "SMTW/missing.md", "Anything", conn)
     assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# scan_todays_tasks
+# ---------------------------------------------------------------------------
+
+def _write_daily(root, ou, content):
+    from datetime import date
+    today_str = date.today().strftime("%Y-%m-%d")
+    d = os.path.join(root, ou, "Daily")
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, f"{today_str}.md"), "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+def test_scan_todays_tasks_reads_daily_file(tmp_path):
+    _write_daily(
+        str(tmp_path), "SMTW",
+        "---\ndate: 2026-07-04 Saturday\n---\n\n## Tasks\n\n- [ ] Write report\n- [x] Done thing\n"
+        "\n## Daily checklist\n\n\n## Log\n",
+    )
+    tasks = task_scan.scan_todays_tasks(str(tmp_path))
+    assert len(tasks) == 1
+    assert tasks[0]["text"] == "Write report"
+    assert tasks[0]["ou"] == "SMTW"
+
+
+def test_scan_todays_tasks_ignores_open_tasks_outside_tasks_section(tmp_path):
+    _write_daily(
+        str(tmp_path), "SMTW",
+        "## Tasks\n\n- [ ] Real task\n\n## Daily checklist\n\n- [ ] Not a today-task\n",
+    )
+    tasks = task_scan.scan_todays_tasks(str(tmp_path))
+    assert len(tasks) == 1
+    assert tasks[0]["text"] == "Real task"
+
+
+def test_scan_todays_tasks_skips_ou_with_no_daily_file(tmp_path):
+    # SMTW has no Daily/ at all — should just contribute nothing, not error.
+    os.makedirs(os.path.join(str(tmp_path), "SMTW"), exist_ok=True)
+    assert task_scan.scan_todays_tasks(str(tmp_path)) == []
+
+
+def test_scan_todays_tasks_does_not_pull_from_project_files(tmp_path):
+    # A project file's open tasks must NOT leak into the curated today view.
+    _write_project(str(tmp_path), "SMTW", "proj.md", "---\nstatus: active\n---\n\n- [ ] Backlog item\n")
+    assert task_scan.scan_todays_tasks(str(tmp_path)) == []

@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
 import { useTodayStore } from '../stores/today.js'
 import { useAiStore } from '../stores/ai.js'
+import { renderMd } from '../mdRender.js'
 
 const auth = useAuthStore()
 const today = useTodayStore()
@@ -74,8 +75,8 @@ onMounted(() => {
 
       <!-- Morning Briefing -->
       <div class="col-12 col-xl-7">
-        <div class="card p-3 h-100">
-          <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="card p-3 d-flex flex-column" style="height: 480px;">
+          <div class="d-flex align-items-center justify-content-between mb-2" style="flex-shrink: 0;">
             <div class="d-flex align-items-center gap-2">
               <i class="bi bi-stars text-accent"></i>
               <span class="fw-semibold" style="font-size: 0.85rem;">Morning Briefing</span>
@@ -106,8 +107,10 @@ onMounted(() => {
 
           <div
             v-else-if="today.briefing"
-            style="font-size: 0.84rem; white-space: pre-wrap; line-height: 1.6; color: var(--text-main, #e0e0e0);"
-          >{{ today.briefing }}</div>
+            class="md-rendered"
+            style="font-size: 0.84rem; line-height: 1.6; color: var(--text-main, #e0e0e0); flex: 1; min-height: 0; overflow-y: auto;"
+            v-html="renderMd(today.briefing)"
+          ></div>
 
           <div v-else class="text-center py-3" style="color: var(--text-muted-custom); font-size: 0.84rem;">
             <i class="bi bi-moon-stars d-block mb-2" style="font-size: 1.8rem; opacity: 0.35;"></i>
@@ -118,7 +121,7 @@ onMounted(() => {
 
       <!-- News Feed -->
       <div class="col-12 col-xl-5">
-        <div class="card p-3 h-100 d-flex flex-column">
+        <div class="card p-3 d-flex flex-column" style="height: 480px;">
           <!-- Header -->
           <div class="d-flex align-items-center justify-content-between mb-2" style="flex-shrink:0;">
             <div class="d-flex align-items-center gap-2">
@@ -286,7 +289,7 @@ onMounted(() => {
             <div style="font-size: 0.82rem; color: var(--text-main, #e0e0e0);">{{ task.text }}</div>
             <div class="d-flex align-items-center gap-1 mt-1" style="font-size: 0.7rem; color: var(--text-muted-custom);">
               <i class="bi bi-file-earmark-text"></i>
-              <span>{{ task.project_title }}</span>
+              <span>{{ task.ou }}</span>
               <span v-if="task.due" class="ms-auto flex-shrink-0">
                 <i class="bi bi-calendar-event me-1"></i>{{ task.due }}
               </span>
@@ -316,9 +319,10 @@ onMounted(() => {
       <div v-if="lastAiMsg" class="mb-2">
         <div
           v-if="lastAiMsg.type === 'answer'"
-          class="p-2 rounded"
-          style="background: var(--bg-app, #13131f); border: 1px solid var(--border-color, rgba(255,255,255,0.07)); font-size: 0.81rem; color: var(--text-main, #e0e0e0); white-space: pre-wrap; max-height: 120px; overflow-y: auto;"
-        >{{ lastAiMsg.content }}</div>
+          class="p-2 rounded md-rendered"
+          style="background: var(--bg-app, #13131f); border: 1px solid var(--border-color, rgba(255,255,255,0.07)); font-size: 0.81rem; color: var(--text-main, #e0e0e0); max-height: 120px; overflow-y: auto;"
+          v-html="renderMd(lastAiMsg.content)"
+        ></div>
 
         <div
           v-else-if="lastAiMsg.type === 'edit'"
@@ -416,7 +420,7 @@ onMounted(() => {
 /* ---- News panel ---- */
 .news-list {
   overflow-y: auto;
-  max-height: 340px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
@@ -500,4 +504,31 @@ onMounted(() => {
 }
 .btn-feedback:hover { background: rgba(255,255,255,0.07); }
 .btn-feedback.active { background: rgba(110,168,254,0.15); border-color: rgba(110,168,254,0.4); }
+
+/* ---- Rendered markdown (briefing / AI replies) ---- */
+.md-rendered :deep(h1),
+.md-rendered :deep(h2),
+.md-rendered :deep(h3) {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0.9em 0 0.4em;
+  color: var(--text-main, #e0e0e0);
+}
+.md-rendered :deep(h1:first-child),
+.md-rendered :deep(h2:first-child),
+.md-rendered :deep(h3:first-child) { margin-top: 0; }
+.md-rendered :deep(p) { margin: 0 0 0.6em; }
+.md-rendered :deep(p:last-child) { margin-bottom: 0; }
+.md-rendered :deep(ul),
+.md-rendered :deep(ol) { margin: 0 0 0.6em; padding-left: 1.3em; }
+.md-rendered :deep(li) { margin-bottom: 0.2em; }
+.md-rendered :deep(strong) { color: var(--text-main, #f0f0f0); }
+.md-rendered :deep(hr) { border: none; border-top: 1px solid var(--border-color, rgba(255,255,255,0.1)); margin: 0.8em 0; }
+.md-rendered :deep(a) { color: var(--accent, #6ea8fe); }
+.md-rendered :deep(code) {
+  background: rgba(255,255,255,0.08);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
 </style>

@@ -14,7 +14,7 @@ A calm, self-hosted personal AI project-management assistant for a single user (
 - **Dev entry point:** `main.py` (repo root) — starts Flask + Vite dev server together
 - **Prod entry point:** gunicorn targeting `code/backend/app:app`; worker via `uv run python code/backend/worker.py`
 - **Python:** 3.12 (locked via `.python-version` at root, managed by uv)
-- **Status:** Phases 0–4 + nightly jobs complete. Phase 5 next (email support). Phase 6 is deploy.
+- **Status:** Phases 0–9 complete (see Project TODO List). Integrations descoped to email-only 2026-07-01 (Telegram/WhatsApp/Jira built then removed — no Facebook account for WhatsApp, didn't actually want the other two). Deadline planning, curated task lists, standalone news topics, corpus data-governance rules, and a domain-based OU reorg (Personal/VIT/SMTW) landed 2026-07-02 through 2026-07-04. Phase 6 final (live Proxmox deploy) is the only phase not started.
 
 ---
 
@@ -101,33 +101,58 @@ SLEEPY/
 │   │   ├── local_db.py        # SQLite migration engine + connection management
 │   │   ├── db_helpers.py      # row_to_dict / rows_to_list serialisation helpers
 │   │   ├── task_queue.py      # DB-backed queue: enqueue/claim/done/fail
-│   │   ├── task_handlers.py   # Dispatch table: task_type → handler fn
+│   │   ├── task_handlers.py   # Dispatch table: task_type → handler fn (9 handlers — see Key Modules)
 │   │   ├── worker.py          # Standalone worker: APScheduler + drain loop
-│   │   ├── scheduled_tasks.py # Cron registry (SCHEDULED_TASKS list)
+│   │   ├── scheduled_tasks.py # Cron registry (SCHEDULED_TASKS list — 8 jobs)
+│   │   ├── md_editor.py       # Confirm-gated AI edit flow: propose_edit/apply_edit/reject_edit
+│   │   ├── md_indexer.py      # ChromaDB indexing + semantic query
+│   │   ├── ai_client.py       # LiteLLM wrapper: chat(), generate_morning_briefing()
+│   │   ├── llm.py             # Anthropic client for the interactive /api/ai/chat tool-use loop
+│   │   ├── tools_registry.py  # Builds the LLM tool list (read_file/write_file/grep/... ) per request
+│   │   ├── skills.py          # Loads code/src/prompts/skills/*.md on demand (load_skill tool)
+│   │   ├── task_scan.py       # Deterministic task scan/toggle — scan_open_tasks/scan_todays_tasks
+│   │   ├── materialiser.py    # Nightly Recur → Plans/Daily/Govern pipeline
+│   │   ├── housekeeping.py    # Nightly corpus health checkers → inbox.md findings
+│   │   ├── goal_planner.py    # Nightly project deadline planning (target_date → ## Plan + email digest)
+│   │   ├── news_watch.py      # Anthropic Batches API news search (project topics + NewsWatch.md)
+│   │   ├── integrations.py    # O365 Graph API email (send_email) — only integration since 2026-07-01
+│   │   ├── app.py             # Flask app factory; registers all *_bp.py blueprints below
+│   │   ├── ai_bp.py           # POST /api/ai/chat (SSE), /api/ai/edit/<id>/confirm|reject
+│   │   ├── today_bp.py        # GET /api/today, briefing, capture, task toggle
+│   │   ├── projects_bp.py     # GET/PUT /api/projects — corpus file browser + direct editor
+│   │   ├── corpus_bp.py       # materialise/housekeeping/news-watch/news-feedback/news-click endpoints
+│   │   ├── integrations_bp.py # POST /api/integrations/email
+│   │   ├── logs_bp.py         # Daily/weekly log endpoints
 │   │   ├── secrets_app.py     # Gitignored — never commit
 │   │   ├── example_secrets_app.py  # Template — checked in
-│   │   └── tests/
-│   │       ├── conftest.py    # App fixture, DEV_AUTH_BYPASS=1, SQLITE_DB_PATH=:memory:
-│   │       └── test_rbac.py   # Layer 1 + Layer 2 tests (9 tests)
+│   │   └── tests/              # 138 tests across 12 files — run via tooling/run-backend-tests.bat
 │   └── frontend/              # Vue 3 + Vite SPA
 │       ├── src/
 │       │   ├── main.js        # App bootstrap
-│       │   ├── api.js         # Fetch wrapper — injects Bearer token
-│       │   ├── stores/auth.js # Keycloak init + reactive state
+│       │   ├── api.js         # Fetch wrapper — injects Bearer token (apiGet/Post/Put/Delete/Stream)
+│       │   ├── mdRender.js    # marked + DOMPurify — renderMd() used by all LLM-text surfaces
+│       │   ├── stores/        # auth, today, ai, projects, integrations — Pinia
 │       │   ├── router/        # Vue Router
 │       │   ├── components/layout/   # AppSidebar, AppTopbar
-│       │   └── views/         # TodayView, ProjectsView, LogsView
+│       │   ├── components/FileTreeNode.vue  # Recursive corpus folder tree (Projects view)
+│       │   └── views/         # TodayView, ProjectsView, LogsView, AiView, IntegrationsView
 │       ├── index.html
 │       └── vite.config.js
 ├── data/                      # Gitignored — per-user MD corpus + derived DBs
-│   └── kla/                   # KLA's folder (see Per-User Layout below)
+│   └── kla/                   # KLA's folder — schema documented in docs/CORPUS_SCHEMA.md
 ├── docs/
 │   ├── PROJ_CHARTER.md        # Full charter — canonical reference for scope + decisions
-│   └── PROJ_STARTER.md        # Engineering standards baseline (also in .CLAUDE/)
+│   ├── PROJ_STARTER.md        # Engineering standards baseline (also in .CLAUDE/)
+│   ├── SETUP.md               # Zero-to-running setup guide, dev + prod
+│   └── CORPUS_SCHEMA.md       # Ground-truth data storage schema (added 2026-07-04)
 ├── tooling/
 │   ├── run-backend.bat        # Start Flask + Vite (cd repo root → uv run python main.py)
 │   ├── run-backend-tests.bat  # uv run pytest from code/backend
-│   └── run-frontend.bat       # npm run dev from code/frontend
+│   ├── run-frontend.bat       # npm run dev from code/frontend
+│   ├── run-frontend-build.bat # npm run build from code/frontend
+│   ├── run-worker.bat         # Standalone worker process
+│   └── diagnose.py            # Startup health-check script (config/DB/worker/integrations)
+├── Dockerfile.backend / Dockerfile.frontend / Caddyfile / docker-compose.yml   # Prod deploy
 └── docker-compose.dev.yml     # ChromaDB dev service
 ```
 
@@ -137,19 +162,9 @@ SLEEPY/
 
 ### Per-user data layout (`data/<USER>/`)
 
-```
-data/kla/
-├── ABOUT.md              # User profile + working style
-├── People.md             # All contacts (one ## section per person)
-├── db/
-│   ├── sqlite/           # SQLite app state (pma.db)
-│   └── chroma/           # ChromaDB persistence
-├── <OU>/                 # One folder per Organisational Unit
-│   └── <project>.md      # Project files live directly in OU folder
-├── logs/                 # YYYY-MM-DD.md + YYYY-WNN.md
-├── archive/              # Completed / shelved projects
-└── inbox.md              # Quick captures
-```
+**See `docs/CORPUS_SCHEMA.md` for the full, current, verified-against-code schema** — directory structure, frontmatter rules, date format conventions, the materialiser pipeline, task-adding rules, and an explicit "Not Yet Built" list. Don't duplicate that content here; update it there and link to it.
+
+Quick orientation: root-level `ABOUT.md`/`People.md`/`inbox.md`/`NewsWatch.md`/`NewsStats.md` plus one `<OU>/` folder per life domain (this user: `Personal/`, `VIT/`, `SMTW/`), each containing project files directly (`<OU>/<slug>.md`, no `Projects/` subfolder) plus `Recur/`/`Daily/`/`Plans/`/`Govern/`/`Archive/` subfolders owned by the nightly materialiser.
 
 ---
 
@@ -193,11 +208,35 @@ Loads from `secrets_app`; all modules import from `config`, never from `secrets_
 - `HANDLERS: dict[str, callable]` — dispatch table mapping `task_type` to `handler(payload, conn)`.
 - `dispatch(task_type, payload, conn)` — looks up and calls handler.
 - **Handlers must NOT commit** — the worker owns the transaction boundary.
-- Current handlers: `md_reindex`, `morning_briefing` (both are stubs — Phase 3 work).
+- Current handlers: `md_reindex`, `morning_briefing` (also runs `goal_planner` + emails the digest), `materialise`, `index_sync`, `commit_pending`, `housekeeping`, `news_watch_submit`, `news_watch_finalize`, `email`.
 
 ### `code/backend/scheduled_tasks.py`
-- `SCHEDULED_TASKS` — list of `{task_type, cron, payload}` dicts. APScheduler in the worker reads this to register cron jobs that enqueue into `task_queue`.
-- Current schedule: morning briefing at 06:30 IST, MD reindex at 02:00 IST.
+- `SCHEDULED_TASKS` — list of `{task_type, trigger, trigger_kwargs, payload, enabled?}` dicts. APScheduler in the worker reads this to register cron/interval jobs that enqueue into `task_queue`.
+- Current schedule (8 jobs): `md_reindex` 02:00 IST, `morning_briefing` 06:30 IST (deadline planning + email digest rides this), `index_sync` every 5 min, `commit_pending` hourly, `housekeeping` 23:00 IST, `materialise` 00:05 IST, `news_watch_submit` 00:00 IST, `news_watch_finalize` every 5 min.
+
+### `code/backend/task_scan.py`
+Deterministic (non-LLM, non-RAG) task scanning — the foundation for the Today view's click-to-check list and the morning briefing's task context. `scan_open_tasks(data_root)` — every open task across every active project (general-purpose). `scan_todays_tasks(data_root)` — **what the Today view/briefing actually use**: reads only `<OU>/Daily/<today>.md`'s `## Tasks` section, i.e. the curated list, not every project's backlog. `toggle_task(data_root, rel_path, text, conn)` — flips one `- [ ] <text>` line via `md_editor`, auto-applied (no confirm gate — the click itself is the confirmation).
+
+### `code/backend/materialiser.py`
+Nightly (00:05 IST `materialise` job) three-stage pipeline: `materialise_non_daily` (Recur monthly/quarterly/yearly → Plans, `^R:` idempotency markers), `materialise_daily` (seeds `<OU>/Daily/<date>.md` from carry-forward + plan-pipe + `cadence: daily`/`weekly` Recur items + `Recur/Daily.md` checklist — all four merges are additive/idempotent), `materialise_govern` (team-owned Recur → Govern, generation exists but no viewer UI yet). Full detail in `docs/CORPUS_SCHEMA.md`.
+
+### `code/backend/housekeeping.py`
+Nightly (23:00 IST) read-only corpus checkers (`project_status_hygiene`, `missing_frontmatter`, `unknown_owner`, `invalid_dates`) emit `Finding`s written to `inbox.md` under `## Housekeeping` with exact-line dedup, plus an action (`archive_old_daily`, moves `Daily/` files >365 days old).
+
+### `code/backend/goal_planner.py`
+Nightly (rides the `morning_briefing` job): for every active project with `target_date:` frontmatter, LLM-regenerates a `## Plan` section (this week's goal + today's next action, grounded in the project's own content) and builds a deterministic urgency-sorted digest that gets folded into the emailed briefing.
+
+### `code/backend/news_watch.py`
+Two-stage async pipeline over the Anthropic Message Batches API. Stage 1 (`news_watch_submit`, midnight): submits one batch request per project `news_topics:` entry plus every `NewsWatch.md` standalone topic (dormant topics — no `+1` in `config.NEWS_TOPIC_DORMANT_DAYS`, default 30d — get a stricter "breakthrough only" ask). Stage 2 (`news_watch_finalize`, every 5 min): polls, dedups (URL + LLM semantic pass), writes surviving bullets to `inbox.md`. Unclicked items resurface up to `config.NEWS_MAX_RESHOW` (3) times before permanent exclusion; `mark_clicked()` excludes immediately. `write_stats_file()` regenerates `NewsStats.md` after each successful finalize.
+
+### `code/backend/integrations.py`
+O365 Graph API email only (`send_email` via MSAL client-credentials) — Telegram/WhatsApp/Jira were built in Phase 5 and fully removed 2026-07-01 (see Project TODO List).
+
+### `code/backend/md_editor.py`
+The confirm-gated AI edit flow: `validate_edit`/`propose_edit` (writes a pending `ai_events` row, returns a diff) → `apply_edit`/`reject_edit` (user or route confirms). Also reused directly (propose+apply back-to-back, no confirm gate) by low-risk deterministic writes: `today_bp.capture()`, `task_scan.toggle_task()`, `projects_bp`'s `PUT /api/projects/content`.
+
+### `code/backend/ai_client.py`
+`chat()` — LiteLLM wrapper used by background jobs (goal_planner, news_watch dedup). `generate_morning_briefing(conn)` — builds a deterministic context (today's curated tasks via `task_scan.scan_todays_tasks` + raw `inbox.md`, not fuzzy RAG) and asks the LLM for a `## Today's Schedule`/`## Due-Overdue`/`## Blocked`/`## Focus Plan` briefing.
 
 ### `code/backend/worker.py`
 Separate process (`uv run python code/backend/worker.py`). Calls `local_db.init_db()`, starts APScheduler from `SCHEDULED_TASKS`, then loops every 5s calling `_drain_once()` which claims and dispatches all pending tasks. Handles `KeyboardInterrupt`/`SystemExit` gracefully.
@@ -245,7 +284,9 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | `_MIGRATIONS` | Append-only forever. Never edit or delete an applied entry — it will desync other instances |
 | `ai_events` | Immutable event log. Never UPDATE/DELETE. Set `voided=1` to cancel. |
 | Bare imports | Backend modules use bare imports (`import config`). Works because `main.py` / `conftest.py` both insert `code/backend` onto `sys.path` before importing. |
-| MD corpus writes | Only allowed via the diff → validate → apply → user confirmation → GitPython commit flow. Never direct file writes from API routes. |
+| MD corpus writes | Two paths, both through `md_editor.py`, never raw file I/O from route code: (1) AI chat proposals — diff → validate → **user confirms via `/api/ai/edit/<id>/confirm`** → commit; (2) direct low-risk writes (quick-capture, task-toggle, Projects-view editor save, all nightly background jobs) — `propose_edit`+`apply_edit` back-to-back, no confirm gate, because the action itself (a click, a background job's own deterministic logic) already is the confirmation. |
+| Frontmatter dates | Always ISO `YYYY-MM-DD` (`target_date`, `started`, `added`, Daily/Plan `date:`). Task-line `due:`/`start:`/`finish:` tokens accept looser forms (`Mon-DD`, `Qn`, etc.) — see `docs/CORPUS_SCHEMA.md`. Prose can be `DD-MM-YYYY`. |
+| OU names | No fixed taxonomy — `_find_ous()` just lists directories that exist. This user: `Personal/`, `VIT/`, `SMTW/` (domain-based, reorganised 2026-07-04 from type-based `Projects/`/`Research/`/`Goals/`). Never hardcode an OU name as if it's universal. |
 
 ---
 
@@ -322,14 +363,22 @@ Legend: 🔴 Bug / rule violation  |  🟡 Incomplete feature  |  🟢 Not start
 - ✅ Phase 4 — Core features: Today View (briefing card, task list, quick capture → inbox.md), Projects view, Logs view, 82/82 tests passing
 - ✅ Nightly scheduled jobs wired: APScheduler in worker enqueues `morning_briefing` (06:30 IST) and `md_reindex` (02:00 IST); handlers call real `ai_client` and `md_indexer` implementations
 - ✅ AI Assistant view (`/ai`): natural-language chat → LLM classifies intent → answer bubble or diff card with Apply/Discard; retry/clarify via conversation history; `POST /api/ai/chat` backend endpoint
-- ✅ Phase 5 — Integrations: Telegram Bot API, O365 Graph API email, WhatsApp Meta Cloud API, Jira Cloud (create + corpus sync); Integrations frontend view (`/integrations`) with status panel + manual send forms; `send_whatsapp` LLM tool; 96/96 tests passing
+- ✅ Phase 5 — Integrations: originally built Telegram Bot API, O365 Graph API email, WhatsApp Meta Cloud API, Jira Cloud (create + corpus sync), 96/96 tests passing. **Telegram/WhatsApp/Jira fully removed 2026-07-01** — no Facebook account (blocks WhatsApp Cloud API onboarding), didn't actually want Telegram/Jira. Email (O365 Graph API via MSAL) is the only integration now; `integrations_bp.py` only exposes `POST /api/integrations/email`.
 - ✅ Phase 6 — Deploy: `docker-compose.yml` (backend/worker/frontend/chromadb/caddy), `Dockerfile.backend`, `Dockerfile.frontend`, `Caddyfile` for `pa.mspv.app`, `tooling/run-frontend-build.bat`; VERSION → 0.5.0; CORS locked to `https://pa.mspv.app` in prod
-- ✅ Phase 7 — Materialiser: nightly Recur → Plans + Daily + Govern; `materialiser.py`, `materialise` handler, 00:05 IST cron
+- ✅ Phase 7 — Materialiser: nightly Recur → Plans + Daily + Govern; `materialiser.py`, `materialise` handler, 00:05 IST cron. `cadence: daily` support (was silently unimplemented) added 2026-07-04.
 - ✅ Phase 8 — Housekeeping: `housekeeping.py`, nightly corpus health checks + inbox findings + archive old dailies + task queue prune; 23:00 IST cron
-- ✅ Phase 9 — News Watch: `news_watch.py`, Anthropic Message Batches API for nightly news; `news_watch_submit` (00:00 IST) + `news_watch_finalize` (every 5m); news feed in Today view; corpus_bp endpoints
+- ✅ Phase 9 — News Watch: `news_watch.py`, Anthropic Message Batches API for nightly news; `news_watch_submit` (00:00 IST) + `news_watch_finalize` (every 5m); news feed in Today view; corpus_bp endpoints. Extended 2026-07-02/03: standalone `NewsWatch.md` topics with dormancy/breakthrough logic, click-tracking + resurface-then-exclude dedup (`clicked`/`shown_count` on `news_seen.json`), human-readable `NewsStats.md` dashboard.
+- ✅ Project deadline planning (2026-07-02) — `goal_planner.py`: optional `target_date:` frontmatter, nightly `## Plan` regeneration + emailed deadline digest riding the `morning_briefing` cron.
+- ✅ Deterministic, curated task lists (2026-07-04) — `task_scan.py`: Today view/briefing pivoted from "every open task in every project" to "today's materialised Daily file only"; click-to-check UI (`POST /api/today/tasks/toggle`); AI only adds to a Daily file on explicit request (`SystemPrompt.MD` "Adding a Task for Today"/"Recurring Tasks"/"Acknowledging Completed Tasks" rules).
+- ✅ GUI polish (2026-07-04) — markdown rendering (`marked`+`dompurify`, `mdRender.js`) on briefing/AI chat surfaces (previously raw `#`/`**` text); independent fixed-height Briefing/News cards; chat input auto-grows; Projects view rebuilt as a client-side folder tree (`FileTreeNode.vue`) + in-browser editable textarea (`PUT /api/projects/content`) with ancestor-path highlighting.
+- ✅ Corpus data-governance hardening (2026-07-02/04) — `SystemPrompt.MD` "Data Storage Rules" decision table + "When Uncertain — Ask, Don't Guess" (8 trigger conditions); fixed a real bug where the AI defaulted to a fictional "SMTW" OU (a prompt example, not real data) instead of discovering actual OUs via `list_files`.
+- ✅ Domain-based OU reorg (2026-07-04) — corpus reorganised from type-based OUs (`Projects/`/`Research/`/`Goals/`) to life-domain OUs (`Personal/`/`VIT/`/`SMTW/`); no code changes needed (OU discovery was already fully dynamic). New `docs/CORPUS_SCHEMA.md` — ground-truth schema doc, distinct from the aspirational `project/*.md` reference folder (an earlier planning-phase target design that's materially ahead of current code in places).
 
 ### NOT STARTED
 - 🟢 Phase 6 final — Live deploy to Proxmox VM: `docker compose up -d`, Keycloak pma client wiring, mobile PWA smoke test on `pa.mspv.app`
+- 🟢 Playbook system — project-embedded `## Playbook` recurring tasks (`{{token}}` substitution, `^P:` markers) from the reference design; see `docs/CORPUS_SCHEMA.md` "Not Yet Built"
+- 🟢 Govern UI — `materialise_govern()` already runs nightly, but there's no `GET /api/corpus/govern` endpoint or frontend `/team` view to browse the output yet
+- 🟢 `POST /api/corpus/move-line` — fuzzy-match moving a task line between files (e.g. inbox.md → a Plan file)
 
 ---
 

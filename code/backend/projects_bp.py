@@ -1,10 +1,11 @@
 """
-Projects Blueprint — read-only filesystem view of the entire MD corpus
+Projects Blueprint — filesystem view + direct editor for the entire MD corpus
 (project files, research notes, People/, Recur/, Daily/, Plans/, Govern/,
 root-level files like inbox.md/ABOUT.md — everything except db/).
 
   GET /api/projects                    list all corpus .md files grouped by top folder
   GET /api/projects/content?path=...   raw content of a single corpus file
+  PUT /api/projects/content            save edited content (auto-applied, no confirm)
 """
 
 import logging
@@ -135,3 +136,30 @@ def project_content():
         return jsonify({"error": "Not found"}), 404
 
     return jsonify({"rel_path": rel, "content": content})
+
+
+@projects_bp.put("/api/projects/content")
+@require_perm("projects:write")
+def save_project_content():
+    """
+    Direct save from the Projects GUI editor — auto-applied, no confirm step
+    (the user already reviewed the content themselves before clicking Save).
+    Body: {"path": "...", "content": "..."}
+    """
+    body = request.get_json(silent=True) or {}
+    rel = (body.get("path") or "").strip()
+    content = body.get("content", "")
+    if not rel:
+        return jsonify({"error": "path is required"}), 400
+
+    import md_editor
+    from app import get_db
+
+    db = get_db()
+    try:
+        proposal = md_editor.propose_edit(rel, content, f"Edited via Projects GUI: {rel}", db)
+        sha = md_editor.apply_edit(proposal["event_id"], db)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({"ok": True, "sha": sha[:8]})

@@ -147,3 +147,51 @@ def test_project_content_not_found(client, monkeypatch, tmp_path):
 
     resp = client.get("/api/projects/content?path=SMTW/missing.md")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/projects/content
+# ---------------------------------------------------------------------------
+
+def test_save_project_content_missing_path(client):
+    resp = client.put("/api/projects/content", json={"content": "x"})
+    assert resp.status_code == 400
+
+
+def test_save_project_content_success(client, monkeypatch, tmp_path):
+    import config
+    import md_editor
+
+    root = tmp_path / "corpus6"
+    (root / "SMTW").mkdir(parents=True)
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    monkeypatch.setattr(
+        md_editor, "propose_edit",
+        lambda rel, content, summary, conn: {
+            "event_id": 99, "diff": "+line", "rel_path": rel, "summary": summary, "is_new": False,
+        }
+    )
+    monkeypatch.setattr(md_editor, "apply_edit", lambda event_id, conn: "a1b2c3d4e5f6" + "0" * 28)
+
+    resp = client.put("/api/projects/content", json={"path": "SMTW/alpha.md", "content": "# Edited\n"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["sha"] == "a1b2c3d4"
+
+
+def test_save_project_content_validation_error(client, monkeypatch, tmp_path):
+    import config
+    import md_editor
+
+    root = tmp_path / "corpus7"
+    (root / "SMTW").mkdir(parents=True)
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    def _boom(rel, content, summary, conn):
+        raise ValueError("new_content is empty")
+    monkeypatch.setattr(md_editor, "propose_edit", _boom)
+
+    resp = client.put("/api/projects/content", json={"path": "SMTW/alpha.md", "content": ""})
+    assert resp.status_code == 400

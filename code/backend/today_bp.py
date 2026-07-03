@@ -34,7 +34,8 @@ def get_today():
     Returns:
       briefing      — text of the last morning briefing (or null)
       briefing_at   — formatted IST timestamp (DD-MM-YYYY HH:MM) or null
-      tasks         — list of {rel_path, text, project_title, due} open task lines
+      tasks         — list of {rel_path, text, ou, due} — today's curated tasks
+                      (from <OU>/Daily/<today>.md, not every project's backlog)
     """
     db = _db()
 
@@ -58,7 +59,7 @@ def get_today():
             briefing_at = row["created_at"]
 
     try:
-        tasks = task_scan.scan_open_tasks(config.USER_DATA_ROOT)
+        tasks = task_scan.scan_todays_tasks(config.USER_DATA_ROOT)
     except Exception as exc:
         logger.warning("Task scan failed: %s", exc)
         tasks = []

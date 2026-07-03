@@ -467,6 +467,33 @@ def _weekly_tasks(data_root: str, ou: str, today: date, existing: str) -> list[s
     return result
 
 
+def _daily_tasks(data_root: str, ou: str, today: date, existing: str) -> list[str]:
+    """Recur files with cadence: daily — one task line added every day, same shape
+    as _weekly_tasks but unconditional (no weekday match needed)."""
+    result: list[str] = []
+    for recur_path in _find_recur_files(data_root, ou):
+        try:
+            content = recur_path.read_text(encoding="utf-8", errors="replace")
+            fm, _ = _parse_fm(content)
+            if str(fm.get("cadence") or "").strip().lower() != "daily":
+                continue
+            slug = _recur_slug(recur_path, data_root)
+            if slug in existing:
+                continue
+            title = fm.get("title") or recur_path.stem
+            owners = _owners_list(fm)
+            owners_str = " ".join(f"@{o}" for o in owners) if owners else ""
+            parts = [f"- [ ] {title}"]
+            if owners_str:
+                parts.append(owners_str)
+            parts.append(f"due:{today.strftime('%Y-%m-%d')}")
+            parts.append(slug)
+            result.append(" ".join(parts))
+        except Exception:
+            logger.exception("Daily recur error: %s", recur_path)
+    return result
+
+
 def _daily_checklist(data_root: str, ou: str) -> list[str]:
     f = Path(data_root) / ou / "Recur" / "Daily.md"
     if not f.is_file():
@@ -541,10 +568,11 @@ def materialise_daily(
 
         carry = _carry_forward(data_root, ou, today)
         pipe = _apply_plan_pipe(data_root, ou, today)
+        daily_recur = _daily_tasks(data_root, ou, today, existing)
         weekly = _weekly_tasks(data_root, ou, today, existing)
         checklist = _daily_checklist(data_root, ou)
 
-        all_tasks = carry + pipe + weekly
+        all_tasks = carry + pipe + daily_recur + weekly
 
         if not daily_path.is_file():
             daily_dir.mkdir(parents=True, exist_ok=True)

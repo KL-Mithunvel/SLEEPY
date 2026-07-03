@@ -165,14 +165,15 @@ def build_rag_context(query: str, k: int | None = None) -> str:
 
 _BRIEFING_SYSTEM = """\
 You are a calm, focused personal project assistant. You have access to a deterministic \
-scan of the user's open tasks (grouped by project) and the raw content of their inbox \
+scan of today's curated tasks (grouped by OU — these are the tasks actually queued for \
+today, not every open item across every project) and the raw content of their inbox \
 (quick captures, which is where meeting mentions and other free-text notes land). \
 Generate a concise morning briefing with these sections, in order:
 - ## Today's Schedule — any meetings, calls, or time-bound items you can find in the
   inbox content or task due-dates. If genuinely nothing time-bound is found, say so
   briefly rather than omitting the section.
-- ## Due / Overdue — what's due today or overdue, called out by project
-- ## Blocked — any projects that look stalled or blocked, if apparent from the tasks
+- ## Due / Overdue — what's due today or overdue, called out by OU
+- ## Blocked — anything that looks stalled or blocked, if apparent from the tasks
 - ## Focus Plan — no more than 3 priority items for today
 Use professional, warm, direct language. Format in clean Markdown.
 Do not invent tasks, people, or meetings. Only reference what is in the provided context.\
@@ -180,20 +181,20 @@ Do not invent tasks, people, or meetings. Only reference what is in the provided
 
 
 def _build_project_task_summary(data_root: str) -> str:
-    """Deterministic, grouped-by-project open task list (not fuzzy semantic search)."""
-    tasks = task_scan.scan_open_tasks(data_root)
+    """Deterministic, grouped-by-OU curated task list — today's Daily files, not
+    every open checklist item across every project (see task_scan.scan_todays_tasks)."""
+    tasks = task_scan.scan_todays_tasks(data_root)
     if not tasks:
-        return "No open tasks found in any active project."
+        return "No tasks queued for today (nothing in today's Daily files yet)."
 
-    by_project: dict[str, list[dict]] = {}
+    by_ou: dict[str, list[dict]] = {}
     for t in tasks:
-        by_project.setdefault(t["project_title"], []).append(t)
+        by_ou.setdefault(t["ou"], []).append(t)
 
     parts = []
-    for title, project_tasks in by_project.items():
-        rel_path = project_tasks[0]["rel_path"]
-        parts.append(f"### {title} ({rel_path}) — {len(project_tasks)} open task(s)")
-        for t in project_tasks:
+    for ou, ou_tasks in by_ou.items():
+        parts.append(f"### {ou} — {len(ou_tasks)} task(s) for today")
+        for t in ou_tasks:
             due_str = f" due:{t['due']}" if t["due"] else ""
             parts.append(f"- {t['text']}{due_str}")
     return "\n".join(parts)

@@ -690,6 +690,11 @@ def news_watch_finalize_for_user(data_root: str) -> dict:
     _upsert_seen_entries(seen, surviving, today_str)
     _save_news_seen(data_root, seen)
 
+    try:
+        write_stats_file(data_root)
+    except Exception:
+        logger.exception("news_watch_finalize: write_stats_file failed")
+
     # Mark finalized
     state["finalized"] = True
     state["finalized_at"] = datetime.now().isoformat()
@@ -788,3 +793,83 @@ def mark_clicked(data_root: str, bullet: str) -> bool:
             _save_news_seen(data_root, seen)
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Human-readable stats file (NewsStats.md) — informational only, not read by
+# the AI's write flow. Regenerated at the end of a successful finalize.
+# ---------------------------------------------------------------------------
+
+def _topic_stats(topic: str, seen: list[dict]) -> dict:
+    tag = f"*topic: {topic}*"
+    matching = [s for s in seen if tag in s.get("bullet", "")]
+    liked = sum(1 for s in matching if s.get("feedback") == "+1")
+    disliked = sum(1 for s in matching if s.get("feedback") == "-1")
+    clicked = sum(1 for s in matching if s.get("clicked"))
+    last_liked = None
+    for s in matching:
+        if s.get("feedback") == "+1":
+            d = s.get("date", "")
+            if not last_liked or d > last_liked:
+                last_liked = d
+    return {
+        "shown": len(matching), "liked": liked, "disliked": disliked,
+        "clicked": clicked, "last_liked": last_liked,
+    }
+
+
+def write_stats_file(data_root: str) -> None:
+    """Regenerate NewsStats.md — tracked topics + overall activity, for the user to browse."""
+    seen = _load_news_seen(data_root)
+    today = date.today()
+    topics = _load_topic_file(data_root)
+    projects = _scan_active_projects(data_root)
+
+    lines = ["# News Stats", "", f"_Last updated: {today.isoformat()}_", "", "## Tracked Topics", ""]
+
+    any_topic = False
+    for t in topics:
+        any_topic = True
+        stats = _topic_stats(t["topic"], seen)
+        dormant = _topic_is_dormant(t["topic"], t["added"], seen, today, config.NEWS_TOPIC_DORMANT_DAYS)
+        age_days = (today - t["added"]).days
+        status = "dormant (breakthrough-only)" if dormant else "active"
+        lines.append(
+            f"- **{t['topic']}** — {status}, added {age_days}d ago, "
+            f"{stats['shown']} shown / {stats['clicked']} clicked / {stats['liked']} liked, "
+            f"last liked: {stats['last_liked'] or 'never'}"
+        )
+
+    for proj in projects:
+        for topic in proj.get("topics", []):
+            any_topic = True
+            stats = _topic_stats(topic, seen)
+            lines.append(
+                f"- **{topic}** _(project: {proj['key']})_ — "
+                f"{stats['shown']} shown / {stats['clicked']} clicked / {stats['liked']} liked, "
+                f"last liked: {stats['last_liked'] or 'never'}"
+            )
+
+    if not any_topic:
+        lines.append("_No topics tracked yet._")
+
+    total_clicked = sum(1 for s in seen if s.get("clicked"))
+    total_liked = sum(1 for s in seen if s.get("feedback") == "+1")
+    total_disliked = sum(1 for s in seen if s.get("feedback") == "-1")
+    resurfacing = sum(
+        1 for s in seen
+        if not s.get("clicked") and s.get("shown_count", 1) < config.NEWS_MAX_RESHOW
+    )
+
+    lines += [
+        "",
+        "## Activity",
+        "",
+        f"- Total items seen: {len(seen)}",
+        f"- Clicked: {total_clicked}",
+        f"- Liked: {total_liked} · Disliked: {total_disliked}",
+        f"- Currently resurfacing (unclicked, under reshow cap): {resurfacing}",
+    ]
+
+    path = Path(data_root) / "NewsStats.md"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")

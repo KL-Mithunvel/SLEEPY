@@ -29,7 +29,7 @@ def client(app):
 
 def test_get_today_empty_tasks(client, monkeypatch):
     import task_scan
-    monkeypatch.setattr(task_scan, "scan_open_tasks", lambda data_root: [])
+    monkeypatch.setattr(task_scan, "scan_todays_tasks", lambda data_root: [])
     resp = client.get("/api/today")
     assert resp.status_code == 200
     data = resp.get_json()
@@ -41,20 +41,20 @@ def test_get_today_empty_tasks(client, monkeypatch):
 def test_get_today_returns_tasks(client, monkeypatch):
     import task_scan
     fake_tasks = [
-        {"rel_path": "SMTW/proj.md", "text": "Deploy server", "project_title": "Proj", "due": "2026-07-05"},
-        {"rel_path": "SMTW/proj.md", "text": "Review PR", "project_title": "Proj", "due": None},
+        {"rel_path": "SMTW/Daily/2026-07-04.md", "text": "Deploy server", "ou": "SMTW", "due": "2026-07-05"},
+        {"rel_path": "SMTW/Daily/2026-07-04.md", "text": "Review PR", "ou": "SMTW", "due": None},
     ]
-    monkeypatch.setattr(task_scan, "scan_open_tasks", lambda data_root: fake_tasks)
+    monkeypatch.setattr(task_scan, "scan_todays_tasks", lambda data_root: fake_tasks)
     resp = client.get("/api/today")
     assert resp.status_code == 200
     data = resp.get_json()
     assert len(data["tasks"]) == 2
-    assert data["tasks"][0]["project_title"] == "Proj"
+    assert data["tasks"][0]["ou"] == "SMTW"
 
 
 def test_get_today_task_scan_failure_returns_empty(client, monkeypatch):
     import task_scan
-    monkeypatch.setattr(task_scan, "scan_open_tasks", lambda data_root: (_ for _ in ()).throw(RuntimeError("scan failed")))
+    monkeypatch.setattr(task_scan, "scan_todays_tasks", lambda data_root: (_ for _ in ()).throw(RuntimeError("scan failed")))
     resp = client.get("/api/today")
     assert resp.status_code == 200
     assert resp.get_json()["tasks"] == []
