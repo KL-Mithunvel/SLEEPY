@@ -1,14 +1,15 @@
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useLogsStore } from '../stores/logs.js'
 
 const store = useLogsStore()
 
-const FILTERS = [
-  { key: 'all',    label: 'All' },
-  { key: 'daily',  label: 'Daily' },
-  { key: 'weekly', label: 'Weekly' },
-]
+// OU filter — built from whatever OUs actually have log entries, since
+// there's no fixed OU list (see docs/CORPUS_SCHEMA.md).
+const ouFilters = computed(() => {
+  const ous = [...new Set(store.logs.map(l => l.ou))].sort()
+  return [{ key: 'all', label: 'All' }, ...ous.map(ou => ({ key: ou, label: ou }))]
+})
 
 onMounted(() => store.fetchLogs())
 </script>
@@ -27,18 +28,19 @@ onMounted(() => store.fetchLogs())
       </button>
     </div>
     <p class="mb-3" style="color: var(--text-muted-custom); font-size: 0.85rem;">
-      Daily logs and weekly reviews.
+      Your reflective notes — what happened, not what's left to do. Each entry is the '## Log' section of a day's
+      <code style="font-size: 0.78rem;">Daily</code> file: say something like "log that the call went well" and it lands here.
     </p>
 
-    <!-- Type filter -->
-    <div class="d-flex gap-1 mb-3">
+    <!-- OU filter -->
+    <div v-if="ouFilters.length > 2" class="d-flex gap-1 mb-3">
       <button
-        v-for="f in FILTERS"
+        v-for="f in ouFilters"
         :key="f.key"
         class="btn btn-sm"
-        :class="store.typeFilter === f.key ? 'btn-primary' : 'btn-outline-secondary'"
+        :class="store.ouFilter === f.key ? 'btn-primary' : 'btn-outline-secondary'"
         style="font-size: 0.78rem;"
-        @click="store.typeFilter = f.key; store.selectedPath = null; store.selectedContent = null"
+        @click="store.ouFilter = f.key; store.selectedPath = null; store.selectedContent = null"
       >{{ f.label }}</button>
     </div>
 
@@ -58,15 +60,16 @@ onMounted(() => store.fetchLogs())
     <!-- Empty: no logs dir -->
     <div v-else-if="store.logs.length === 0" class="card p-4 text-center" style="color: var(--text-muted-custom);">
       <i class="bi bi-journal-text d-block mb-2" style="font-size: 2.5rem; opacity: 0.35;"></i>
-      <div style="font-size: 0.85rem;">No log files found.</div>
+      <div style="font-size: 0.85rem;">No log entries yet.</div>
       <div style="font-size: 0.75rem; margin-top: 0.3rem; opacity: 0.6;">
-        Create <code style="font-size: 0.73rem;">data/kla/logs/YYYY-MM-DD.md</code> files to populate this view.
+        Tell the Assistant something worth remembering about your day — e.g. "log that the meeting went well" —
+        and it'll add it to today's <code style="font-size: 0.73rem;">## Log</code> section.
       </div>
     </div>
 
     <!-- Empty after filter -->
     <div v-else-if="store.filtered.length === 0" class="card p-3 text-center" style="color: var(--text-muted-custom); font-size: 0.84rem;">
-      No {{ store.typeFilter }} logs found.
+      No log entries for {{ store.ouFilter }}.
     </div>
 
     <!-- Log list -->
@@ -80,15 +83,11 @@ onMounted(() => store.fetchLogs())
       >
         <div class="p-3 d-flex align-items-center justify-content-between gap-2">
           <div class="d-flex align-items-center gap-2">
-            <i
-              class="bi"
-              :class="log.type === 'weekly' ? 'bi-calendar-week' : 'bi-calendar-day'"
-              style="font-size: 0.9rem; color: var(--accent, #6ea8fe);"
-            ></i>
+            <i class="bi bi-calendar-day" style="font-size: 0.9rem; color: var(--accent, #6ea8fe);"></i>
             <div>
               <div class="fw-medium" style="font-size: 0.87rem;">{{ log.date }}</div>
-              <div style="font-size: 0.72rem; color: var(--text-muted-custom); text-transform: capitalize;">
-                {{ log.type }}
+              <div style="font-size: 0.72rem; color: var(--text-muted-custom);">
+                {{ log.ou }}
               </div>
             </div>
           </div>

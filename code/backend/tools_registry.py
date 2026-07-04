@@ -15,6 +15,24 @@ import skills
 import task_queue
 from llm import Tool
 
+_ALLOWED_EMAIL_DOMAIN = "@smtw.in"
+
+
+def _is_allowed_email_recipient(to: str) -> bool:
+    """
+    The chat LLM's context includes externally-controlled text (news bullets
+    pulled from the public web via news_watch.py), so send_email is the one
+    unconfirmed write action reachable by prompt injection. Restricting
+    recipients to the owner or the owner's own company domain closes the
+    exfiltration path without requiring a confirm-gate UI for routine mail.
+    """
+    to = (to or "").strip().lower()
+    if not to:
+        return False
+    if to == (config.USER_EMAIL or "").strip().lower():
+        return True
+    return to.endswith(_ALLOWED_EMAIL_DOMAIN)
+
 
 def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
     data_root = config.USER_DATA_ROOT
@@ -135,8 +153,15 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
         return "\n\n---\n\n".join(parts)
 
     def h_send_email(inp: dict) -> str:
+        to = inp["to"]
+        if not _is_allowed_email_recipient(to):
+            return (
+                f"[error: {to!r} is not an allowed recipient. This assistant can only email "
+                "the account owner or addresses on the smtw.in domain — ask the user to send "
+                "to anyone else themselves.]"
+            )
         tid = task_queue.enqueue(conn, "email", {
-            "to": inp["to"], "subject": inp["subject"], "body": inp["body"],
+            "to": to, "subject": inp["subject"], "body": inp["body"],
         })
         return f"Email queued (task_id={tid})"
 

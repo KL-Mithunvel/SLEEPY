@@ -1,5 +1,6 @@
 """
-Tests for the Logs blueprint: list and content endpoints.
+Tests for the Logs blueprint: reads the '## Log' section of <OU>/Daily/<date>.md
+files (the root-level logs/ folder is legacy — see docs/CORPUS_SCHEMA.md).
 """
 
 import os
@@ -18,6 +19,15 @@ def client(app):
     return app.test_client()
 
 
+def _daily_with_log(entry_text: str) -> str:
+    return (
+        "---\ndate: 2026-06-18 Thursday\n---\n\n"
+        "## Tasks\n\n- [ ] Some task\n\n"
+        "## Daily checklist\n\n\n\n"
+        f"## Log\n\n### Morning\n\n### Evening\n\n{entry_text}\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # GET /api/logs — list
 # ---------------------------------------------------------------------------
@@ -32,52 +42,67 @@ def test_list_logs_empty(client, monkeypatch, tmp_path):
     assert data["total"] == 0
 
 
-def test_list_logs_daily_and_weekly(client, monkeypatch, tmp_path):
+def test_list_logs_skips_daily_files_with_no_log_content(client, monkeypatch, tmp_path):
+    """A Daily file whose ## Log section is just bare Morning/Evening headers shouldn't show up."""
     import config
 
     root = tmp_path / "corpus"
-    logs_dir = root / "logs"
-    logs_dir.mkdir(parents=True)
-    (logs_dir / "2026-06-18.md").write_text("# 18 June 2026\n", encoding="utf-8")
-    (logs_dir / "2026-06-17.md").write_text("# 17 June 2026\n", encoding="utf-8")
-    (logs_dir / "2026-W25.md").write_text("# Week 25 2026\n", encoding="utf-8")
+    daily_dir = root / "VIT" / "Daily"
+    daily_dir.mkdir(parents=True)
+    (daily_dir / "2026-06-18.md").write_text(
+        "---\ndate: 2026-06-18 Thursday\n---\n\n## Tasks\n\n## Log\n\n### Morning\n\n### Evening\n",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
 
     resp = client.get("/api/logs")
-    assert resp.status_code == 200
-    data = resp.get_json()
-    assert data["total"] == 3
-
-    types = {l["filename"]: l["type"] for l in data["logs"]}
-    assert types["2026-06-18.md"] == "daily"
-    assert types["2026-06-17.md"] == "daily"
-    assert types["2026-W25.md"] == "weekly"
+    assert resp.get_json()["total"] == 0
 
 
-def test_list_logs_sorted_newest_first(client, monkeypatch, tmp_path):
+def test_list_logs_includes_daily_files_with_real_log_content(client, monkeypatch, tmp_path):
     import config
 
     root = tmp_path / "corpus2"
-    logs_dir = root / "logs"
-    logs_dir.mkdir(parents=True)
-    (logs_dir / "2026-06-01.md").write_text("# June 1\n", encoding="utf-8")
-    (logs_dir / "2026-06-18.md").write_text("# June 18\n", encoding="utf-8")
-    (logs_dir / "2026-06-10.md").write_text("# June 10\n", encoding="utf-8")
+    daily_dir = root / "VIT" / "Daily"
+    daily_dir.mkdir(parents=True)
+    (daily_dir / "2026-06-18.md").write_text(
+        _daily_with_log("Talked to Arun Kumar Sir about the CAN protocol setup."), encoding="utf-8",
+    )
 
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
 
     resp = client.get("/api/logs")
-    filenames = [l["filename"] for l in resp.get_json()["logs"]]
-    assert filenames == sorted(filenames, reverse=True)
+    data = resp.get_json()
+    assert data["total"] == 1
+    assert data["logs"][0]["ou"] == "VIT"
+    assert data["logs"][0]["rel_path"] == "VIT/Daily/2026-06-18.md"
+    assert data["logs"][0]["type"] == "daily"
 
 
-def test_list_logs_daily_display_date(client, monkeypatch, tmp_path):
+def test_list_logs_sorted_newest_first_across_ous(client, monkeypatch, tmp_path):
     import config
 
     root = tmp_path / "corpus3"
-    (root / "logs").mkdir(parents=True)
-    (root / "logs" / "2026-06-18.md").write_text("# Log\n", encoding="utf-8")
+    for ou, d in [("Personal", "2026-06-01"), ("VIT", "2026-06-18"), ("SMTW", "2026-06-10")]:
+        daily_dir = root / ou / "Daily"
+        daily_dir.mkdir(parents=True)
+        (daily_dir / f"{d}.md").write_text(_daily_with_log("Entry."), encoding="utf-8")
+
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.get("/api/logs")
+    dates = [l["date"] for l in resp.get_json()["logs"]]
+    assert dates == ["18-06-2026", "10-06-2026", "01-06-2026"]
+
+
+def test_list_logs_display_date_format(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "corpus4"
+    daily_dir = root / "SMTW" / "Daily"
+    daily_dir.mkdir(parents=True)
+    (daily_dir / "2026-06-18.md").write_text(_daily_with_log("Shipped the OU reorg."), encoding="utf-8")
 
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
 
@@ -86,39 +111,30 @@ def test_list_logs_daily_display_date(client, monkeypatch, tmp_path):
     assert log["date"] == "18-06-2026"
 
 
-def test_list_logs_weekly_display_date(client, monkeypatch, tmp_path):
-    import config
-
-    root = tmp_path / "corpus4"
-    (root / "logs").mkdir(parents=True)
-    (root / "logs" / "2026-W25.md").write_text("# Week 25\n", encoding="utf-8")
-
-    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
-
-    resp = client.get("/api/logs")
-    log = resp.get_json()["logs"][0]
-    assert log["date"] == "W25 2026"
-    assert log["type"] == "weekly"
-
-
 # ---------------------------------------------------------------------------
 # GET /api/logs/content
 # ---------------------------------------------------------------------------
 
-def test_log_content_success(client, monkeypatch, tmp_path):
+def test_log_content_success_returns_only_log_section(client, monkeypatch, tmp_path):
     import config
 
     root = tmp_path / "corpus5"
-    (root / "logs").mkdir(parents=True)
-    (root / "logs" / "2026-06-18.md").write_text("# 18 June\n\nStood up the server.", encoding="utf-8")
+    daily_dir = root / "SMTW" / "Daily"
+    daily_dir.mkdir(parents=True)
+    (daily_dir / "2026-06-18.md").write_text(
+        "---\ndate: 2026-06-18 Thursday\n---\n\n## Tasks\n\n- [ ] Secret task text\n\n"
+        "## Log\n\n### Evening\n\nStood up the server.\n",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
 
-    resp = client.get("/api/logs/content?path=logs/2026-06-18.md")
+    resp = client.get("/api/logs/content?path=SMTW/Daily/2026-06-18.md")
     assert resp.status_code == 200
     data = resp.get_json()
     assert "Stood up the server" in data["content"]
-    assert data["rel_path"] == "logs/2026-06-18.md"
+    assert "Secret task text" not in data["content"]
+    assert data["rel_path"] == "SMTW/Daily/2026-06-18.md"
 
 
 def test_log_content_missing_param(client):
@@ -133,14 +149,13 @@ def test_log_content_traversal_rejected(client, monkeypatch, tmp_path):
     assert resp.status_code == 400
 
 
-def test_log_content_outside_logs_dir_rejected(client, monkeypatch, tmp_path):
-    """A valid .md file outside logs/ must be rejected."""
+def test_log_content_rejects_non_daily_files(client, monkeypatch, tmp_path):
+    """A project file (not a <OU>/Daily/<date>.md) must be rejected even if it exists."""
     import config
 
     root = tmp_path / "corpus6"
     (root / "SMTW").mkdir(parents=True)
     (root / "SMTW" / "proj.md").write_text("# Proj\n", encoding="utf-8")
-    (root / "logs").mkdir()
 
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
 
@@ -152,8 +167,8 @@ def test_log_content_not_found(client, monkeypatch, tmp_path):
     import config
 
     root = tmp_path / "corpus7"
-    (root / "logs").mkdir(parents=True)
+    (root / "SMTW" / "Daily").mkdir(parents=True)
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
 
-    resp = client.get("/api/logs/content?path=logs/2026-01-01.md")
+    resp = client.get("/api/logs/content?path=SMTW/Daily/2026-01-01.md")
     assert resp.status_code == 404

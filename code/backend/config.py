@@ -97,6 +97,26 @@ KEYCLOAK_REALM: str      = _get("KEYCLOAK_REALM", "")
 KEYCLOAK_CLIENT_ID: str  = _get("KEYCLOAK_CLIENT_ID", "pma")
 KEYCLOAK_HOST_IP: str    = _get("KEYCLOAK_HOST_IP", "")
 
+# Explicit prod flag — deliberately NOT inferred from KEYCLOAK_PUBLIC_URL being set,
+# since secrets_app.py commonly has real Keycloak values filled in well before the
+# app is actually deployed (e.g. while still running locally with DEV_AUTH_BYPASS=1).
+# Must be set to "production" explicitly (docker-compose.yml does this) for the
+# hard-fail guards below to engage.
+APP_ENV: str = str(_get("APP_ENV", "development")).strip().lower()
+IS_PROD: bool = APP_ENV in ("prod", "production")
+
+if IS_PROD and DEV_AUTH_BYPASS:
+    raise RuntimeError(
+        "APP_ENV=production with DEV_AUTH_BYPASS enabled — refusing to start. "
+        "This combination exposes the app with owner rights to anyone, unauthenticated."
+    )
+
+if IS_PROD and not ANTHROPIC_API_KEY:
+    raise RuntimeError(
+        "APP_ENV=production but no ANTHROPIC_API_KEY is set — refusing to start with the "
+        "personal Claude Code OAuth token fallback in prod. Set ANTHROPIC_API_KEY."
+    )
+
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------

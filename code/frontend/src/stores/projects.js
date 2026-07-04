@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { apiGet, apiPut } from '../api.js'
+import { apiGet, apiPost, apiPut } from '../api.js'
 
 export const useProjectsStore = defineStore('projects', {
   state: () => ({
@@ -13,6 +13,12 @@ export const useProjectsStore = defineStore('projects', {
     saveError: null,
     filter: '',
     error: null,
+
+    // Structured editor (project files only)
+    mode: 'read',            // 'read' | 'edit' | 'raw'
+    structured: null,        // parse_structured() result for the selected file
+    loadingStructured: false,
+    structuredError: null,
   }),
 
   getters: {
@@ -62,6 +68,9 @@ export const useProjectsStore = defineStore('projects', {
       this.editedContent = null
       this.saveError = null
       this.error = null
+      this.structured = null
+      this.structuredError = null
+      this.mode = 'read'
       try {
         const data = await apiGet(`/api/projects/content?path=${encodeURIComponent(relPath)}`)
         this.selectedContent = data.content
@@ -71,6 +80,11 @@ export const useProjectsStore = defineStore('projects', {
       } finally {
         this.loadingContent = false
       }
+      // Structured data is only meaningful for project files, but fetching it
+      // is cheap and self-contained — a non-project file just gets a 404/empty
+      // result the view ignores (it only shows the structured editor when
+      // selectedMeta is set, i.e. the file is a known project entry).
+      this.fetchStructured()
     },
 
     closeFile() {
@@ -78,6 +92,74 @@ export const useProjectsStore = defineStore('projects', {
       this.selectedContent = null
       this.editedContent = null
       this.saveError = null
+      this.structured = null
+      this.structuredError = null
+      this.mode = 'read'
+    },
+
+    async fetchStructured() {
+      if (!this.selectedPath) return
+      this.loadingStructured = true
+      this.structuredError = null
+      try {
+        this.structured = await apiGet(`/api/projects/structured?path=${encodeURIComponent(this.selectedPath)}`)
+      } catch (e) {
+        this.structured = null
+        this.structuredError = e.message
+      } finally {
+        this.loadingStructured = false
+      }
+    },
+
+    async addTask(text, priority, due) {
+      await apiPost('/api/projects/tasks', { path: this.selectedPath, action: 'add', text, priority, due })
+      await this.fetchStructured()
+      this.fetchProjects()
+    },
+
+    async editTask(task, { description, done, priority, due }) {
+      await apiPost('/api/projects/tasks', {
+        path: this.selectedPath, action: 'edit', old_line: task.line,
+        text: description ?? task.description, done: done ?? task.done,
+        priority: priority !== undefined ? priority : task.priority,
+        due: due !== undefined ? due : task.due,
+      })
+      await this.fetchStructured()
+      this.fetchProjects()
+    },
+
+    async toggleTask(task) {
+      await this.editTask(task, { done: !task.done })
+    },
+
+    async removeTask(task) {
+      await apiPost('/api/projects/tasks', { path: this.selectedPath, action: 'remove', old_line: task.line })
+      await this.fetchStructured()
+      this.fetchProjects()
+    },
+
+    async addListItem(section, text) {
+      await apiPost('/api/projects/list-item', { path: this.selectedPath, section, action: 'add', text })
+      await this.fetchStructured()
+    },
+
+    async removeListItem(section, text) {
+      await apiPost('/api/projects/list-item', { path: this.selectedPath, section, action: 'remove', text })
+      await this.fetchStructured()
+    },
+
+    async saveSection(heading, text) {
+      await apiPut('/api/projects/section', { path: this.selectedPath, heading, text })
+      await this.fetchStructured()
+    },
+
+    async setStatus(status) {
+      const data = await apiPut('/api/projects/status', { path: this.selectedPath, status })
+      if (data.rel_path !== this.selectedPath) {
+        this.selectedPath = data.rel_path
+      }
+      await this.fetchStructured()
+      this.fetchProjects()
     },
 
     discardEdits() {

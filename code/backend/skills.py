@@ -28,8 +28,16 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
 
 
 def get_skill_content(name: str) -> str:
-    """Return the body of a skill file (frontmatter stripped). Returns error string if not found."""
-    path: Path = config.SKILLS_DIR / f"{name}.md"
+    """Return the body of a skill file (frontmatter stripped). Returns error string if not found or invalid."""
+    # `name` is LLM-controlled (the load_skill tool) — resolve and check containment
+    # before touching the filesystem, same boundary check as tools_registry._safe_path.
+    if not name:
+        return f"[invalid skill name {name!r} — available: {_list_names()}]"
+
+    skills_dir = config.SKILLS_DIR.resolve()
+    path = (skills_dir / f"{name}.md").resolve()
+    if path.parent != skills_dir:
+        return f"[invalid skill name {name!r} — available: {_list_names()}]"
     if not path.exists():
         return f"[skill '{name}' not found — available: {_list_names()}]"
     _, body = _parse_frontmatter(path.read_text(encoding="utf-8"))

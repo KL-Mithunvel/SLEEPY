@@ -217,7 +217,10 @@ def query():
     q = request.args.get("q", "").strip()
     if not q:
         return jsonify({"error": "q is required"}), 400
-    k = min(int(request.args.get("k", 5)), 20)
+    try:
+        k = min(int(request.args.get("k", 5)), 20)
+    except ValueError:
+        return jsonify({"error": "k must be an integer"}), 400
 
     chunks = md_indexer.query(q, k=k)
     return jsonify({"items": chunks, "total": len(chunks)})

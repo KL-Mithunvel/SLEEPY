@@ -78,9 +78,9 @@ def generate_briefing():
     db = _db()
     try:
         briefing = ai_client.generate_morning_briefing(db)
-    except Exception as exc:
+    except Exception:
         logger.exception("Briefing generation failed")
-        return jsonify({"error": str(exc)}), 502
+        return jsonify({"error": "Briefing generation failed"}), 502
 
     now_str = datetime.now().strftime("%d-%m-%Y %H:%M")
     return jsonify({"briefing": briefing, "generated_at": now_str})
@@ -148,9 +148,9 @@ def capture():
         sha = md_editor.apply_edit(proposal["event_id"], db)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    except Exception as exc:
+    except Exception:
         logger.exception("Capture failed")
-        return jsonify({"error": str(exc)}), 500
+        return jsonify({"error": "Capture failed"}), 500
 
     return jsonify({"ok": True, "line": line, "sha": sha[:8]})
 

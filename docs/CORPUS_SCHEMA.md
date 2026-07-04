@@ -44,19 +44,23 @@ Flat — directly in the OU folder, **not** nested under a `Projects/` subfolder
 ```yaml
 ---
 key: project-slug        # required — discovery key used by housekeeping/news_watch/goal_planner
-status: active            # required — only "active" projects are scanned by anything
+status: active            # required — active | on_hold | completed | archived (see below)
 owner: KL Mithunvel
 started: YYYY-MM-DD       # ISO — see "Date Formats" below
 target_date: YYYY-MM-DD   # optional — enables the nightly deadline planner (see below)
-news_topics: [topic1, topic2]  # optional — enables nightly news search for this project
+news_topics: [topic1, topic2]  # optional — enables nightly news search for this project (always this key, not news_watch:)
 ---
 ```
 
 `key` and `status` are required — `housekeeping.py`'s `missing_frontmatter` checker flags files without them. Everything else is optional.
 
-### Template body
+`status` is exactly one of `active | on_hold | completed | archived` (added 2026-07-04, `project_editor.py`'s `set_status`). Setting `archived` physically moves the file from `<OU>/<slug>.md` to `<OU>/Archive/<slug>.md`; setting anything else while the file is in `Archive/` moves it back out. Every other status value is a frontmatter-only rewrite, no move.
 
-`## Goal`, `## Why`, `## Current State`, `## Tasks`, `## Decisions`, `## Open Questions`, `## Notes`, `## AI Notes` — see `SystemPrompt.MD`'s "Project File Template" for the canonical shape the AI uses for *new* projects. Existing projects with their own well-developed structure are not retrofitted to match.
+### Template body — fixed section order
+
+`## Goal`, `## Why`, `## Current State`, [project-specific custom sections, e.g. a Hardware table], `## Tasks`, `## Decisions`, `## Open Questions`, `## Notes`, `## AI Notes` — see `SystemPrompt.MD`'s "Project File Template" for the canonical example. This order is **fixed** (not just a style preference) as of the 2026-07-04 migration: the Projects view's structured GUI editor (`project_editor.py` + `GET /api/projects/structured`) parses these exact headings into form controls — a status dropdown, editable task rows, and Decisions/Open Questions list editors — so a project file that doesn't follow this shape won't render correctly in the structured editor (it's still viewable/editable via the Raw tab, which just edits the whole file as text).
+
+**Task line tags** — `- [ ] <description> priority:<high|medium|low> due:<YYYY-MM-DD>`, both optional, same style. `priority:` was added 2026-07-04 alongside the structured editor; `due:` already existed (see "Date Formats").
 
 ---
 
@@ -103,6 +107,14 @@ The Today view / "Active Tasks" panel reads **only** `<OU>/Daily/<today>.md`'s `
 - The AI only appends to a Daily file's `## Tasks` when the user *explicitly* asks to add something to today's list — never as a side effect of any other request.
 - A recurring habit ("every day", "once a week") becomes a `<OU>/Recur/<name>.md` template, not a one-off Daily line.
 - Telling the AI something is done ("I had that meeting") checks off an existing line — it never creates a new one.
+
+---
+
+## Daily Log Entries (`<OU>/Daily/<today>.md`'s `## Log` section)
+
+Reflective, narrative record-keeping — what happened, distinct from `## Tasks` (actionable, checkable items) and a project's `## Notes` (durable reference context, not date-scoped). Structured as `### Morning`/`### Evening` sub-headings. The AI only adds an entry on explicit request (same discipline as Tasks — see "Task-Adding Rules" above), never as a side effect of a task being mentioned or completed.
+
+The frontend Logs view (`GET /api/logs`, `logs_bp.py`) reads directly from these sections across every OU's `Daily/` folder — there is no separate log file. **The root-level `data/<user>/logs/` folder is legacy and unused** (superseded by this per-OU-Daily convention); if you see references to it in older notes, they're stale.
 
 ---
 

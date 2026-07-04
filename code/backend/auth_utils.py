@@ -1,8 +1,11 @@
 import functools
+import logging
 import jwt
 from flask import g, request, jsonify
 import config
 import config_rbac
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +79,23 @@ def _jwks_url():
     # Strip trailing slash
     base = base.rstrip("/")
     if config.KEYCLOAK_HOST_IP:
-        # Internal rewrite: use http + LAN IP, port 8080
-        base = f"http://{config.KEYCLOAK_HOST_IP}:8080"
+        # Internal rewrite: LAN IP, port 8080. Defaults to http:// for backward
+        # compat with existing deployments, but plaintext JWKS fetch over the LAN
+        # is a MITM risk — set KEYCLOAK_HOST_SCHEME=https once the internal
+        # Keycloak endpoint supports it.
+        scheme = getattr(config, "KEYCLOAK_HOST_SCHEME", "http")
+        if scheme == "http":
+            logger.warning(
+                "Fetching JWKS over plain http:// to KEYCLOAK_HOST_IP — vulnerable to a LAN "
+                "MITM substituting signing keys. Set KEYCLOAK_HOST_SCHEME=https once available."
+            )
+        base = f"{scheme}://{config.KEYCLOAK_HOST_IP}:8080"
     return f"{base}/realms/{realm}/protocol/openid-connect/certs"
+
+
+def _issuer() -> str:
+    base = (config.KEYCLOAK_PUBLIC_URL or "").rstrip("/")
+    return f"{base}/realms/{config.KEYCLOAK_REALM}"
 
 
 def validate_token():
@@ -89,6 +106,11 @@ def validate_token():
     if request.method == "OPTIONS":
         return
     if request.path == "/healthz":
+        return
+    if request.path == "/api/auth/config":
+        # Public OIDC bootstrap info (Keycloak URL/realm/clientId, dev-bypass flag) —
+        # the frontend must fetch this BEFORE it has a token to initialise Keycloak,
+        # so requiring auth here would deadlock login entirely. No secrets in the payload.
         return
 
     if config.DEV_AUTH_BYPASS:
@@ -106,6 +128,7 @@ def validate_token():
             token,
             signing_key.key,
             algorithms=["RS256"],
+            issuer=_issuer(),
             options={"verify_aud": False},
         )
     except Exception:
@@ -118,6 +141,7 @@ def validate_token():
                 token,
                 signing_key.key,
                 algorithms=["RS256"],
+                issuer=_issuer(),
                 options={"verify_aud": False},
             )
         except Exception:
@@ -140,13 +164,17 @@ def validate_token():
     if any(r in config_rbac.OWNER_REALM_ROLES for r in all_roles):
         app_roles.append("owner")
 
-    primary_role = app_roles[0] if app_roles else "owner"
+    # A validly-signed token from the shared realm with none of the app's own
+    # roles must NOT default to owner — that would give every user of the
+    # shared Office.smtw.in realm full access to this single-user app.
+    if not app_roles:
+        return jsonify({"error": "No application role assigned"}), 403
 
     g.user = {
         "sub": payload.get("sub"),
         "name": payload.get("name", ""),
         "email": payload.get("email", ""),
         "roles": app_roles,
-        "role": primary_role,
+        "role": app_roles[0],
         "permissions": compute_permissions(app_roles),
     }

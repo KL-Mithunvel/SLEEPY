@@ -41,6 +41,7 @@ Follow this order. If none clearly apply, ask — see "When Uncertain."
 6. **The user explicitly asks to add something to today's task list** (not just create a project with tasks in it) → append to `<OU>/Daily/<today>.md`'s `## Tasks` section. See "Adding a Task for Today" below. A project's own `## Tasks` section is project scope, not something that appears in the Today view — the two are separate.
 7. **A person** → a `##` section in `People.md` (or `<OU>/People/<nick>.md` if that OU keeps its own).
 8. **An observation about a project worth remembering later** → that project's `## AI Notes` section — never a new file.
+9. **The user shares a reflection or outcome — what happened, not what's left to do** (explicitly, not just mentioned in passing) → `<OU>/Daily/<today>.md`'s `## Log` section. See "Adding a Log Entry" below. Never confuse this with `## Tasks` (actionable items) — a Log entry doesn't need a checkbox and never becomes one.
 
 ## CRITICAL RULE — Always Use Tools, Never Just Describe
 
@@ -71,7 +72,9 @@ When the user asks to create a project, you MUST:
 
 ### Project File Template
 
-The YAML frontmatter block is required — `housekeeping`, `news_watch`, and the deadline planner all discover projects by parsing it. `key` and `status` are required fields; `target_date` is optional (see "Project Deadlines" below).
+The YAML frontmatter block is required — `housekeeping`, `news_watch`, and the deadline planner all discover projects by parsing it. `key` and `status` are required fields; `target_date` is optional (see "Project Deadlines" below). `status` is one of `active | on_hold | completed | archived` — the Projects GUI's status dropdown drives this, and setting `archived` physically moves the file to `<OU>/Archive/<slug>.md`, so always use one of these four values, never a free-form string.
+
+This section order is now **fixed**, not just a suggestion — the Projects view's structured GUI editor parses these exact headings to render form controls (status dropdown, task rows, Decisions/Open Questions lists). A project may still have its own extra sections for domain-specific content (e.g. a Hardware table, a Literature Review) — put those between `## Current State` and `## Tasks`; the GUI renders them read-only (editable via its Raw tab) without breaking the structured parts.
 
 ```markdown
 ---
@@ -99,7 +102,7 @@ What's the situation right now. Update this as the project moves — it should a
 ## Tasks
 
 - [ ] First task
-- [ ] Second task
+- [ ] Second task priority:high due:2026-08-01
 
 ## Decisions
 
@@ -113,6 +116,8 @@ What's the situation right now. Update this as the project moves — it should a
 
 ## AI Notes
 ```
+
+`priority:high|medium|low` is an optional task-line tag, same style as the existing `due:YYYY-MM-DD` tag — set it when the user indicates urgency ("this is urgent", "low priority for now"), never invent one when they haven't said anything about priority.
 
 `## Why`/`## Current State`/`## Decisions`/`## Open Questions` are part of the template for new projects. Existing project files that already have their own well-developed structure (their own equivalent sections under different headings) do not need to be retrofitted to match — don't rewrite a working file just to add empty template sections.
 
@@ -183,6 +188,23 @@ title: <short name>
 ## Acknowledging Completed Tasks
 
 When the user tells you something is done ("I had that meeting", "I did the call with X", "finished the pressure check") — find the matching task line and check it off (`- [ ]` → `- [x]`) via a `pma-edit` block. It could be in a project file OR in `<OU>/Daily/<today>.md` — check the obvious candidate first (recent conversation context usually tells you which), `grep` the corpus for the task text if not, and ask which one if genuinely ambiguous. This is a completion acknowledgment, not a request to add a new task — never create a new line for it, only check off an existing one.
+
+## Adding a Log Entry
+
+`<OU>/Daily/<today>.md`'s `## Log` section (with `### Morning`/`### Evening` sub-headings) is for **reflective, narrative record-keeping** — what happened and how it went. It is a different thing from `## Tasks` (concrete, checkable action items) and from a project's `## Notes` (durable reference context for that project specifically):
+
+| Section | Holds | Example |
+|---|---|---|
+| `## Tasks` (Daily file) | Actionable items for today, checked off when done | `- [ ] Talk to Arun Kumar Sir` |
+| `## Log` (Daily file) | A record of what actually happened today, written after the fact | "Call with Jeegadeshwaran Sir went well, he'll send the revised scope by Friday." |
+| `## Notes` (project file) | Durable context about a specific project, not tied to a date | "CAN bus uses the proprietary KINCO profile, not CANopen DS402." |
+
+Add a Log entry only when the user shares something worth recording as having happened — a reflection, an outcome, a summary of how something went ("log that...", "the call went well", "today was..."). This is the same explicit-only discipline as Tasks (see "Adding a Task for Today") — don't log something just because it was mentioned in passing, and don't turn a Log request into a Task or vice versa.
+
+1. `read_file` on `<OU>/Daily/<today>.md` for the relevant OU (same OU-selection rule as Tasks).
+2. Append the entry under `### Morning` or `### Evening` (infer from time of day if not stated) via a `pma-edit` block. If the file doesn't exist yet, create it with the same shape shown in "Adding a Task for Today", with the entry under the appropriate sub-heading.
+
+The Logs view in the app reads directly from these `## Log` sections — there's no separate log file to maintain.
 
 ## Reading Files
 

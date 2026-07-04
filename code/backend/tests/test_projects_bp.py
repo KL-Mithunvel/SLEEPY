@@ -195,3 +195,317 @@ def test_save_project_content_validation_error(client, monkeypatch, tmp_path):
 
     resp = client.put("/api/projects/content", json={"path": "SMTW/alpha.md", "content": ""})
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Structured editor — shared fixtures/helpers
+# ---------------------------------------------------------------------------
+
+_PROJECT_MD = """---
+key: alpha
+status: active
+owner: KL Mithunvel
+started: 2026-07-01
+---
+
+# Alpha Project
+
+## Goal
+
+Ship the thing.
+
+## Tasks
+
+- [ ] First task
+- [x] Done task priority:low
+
+## Decisions
+
+- 2026-07-01: Picked option A
+
+## Open Questions
+
+- Still not sure about X
+
+## Notes
+
+## AI Notes
+"""
+
+
+def _fake_md_editor_writing(monkeypatch, data_root):
+    """propose_edit/apply_edit that actually persist new_content to disk (no git)."""
+    import md_editor
+
+    captured = {}
+
+    def _propose(rel, content, summary, conn):
+        captured["rel"] = rel
+        captured["content"] = content
+        return {"event_id": 1, "diff": "+x", "rel_path": rel, "summary": summary, "is_new": False}
+
+    def _apply(event_id, conn):
+        abs_path = os.path.join(data_root, captured["rel"])
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(captured["content"])
+        return "0" * 40
+
+    monkeypatch.setattr(md_editor, "propose_edit", _propose)
+    monkeypatch.setattr(md_editor, "apply_edit", _apply)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/projects/structured
+# ---------------------------------------------------------------------------
+
+def test_structured_parses_frontmatter_tasks_and_lists(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "s1"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.get("/api/projects/structured?path=SMTW/alpha.md")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["frontmatter"]["status"] == "active"
+    assert data["frontmatter"]["started"] == "2026-07-01"
+    assert len(data["tasks"]) == 2
+    done_task = next(t for t in data["tasks"] if t["done"])
+    assert done_task["priority"] == "low"
+    assert data["decisions"] == ["2026-07-01: Picked option A"]
+    assert data["open_questions"] == ["Still not sure about X"]
+
+
+def test_structured_not_found(client, monkeypatch, tmp_path):
+    import config
+    root = tmp_path / "s2"
+    root.mkdir()
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    resp = client.get("/api/projects/structured?path=SMTW/missing.md")
+    assert resp.status_code == 404
+
+
+def test_structured_invalid_path(client, monkeypatch, tmp_path):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path / "s3"))
+    resp = client.get("/api/projects/structured?path=../../etc/passwd")
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# POST /api/projects/tasks
+# ---------------------------------------------------------------------------
+
+def test_add_task(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "t1"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    _fake_md_editor_writing(monkeypatch, str(root))
+
+    resp = client.post("/api/projects/tasks", json={
+        "path": "SMTW/alpha.md", "action": "add", "text": "New task", "priority": "high", "due": "2026-08-01",
+    })
+    assert resp.status_code == 200
+
+    content = (root / "SMTW" / "alpha.md").read_text(encoding="utf-8")
+    assert "- [ ] New task priority:high due:2026-08-01" in content
+
+
+def test_edit_task_toggles_done_and_fields(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "t2"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    _fake_md_editor_writing(monkeypatch, str(root))
+
+    resp = client.post("/api/projects/tasks", json={
+        "path": "SMTW/alpha.md", "action": "edit",
+        "old_line": "- [ ] First task", "text": "First task", "done": True, "priority": "medium",
+    })
+    assert resp.status_code == 200
+
+    content = (root / "SMTW" / "alpha.md").read_text(encoding="utf-8")
+    assert "- [x] First task priority:medium" in content
+
+
+def test_remove_task(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "t3"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    _fake_md_editor_writing(monkeypatch, str(root))
+
+    resp = client.post("/api/projects/tasks", json={
+        "path": "SMTW/alpha.md", "action": "remove", "old_line": "- [ ] First task",
+    })
+    assert resp.status_code == 200
+
+    content = (root / "SMTW" / "alpha.md").read_text(encoding="utf-8")
+    assert "First task" not in content
+
+
+def test_task_action_not_found_returns_400(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "t4"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    _fake_md_editor_writing(monkeypatch, str(root))
+
+    resp = client.post("/api/projects/tasks", json={
+        "path": "SMTW/alpha.md", "action": "remove", "old_line": "- [ ] Does not exist",
+    })
+    assert resp.status_code == 400
+
+
+def test_task_unknown_action(client, monkeypatch, tmp_path):
+    import config
+    root = tmp_path / "t5"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.post("/api/projects/tasks", json={"path": "SMTW/alpha.md", "action": "bogus"})
+    assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# POST /api/projects/list-item
+# ---------------------------------------------------------------------------
+
+def test_add_decision(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "l1"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    _fake_md_editor_writing(monkeypatch, str(root))
+
+    resp = client.post("/api/projects/list-item", json={
+        "path": "SMTW/alpha.md", "section": "Decisions", "action": "add", "text": "New decision",
+    })
+    assert resp.status_code == 200
+    content = (root / "SMTW" / "alpha.md").read_text(encoding="utf-8")
+    assert "- New decision" in content
+
+
+def test_remove_open_question(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "l2"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    _fake_md_editor_writing(monkeypatch, str(root))
+
+    resp = client.post("/api/projects/list-item", json={
+        "path": "SMTW/alpha.md", "section": "Open Questions", "action": "remove", "text": "Still not sure about X",
+    })
+    assert resp.status_code == 200
+    content = (root / "SMTW" / "alpha.md").read_text(encoding="utf-8")
+    assert "Still not sure about X" not in content
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/projects/section
+# ---------------------------------------------------------------------------
+
+def test_update_section_text(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "sec1"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    _fake_md_editor_writing(monkeypatch, str(root))
+
+    resp = client.put("/api/projects/section", json={
+        "path": "SMTW/alpha.md", "heading": "Goal", "text": "New goal text.",
+    })
+    assert resp.status_code == 200
+    content = (root / "SMTW" / "alpha.md").read_text(encoding="utf-8")
+    assert "New goal text." in content
+    assert "Ship the thing." not in content
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/projects/status
+# ---------------------------------------------------------------------------
+
+def test_status_change_no_move(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "st1"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    _fake_md_editor_writing(monkeypatch, str(root))
+
+    resp = client.put("/api/projects/status", json={"path": "SMTW/alpha.md", "status": "on_hold"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["rel_path"] == "SMTW/alpha.md"
+
+    content = (root / "SMTW" / "alpha.md").read_text(encoding="utf-8")
+    assert "status: on_hold" in content
+
+
+def test_status_archived_moves_file(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "st2"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.put("/api/projects/status", json={"path": "SMTW/alpha.md", "status": "archived"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["rel_path"] == "SMTW/Archive/alpha.md"
+
+    assert not (root / "SMTW" / "alpha.md").exists()
+    moved = root / "SMTW" / "Archive" / "alpha.md"
+    assert moved.exists()
+    assert "status: archived" in moved.read_text(encoding="utf-8")
+
+
+def test_status_unarchive_moves_file_back(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "st3"
+    (root / "SMTW" / "Archive").mkdir(parents=True)
+    (root / "SMTW" / "Archive" / "alpha.md").write_text(
+        _PROJECT_MD.replace("status: active", "status: archived"), encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.put("/api/projects/status", json={"path": "SMTW/Archive/alpha.md", "status": "active"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["rel_path"] == "SMTW/alpha.md"
+
+    assert not (root / "SMTW" / "Archive" / "alpha.md").exists()
+    assert (root / "SMTW" / "alpha.md").exists()
+
+
+def test_status_invalid_value_rejected(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "st4"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.put("/api/projects/status", json={"path": "SMTW/alpha.md", "status": "bogus"})
+    assert resp.status_code == 400

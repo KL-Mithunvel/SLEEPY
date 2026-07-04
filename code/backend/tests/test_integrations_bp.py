@@ -27,7 +27,15 @@ def client(app):
 # GET /api/integrations/status
 # ---------------------------------------------------------------------------
 
-def test_status_all_unconfigured(client):
+def test_status_all_unconfigured(client, monkeypatch):
+    # /status reads config.O365_* directly — monkeypatch rather than rely on
+    # secrets_app.py being blank, since dev machines have real values filled in.
+    import config
+    monkeypatch.setattr(config, "O365_CLIENT_ID", "")
+    monkeypatch.setattr(config, "O365_CLIENT_SECRET", "")
+    monkeypatch.setattr(config, "O365_TENANT_ID", "")
+    monkeypatch.setattr(config, "O365_MAILBOX", "")
+
     resp = client.get("/api/integrations/status")
     assert resp.status_code == 200
     data = resp.get_json()

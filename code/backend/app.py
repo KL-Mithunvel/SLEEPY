@@ -12,7 +12,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app, origins=config.CORS_ORIGINS, supports_credentials=True)
+# Bearer-token auth only, no cookies — supports_credentials isn't needed and
+# widens the CORS surface for no benefit.
+CORS(app, origins=config.CORS_ORIGINS)
+# Unbounded POST bodies would go straight into the LLM (cost-abuse risk if a
+# token ever leaks) — 2 MB comfortably covers chat messages and MD file saves.
+app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
 
 # ---------------------------------------------------------------------------
 # DB lifecycle

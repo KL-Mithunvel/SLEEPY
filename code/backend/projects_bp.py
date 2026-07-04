@@ -3,9 +3,14 @@ Projects Blueprint — filesystem view + direct editor for the entire MD corpus
 (project files, research notes, People/, Recur/, Daily/, Plans/, Govern/,
 root-level files like inbox.md/ABOUT.md — everything except db/).
 
-  GET /api/projects                    list all corpus .md files grouped by top folder
-  GET /api/projects/content?path=...   raw content of a single corpus file
-  PUT /api/projects/content            save edited content (auto-applied, no confirm)
+  GET  /api/projects                    list all corpus .md files grouped by top folder
+  GET  /api/projects/content?path=...   raw content of a single corpus file
+  PUT  /api/projects/content            save edited content (auto-applied, no confirm)
+  GET  /api/projects/structured?path=... structured project data (frontmatter/sections/tasks/lists)
+  POST /api/projects/tasks              add/edit/remove a task line
+  POST /api/projects/list-item          add/remove a Decisions or Open Questions bullet
+  PUT  /api/projects/section            replace a Goal/Why/Current State/Notes section's text
+  PUT  /api/projects/status             change status, moving to/from <OU>/Archive/ as needed
 """
 
 import logging
@@ -15,6 +20,7 @@ import re
 from flask import Blueprint, jsonify, request
 
 import config
+import project_editor
 from auth_utils import require_perm
 from md_indexer import _parse_frontmatter
 
@@ -163,3 +169,127 @@ def save_project_content():
         return jsonify({"error": str(exc)}), 400
 
     return jsonify({"ok": True, "sha": sha[:8]})
+
+
+# ---------------------------------------------------------------------------
+# Structured editor routes
+# ---------------------------------------------------------------------------
+
+@projects_bp.get("/api/projects/structured")
+@require_perm("projects:read")
+def project_structured():
+    rel = (request.args.get("path") or "").strip()
+    if not rel or not _safe_project_abs(rel):
+        return jsonify({"error": "Invalid path"}), 400
+
+    data = project_editor.parse_structured(config.USER_DATA_ROOT, rel)
+    if data is None:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify(data)
+
+
+@projects_bp.post("/api/projects/tasks")
+@require_perm("projects:write")
+def project_tasks():
+    from app import get_db
+
+    body = request.get_json(silent=True) or {}
+    rel = (body.get("path") or "").strip()
+    action = (body.get("action") or "").strip()
+    if not rel or not _safe_project_abs(rel):
+        return jsonify({"error": "Invalid path"}), 400
+
+    db = get_db()
+    ok = False
+    if action == "add":
+        text = (body.get("text") or "").strip()
+        if not text:
+            return jsonify({"error": "text is required"}), 400
+        ok = project_editor.add_task(config.USER_DATA_ROOT, rel, text, body.get("priority"), body.get("due"), db)
+    elif action == "edit":
+        old_line = (body.get("old_line") or "").strip()
+        text = (body.get("text") or "").strip()
+        if not old_line or not text:
+            return jsonify({"error": "old_line and text are required"}), 400
+        ok = project_editor.edit_task(
+            config.USER_DATA_ROOT, rel, old_line, text,
+            bool(body.get("done")), body.get("priority"), body.get("due"), db,
+        )
+    elif action == "remove":
+        old_line = (body.get("old_line") or "").strip()
+        if not old_line:
+            return jsonify({"error": "old_line is required"}), 400
+        ok = project_editor.remove_task(config.USER_DATA_ROOT, rel, old_line, db)
+    else:
+        return jsonify({"error": f"Unknown action: {action!r}"}), 400
+
+    if not ok:
+        return jsonify({"error": "Task operation failed (line not found or write rejected)"}), 400
+    return jsonify({"ok": True})
+
+
+@projects_bp.post("/api/projects/list-item")
+@require_perm("projects:write")
+def project_list_item():
+    from app import get_db
+
+    body = request.get_json(silent=True) or {}
+    rel = (body.get("path") or "").strip()
+    heading = (body.get("section") or "").strip()
+    action = (body.get("action") or "").strip()
+    text = (body.get("text") or "").strip()
+    if not rel or not _safe_project_abs(rel):
+        return jsonify({"error": "Invalid path"}), 400
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+
+    db = get_db()
+    if action == "add":
+        ok = project_editor.add_list_item(config.USER_DATA_ROOT, rel, heading, text, db)
+    elif action == "remove":
+        ok = project_editor.remove_list_item(config.USER_DATA_ROOT, rel, heading, text, db)
+    else:
+        return jsonify({"error": f"Unknown action: {action!r}"}), 400
+
+    if not ok:
+        return jsonify({"error": "List-item operation failed"}), 400
+    return jsonify({"ok": True})
+
+
+@projects_bp.put("/api/projects/section")
+@require_perm("projects:write")
+def project_section():
+    from app import get_db
+
+    body = request.get_json(silent=True) or {}
+    rel = (body.get("path") or "").strip()
+    heading = (body.get("heading") or "").strip()
+    text = body.get("text", "")
+    if not rel or not _safe_project_abs(rel):
+        return jsonify({"error": "Invalid path"}), 400
+    if not heading:
+        return jsonify({"error": "heading is required"}), 400
+
+    db = get_db()
+    ok = project_editor.update_section_text(config.USER_DATA_ROOT, rel, heading, text, db)
+    if not ok:
+        return jsonify({"error": "Section update failed"}), 400
+    return jsonify({"ok": True})
+
+
+@projects_bp.put("/api/projects/status")
+@require_perm("projects:write")
+def project_status():
+    from app import get_db
+
+    body = request.get_json(silent=True) or {}
+    rel = (body.get("path") or "").strip()
+    status = (body.get("status") or "").strip()
+    if not rel or not _safe_project_abs(rel):
+        return jsonify({"error": "Invalid path"}), 400
+
+    db = get_db()
+    new_rel_path = project_editor.set_status(config.USER_DATA_ROOT, rel, status, db)
+    if new_rel_path is None:
+        return jsonify({"error": "Status change failed"}), 400
+    return jsonify({"ok": True, "rel_path": new_rel_path})

@@ -30,6 +30,8 @@ pa.mspv.app {
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
         Referrer-Policy "strict-origin-when-cross-origin"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://auth.office.smtw.in; frame-ancestors 'none'"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
         -Server
     }
 

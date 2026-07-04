@@ -126,7 +126,10 @@ def news_items():
     Return the most recent N news items from news_seen.json, parsed into
     structured objects for easy rendering.
     """
-    limit = min(int(request.args.get("limit", 20)), 100)
+    try:
+        limit = min(int(request.args.get("limit", 20)), 100)
+    except ValueError:
+        return jsonify({"error": "limit must be an integer"}), 400
     seen = news_watch.get_feedback(config.USER_DATA_ROOT)
     recent = list(reversed(seen))[:limit]
 

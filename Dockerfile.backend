@@ -20,6 +20,11 @@ WORKDIR /app
 ENV PYTHONPATH=/app/code/backend
 ENV PYTHONUNBUFFERED=1
 
+# Run as a non-root user — no reason gunicorn/the worker need root inside the container.
+RUN groupadd -r sleepy && useradd -r -g sleepy -d /app sleepy \
+    && chown -R sleepy:sleepy /app
+USER sleepy
+
 EXPOSE 5000
 
 CMD ["uv", "run", "gunicorn", \

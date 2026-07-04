@@ -8,15 +8,15 @@ export const useLogsStore = defineStore('logs', {
     loadingContent: false,
     selectedPath: null,
     selectedContent: null,
-    typeFilter: 'all',   // 'all' | 'daily' | 'weekly'
+    ouFilter: 'all',   // 'all' | an OU name
     error: null,
   }),
 
   getters: {
     filtered: (state) =>
-      state.typeFilter === 'all'
+      state.ouFilter === 'all'
         ? state.logs
-        : state.logs.filter(l => l.type === state.typeFilter),
+        : state.logs.filter(l => l.ou === state.ouFilter),
   },
 
   actions: {
