@@ -114,7 +114,7 @@ backup is a single `rsync`; per-user ChromaDB keeps RAG relevance sharp and avoi
 |Layer|PMA|Starter baseline|Deviation?|Why|
 |-|-|-|-|-|
 |Backend|Flask (3.12+)|Flask|✅ same|—|
-|Frontend|**Nuxt 3 (Vue 3)**|Vue 3 + Vite|⚠ deviation|Grok suggestion for PWA/SSR polish. **Tradeoff:** new tooling vs KLA's Vite muscle memory. Candidate revert to Vue 3 + Vite + PWA plugin. **Decide before scaffolding frontend.**|
+|Frontend|**Nuxt 3 (Vue 3)**|Vue 3 + Vite|⚠ deviation|Grok suggestion for PWA/SSR polish. **Tradeoff:** new tooling vs KLM's Vite muscle memory. Candidate revert to Vue 3 + Vite + PWA plugin. **Decide before scaffolding frontend.**|
 |Styling|Bootstrap 5|Bootstrap 5|✅ same|—|
 |Primary DB|**SQLite**|TimescaleDB/PG|⚠ deviation|Single user, low volume, zero-ops. Swap to Postgres if concurrency or analytics demand. Keep all SQL ANSI-ish to ease migration.|
 |Auth|Keycloak + AD + Passkeys|Keycloak|✅ same|Reuse existing Keycloak realm.|
@@ -217,7 +217,7 @@ N-line changes without confirmation.
 1. **Frontend:** Vue 3 + Vite (no Nuxt — SSR not needed). *(decided 2026-04)*
 2. **Repo:** Split — app repo + MD corpus as separate git repo mounted at `data/<user>/md/`. *(decided 2026-04)*
 3. **Dev/runtime context docs:** `CLAUDE.md` (Claude Code dev instructions) + `BOT.md` (runtime assistant persona) +
-`SystemPrompt.MD` (hot-reloaded per request). No separate KLA-AI-Context needed. *(decided 2026-04)*
+`SystemPrompt.MD` (hot-reloaded per request). No separate KLM-AI-Context needed. *(decided 2026-04)*
 4. **Keycloak realm:** Reuse existing `Office.smtw.in` realm with a `pma` public client (PKCE S256). *(decided 2026-04)*
 5. **MD repo hosting:** Local git only — no remote push. Git provides version history and rollback; VM infra backup
 covers disaster recovery. No Gitea/GitHub needed. *(decided 2026-04)*
@@ -234,7 +234,7 @@ All architectural decisions resolved.
 
 ## 9\. Success criteria (v1 done-definition)
 
-* KLA uses PMA daily on iPhone for at least 2 weeks without falling back to CLI/Claude Desktop.
+* KLM uses PMA daily on iPhone for at least 2 weeks without falling back to CLI/Claude Desktop.
 * Morning briefing is generated automatically and delivered via Telegram before 07:00 IST.
 * At least 80% of AI-proposed MD edits are accepted without manual correction.
 * MD repo history shows only clean AI commits; no binary corruption, no frontmatter breakage.

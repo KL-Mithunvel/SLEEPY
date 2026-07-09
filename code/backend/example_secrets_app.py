@@ -19,7 +19,7 @@ KEYCLOAK_CLIENT_ID  = "pma"
 # ---------------------------------------------------------------------------
 # SQLite DB path (absolute, or relative to code/backend/)
 # ---------------------------------------------------------------------------
-SQLITE_DB_PATH = "../../data/kla/db/sqlite/pma.db"
+SQLITE_DB_PATH = "../../data/klm/db/sqlite/pma.db"
 
 # ---------------------------------------------------------------------------
 # Office 365 email (MSAL client-credentials + Graph API sendMail)

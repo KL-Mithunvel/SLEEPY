@@ -77,7 +77,7 @@ path = config.SKILLS_DIR / f"{name}.md"
 ```
 
 `name` is LLM-controlled (the `load_skill` tool) and unvalidated —
-`../../../../data/kla/People` reads any `.md` file anywhere on disk. Impact is
+`../../../../data/klm/People` reads any `.md` file anywhere on disk. Impact is
 limited (read-only, `.md` only) but it breaks the sandbox every other tool enforces.
 
 **Fix:** reject names containing `/`, `\` or `..`, or resolve and check containment
@@ -183,7 +183,7 @@ recommended.
 
 ### Layer 5 — Backup & recovery
 
-- Nightly `git push` of `data/kla/` to a private remote (the corpus is already a git
+- Nightly `git push` of `data/klm/` to a private remote (the corpus is already a git
   repo — one cron line, offsite history included).
 - Nightly `sqlite3 pma.db ".backup ..."` (WAL-safe) to the same offsite location.
 - Chroma is rebuildable — do not back it up.

@@ -83,7 +83,7 @@ docker compose -f docker-compose.dev.yml up -d
 | Entry point | `python main.py` (root) | `gunicorn code/backend/app:app` |
 | Auth | `DEV_AUTH_BYPASS=1` — synthetic "owner" user | Keycloak live |
 | Frontend | Vite dev server (`localhost:5173`) | Built static files served by caddy |
-| DB path | `data/kla/db/sqlite/pma.db` (relative to `code/backend/`) | Same path, mounted volume |
+| DB path | `data/klm/db/sqlite/pma.db` (relative to `code/backend/`) | Same path, mounted volume |
 
 ### Module layout
 
@@ -139,7 +139,7 @@ SLEEPY/
 │       ├── index.html
 │       └── vite.config.js
 ├── data/                      # Gitignored — per-user MD corpus + derived DBs
-│   └── kla/                   # KLA's folder — schema documented in docs/CORPUS_SCHEMA.md
+│   └── klm/                   # KLM's folder — schema documented in docs/CORPUS_SCHEMA.md
 ├── docs/
 │   ├── PROJ_CHARTER.md        # Full charter — canonical reference for scope + decisions
 │   ├── PROJ_STARTER.md        # Engineering standards baseline (also in .CLAUDE/)
@@ -177,7 +177,7 @@ Dev-only entry point. Inserts `code/backend` onto `sys.path`, sets `DEV_AUTH_BYP
 Flask app with CORS (origins from `config.CORS_ORIGINS`), per-request DB caching on `g`, slow-request logger (`SLOW_REQUEST_MS`), and `validate_token` as `before_request`. Only public route is `GET /healthz`. Blueprints registered here as features are built.
 
 ### `code/backend/config.py`
-Loads from `secrets_app`; all modules import from `config`, never from `secrets_app` directly. Key exports: `CLAUDE_API_KEY`, `KEYCLOAK_*`, `SQLITE_DB_PATH`, `DEBUG`, `CORS_ORIGINS`, `SLOW_REQUEST_MS`, `USER_DATA_ROOT`.  `USER_DATA_ROOT` resolves relative to `config.py`'s own directory (not cwd) — defaults to `../../data/kla` → `data/kla/` at repo root.
+Loads from `secrets_app`; all modules import from `config`, never from `secrets_app` directly. Key exports: `CLAUDE_API_KEY`, `KEYCLOAK_*`, `SQLITE_DB_PATH`, `DEBUG`, `CORS_ORIGINS`, `SLOW_REQUEST_MS`, `USER_DATA_ROOT`.  `USER_DATA_ROOT` resolves relative to `config.py`'s own directory (not cwd) — defaults to `../../data/klm` → `data/klm/` at repo root.
 
 ### `code/backend/auth_utils.py`
 - `validate_token()` — `before_request` handler; sets `g.user` or returns 401. Skips `/healthz` and OPTIONS. In dev bypass mode, synthesises `owner` user.
@@ -251,8 +251,8 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 
 ## Schema Reference
 
-- **SQLite DB:** `data/kla/db/sqlite/pma.db` (relative to `code/backend/`, resolves to repo-root-relative path)
-- **Inspecting:** `sqlite3 data/kla/db/sqlite/pma.db ".tables"` or any SQLite browser
+- **SQLite DB:** `data/klm/db/sqlite/pma.db` (relative to `code/backend/`, resolves to repo-root-relative path)
+- **Inspecting:** `sqlite3 data/klm/db/sqlite/pma.db ".tables"` or any SQLite browser
 
 ### Tables
 
@@ -276,8 +276,8 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | Convention | Value / Rule |
 |---|---|
 | `DEV_AUTH_BYPASS` | `1` = skip Keycloak, synthesise `owner` user. Set by `main.py` by default. **Never `1` in prod.** |
-| `SQLITE_DB_PATH` | Default: `"../../data/kla/db/sqlite/pma.db"` (relative to `code/backend/`). Override with env var. Tests force `:memory:`. |
-| `USER_DATA_ROOT` | Default: `data/kla/` (resolved relative to `code/backend/__file__`). Override with env var. |
+| `SQLITE_DB_PATH` | Default: `"../../data/klm/db/sqlite/pma.db"` (relative to `code/backend/`). Override with env var. Tests force `:memory:`. |
+| `USER_DATA_ROOT` | Default: `data/klm/` (resolved relative to `code/backend/__file__`). Override with env var. |
 | AI commit author | `Arivu Baalan <arivu@smtw.in>` — every GitPython commit from the AI uses this author, never the dev's identity |
 | Dates in SQLite | ISO-8601 strings, IST (naive). No TIMESTAMPTZ. `datetime('now', 'localtime')` in SQL. |
 | Task handler commits | Handlers **must not commit** — the worker owns the transaction |
@@ -294,7 +294,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 
 | Path | Contents | Git-tracked? |
 |---|---|---|
-| `data/kla/` | MD corpus + SQLite + ChromaDB | No (gitignored) |
+| `data/klm/` | MD corpus + SQLite + ChromaDB | No (gitignored) |
 | `code/backend/secrets_app.py` | API keys, Keycloak config, DB path | **Never commit** |
 | `code/backend/example_secrets_app.py` | Template with placeholder values | Yes |
 | `.venv/` | Root virtualenv (uv) | No (gitignored) |
@@ -321,7 +321,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | Entry | `python main.py` (root) | `gunicorn code/backend/app:app` |
 | Worker | `uv run python code/backend/worker.py` | Same, as a separate container/process |
 | Auth | `DEV_AUTH_BYPASS=1` | Keycloak `Office.smtw.in` realm, `pma` client |
-| DB | `data/kla/db/sqlite/pma.db` | Same path, Docker bind-mount |
+| DB | `data/klm/db/sqlite/pma.db` | Same path, Docker bind-mount |
 | Public URL | `localhost:5000` | `pa.mspv.app` via Caddy (auto TLS) |
 
 **Pre-deploy checklist:** All tests green → `main.py` boots clean locally → `uv export` requirements.txt synced → VERSION bumped → `docker compose build` succeeds → `secrets_app.py` mounted on VM.
