@@ -5,7 +5,7 @@ version: "3.9"
 #
 # Before first deploy:
 #   1. Copy code/backend/example_secrets_app.py → code/backend/secrets_app.py and fill in values
-#   2. Create ./data/kla/ directory tree and ensure it is a git repo
+#   2. Create ./data/klm/ directory tree and ensure it is a git repo
 #   3. `docker compose build` then `docker compose up -d`
 #
 # Keycloak reuses the existing Office.smtw.in realm — no separate keycloak service here.
@@ -24,8 +24,8 @@ services:
     environment:
       - APP_ENV=production
       - DEV_AUTH_BYPASS=0
-      - SQLITE_DB_PATH=/data/kla/db/sqlite/pma.db
-      - USER_DATA_ROOT=/data/kla
+      - SQLITE_DB_PATH=/data/klm/db/sqlite/pma.db
+      - USER_DATA_ROOT=/data/klm
       - DATA_ROOT=/data
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
@@ -58,8 +58,8 @@ services:
     environment:
       - APP_ENV=production
       - DEV_AUTH_BYPASS=0
-      - SQLITE_DB_PATH=/data/kla/db/sqlite/pma.db
-      - USER_DATA_ROOT=/data/kla
+      - SQLITE_DB_PATH=/data/klm/db/sqlite/pma.db
+      - USER_DATA_ROOT=/data/klm
       - DATA_ROOT=/data
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000

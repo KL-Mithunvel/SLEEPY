@@ -13,7 +13,7 @@ Recur files define recurring tasks that materialise into daily and plan files au
 title: Monthly Compliance Check
 cadence: monthly
 schedule: first monday
-owners: [kla]
+owners: [klm]
 priority: high
 ---
 ```
@@ -41,7 +41,7 @@ priority: high
 
 ### `owners`
 
-List of usernames (local part of email). `kla` = KL Mithunvel. Tasks with other owners
+List of usernames (local part of email). `klm` = KL Mithunvel. Tasks with other owners
 route to the Govern view rather than the daily log.
 
 ## Body

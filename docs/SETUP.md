@@ -47,15 +47,15 @@ Everything else can stay blank until you need that feature.
 ### 1.3 Create the data directory
 
 ```bat
-mkdir data\kla\db\sqlite
-mkdir data\kla\db\chroma
-mkdir data\kla\logs
+mkdir data\klm\db\sqlite
+mkdir data\klm\db\chroma
+mkdir data\klm\logs
 ```
 
 Create a bare git repo inside it (the AI commits edits here):
 
 ```bat
-cd data\kla
+cd data\klm
 git init
 git commit --allow-empty -m "init corpus"
 cd ..\..
@@ -64,8 +64,8 @@ cd ..\..
 Create the mandatory seed files:
 
 ```bat
-echo # Inbox > data\kla\inbox.md
-echo # About > data\kla\ABOUT.md
+echo # Inbox > data\klm\inbox.md
+echo # About > data\klm\ABOUT.md
 ```
 
 ### 1.4 Start the dev server
@@ -267,8 +267,8 @@ cp code/backend/example_secrets_app.py code/backend/secrets_app.py
 nano code/backend/secrets_app.py
 
 # Create the data directory (or restore from backup)
-mkdir -p data/kla/db/sqlite data/kla/db/chroma data/kla/logs
-cd data/kla && git init && git commit --allow-empty -m "init corpus" && cd ../..
+mkdir -p data/klm/db/sqlite data/klm/db/chroma data/klm/logs
+cd data/klm && git init && git commit --allow-empty -m "init corpus" && cd ../..
 ```
 
 ### 8.2 Build and start
@@ -336,8 +336,8 @@ Or trigger from the UI: **Assistant** → type "reindex".
 
 - [ ] `uv sync` and `npm install` done
 - [ ] `secrets_app.py` created with `CLAUDE_API_KEY` set
-- [ ] `data/kla/` directory created with `inbox.md` and `ABOUT.md`
-- [ ] `data/kla/` is a git repo (`git init` inside it)
+- [ ] `data/klm/` directory created with `inbox.md` and `ABOUT.md`
+- [ ] `data/klm/` is a git repo (`git init` inside it)
 - [ ] `tooling\run-backend.bat` starts without errors
 - [ ] AI chat at `/ai` responds
 
