@@ -106,15 +106,17 @@ The Today view / "Active Tasks" panel reads **only** `<OU>/Daily/<today>.md`'s `
 - Creating a project with its own `## Tasks` list does **not** put those items in the Today view.
 - The AI only appends to a Daily file's `## Tasks` when the user *explicitly* asks to add something to today's list — never as a side effect of any other request.
 - A recurring habit ("every day", "once a week") becomes a `<OU>/Recur/<name>.md` template, not a one-off Daily line.
-- Telling the AI something is done ("I had that meeting") checks off an existing line — it never creates a new one.
+- Telling the AI something is done ("I had that meeting") checks off **every** matching line, not just the first found — the same real-world thing is often duplicated across a Daily task, a project's own `## Tasks`, an `inbox.md` capture, and a `People.md` note. Added 2026-07-07 after a real bug: a Daily task got checked off but a duplicate `inbox.md` capture about the identical meeting was left unresolved, and since `inbox.md` is loaded into every morning briefing verbatim (see below), the same already-done thing kept nagging the user for days. It never creates a new `## Tasks` line.
 
 ---
 
 ## Daily Log Entries (`<OU>/Daily/<today>.md`'s `## Log` section)
 
-Reflective, narrative record-keeping — what happened, distinct from `## Tasks` (actionable, checkable items) and a project's `## Notes` (durable reference context, not date-scoped). Structured as `### Morning`/`### Evening` sub-headings. The AI only adds an entry on explicit request (same discipline as Tasks — see "Task-Adding Rules" above), never as a side effect of a task being mentioned or completed.
+Reflective, narrative record-keeping — what happened, distinct from `## Tasks` (actionable, checkable items) and a project's `## Notes` (durable reference context, not date-scoped). Structured as `### Morning`/`### Evening` sub-headings. The AI adds an entry on explicit request the same way it adds a Task (see "Task-Adding Rules" above) — **but as of 2026-07-07, acknowledging a completion is the one exception**: whenever the user confirms something is done, a Log entry recording what happened and which project/person/action it relates to is mandatory, even if that thing was never tracked as a formal task at all (an ad-hoc "met Arun Kumar Sir today" still gets logged). This is what makes "was this actually resolved" answerable later instead of relying on scattered checkbox state.
 
 The frontend Logs view (`GET /api/logs`, `logs_bp.py`) reads directly from these sections across every OU's `Daily/` folder — there is no separate log file. **The root-level `data/<user>/logs/` folder is legacy and unused** (superseded by this per-OU-Daily convention); if you see references to it in older notes, they're stale.
+
+**Briefing hygiene:** `ai_client._load_inbox()` strips already-checked (`- [x]`) lines out of `inbox.md` before it reaches the morning-briefing LLM — inbox.md itself is never pruned, items just get checked off in place, so without this filter a resolved capture would keep being fed into every briefing's context indefinitely.
 
 ---
 

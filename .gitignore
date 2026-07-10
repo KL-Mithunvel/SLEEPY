@@ -11,6 +11,17 @@ __pycache__/
 # --- Secrets (never commit) ---
 code/backend/secrets_*.py
 !code/backend/example_secrets_*.py
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# --- Claude Code local settings (personal permission overrides, not shared) ---
+# Was previously only excluded by this machine's global gitignore — added here
+# too so a fresh clone / different machine doesn't accidentally commit it.
+.claude/settings.local.json
+.CLAUDE/settings.local.json
 
 # --- SQLite databases ---
 *.db

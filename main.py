@@ -1,9 +1,12 @@
 """
-Dev entry point — starts the Vite frontend dev server alongside Flask so
+Dev entry point — starts the Vite frontend dev server and the background
+worker (APScheduler + task_queue drainer) alongside Flask so
 `uv run python main.py` brings up the whole stack for local testing.
+Without the worker running, nightly jobs (materialise, morning_briefing,
+housekeeping, news_watch, etc.) never fire and the corpus silently goes stale.
 
-Production (Proxmox) uses gunicorn against app:app directly; the frontend
-is built and served as static files. This script is for local dev only.
+Production (Proxmox) uses gunicorn against app:app directly, with the worker
+as its own container (see docker-compose.yml) — this script is dev only.
 """
 
 import atexit
@@ -24,8 +27,11 @@ import local_db
 from app import app
 
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "code", "frontend"))
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "code", "backend"))
+WORKER_SCRIPT = os.path.join(BACKEND_DIR, "worker.py")
 
 _frontend_proc: subprocess.Popen | None = None
+_worker_proc: subprocess.Popen | None = None
 
 
 def _vite_binary() -> str:
@@ -60,18 +66,40 @@ def _stop_frontend():
             _frontend_proc.kill()
 
 
+def _start_worker() -> subprocess.Popen:
+    # Runs as its own OS process (never imported into the Flask process) —
+    # same interpreter as this one, cwd set so its bare imports resolve.
+    print(f"[main] Starting worker: {WORKER_SCRIPT}")
+    return subprocess.Popen([sys.executable, WORKER_SCRIPT], cwd=BACKEND_DIR)
+
+
+def _stop_worker():
+    if _worker_proc and _worker_proc.poll() is None:
+        print("[main] Stopping worker...")
+        _worker_proc.terminate()
+        try:
+            _worker_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _worker_proc.kill()
+
+
 if __name__ == "__main__":
     local_db.init_db()
 
     _frontend_proc = _start_frontend()
     atexit.register(_stop_frontend)
 
+    _worker_proc = _start_worker()
+    atexit.register(_stop_worker)
+
     print("[main] Backend:  http://localhost:5000")
     print("[main] Frontend: http://localhost:5173")
+    print("[main] Worker:   running (materialise/briefing/housekeeping/news_watch cron + queue drain)")
 
     try:
         # use_reloader=False — Werkzeug's reloader re-execs this script,
-        # which would spawn a second frontend process.
+        # which would spawn duplicate frontend/worker processes.
         app.run(debug=config.DEBUG, port=5000, use_reloader=False)
     finally:
         _stop_frontend()
+        _stop_worker()

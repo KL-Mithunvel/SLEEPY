@@ -11,6 +11,7 @@ Public API:
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -167,7 +168,8 @@ _BRIEFING_SYSTEM = """\
 You are a calm, focused personal project assistant. You have access to a deterministic \
 scan of today's curated tasks (grouped by OU — these are the tasks actually queued for \
 today, not every open item across every project) and the raw content of their inbox \
-(quick captures, which is where meeting mentions and other free-text notes land). \
+(quick captures, which is where meeting mentions and other free-text notes land; already- \
+resolved captures are filtered out before you see them, so everything here is still open). \
 Generate a concise morning briefing with these sections, in order:
 - ## Today's Schedule — any meetings, calls, or time-bound items you can find in the
   inbox content or task due-dates. If genuinely nothing time-bound is found, say so
@@ -175,6 +177,11 @@ Generate a concise morning briefing with these sections, in order:
 - ## Due / Overdue — what's due today or overdue, called out by OU
 - ## Blocked — anything that looks stalled or blocked, if apparent from the tasks
 - ## Focus Plan — no more than 3 priority items for today
+Inbox captures carry a `captured DD-MM-YYYY HH:MM` timestamp — use it. For anything that's \
+been sitting open for more than a couple of days, say how long it's been pending instead of \
+just repeating the capture text verbatim (e.g. "still not scheduled — pending since Jul 4") \
+so a genuinely unresolved item reads as an escalating nudge across days, not an identical \
+line copy-pasted every morning.
 Use professional, warm, direct language. Format in clean Markdown.
 Do not invent tasks, people, or meetings. Only reference what is in the provided context.\
 """
@@ -200,11 +207,21 @@ def _build_project_task_summary(data_root: str) -> str:
     return "\n".join(parts)
 
 
+_CHECKED_LINE_RE = re.compile(r"^\s*- \[[xX]\]")
+
+
 def _load_inbox(data_root: str) -> str:
+    """
+    Raw inbox content, minus already-resolved (- [x]) lines. inbox.md is never
+    pruned on its own — items just get checked off in place when resolved — so
+    without this filter, a resolved capture keeps getting fed into the briefing
+    LLM's context forever and can resurface as if it were still open.
+    """
     path = Path(data_root) / "inbox.md"
     if not path.is_file():
         return ""
-    return path.read_text(encoding="utf-8", errors="replace")
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    return "\n".join(line for line in raw.splitlines() if not _CHECKED_LINE_RE.match(line))
 
 
 def generate_morning_briefing(conn: sqlite3.Connection) -> str:

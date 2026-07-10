@@ -90,7 +90,7 @@ LLM_MAX_TOKENS: int         = int(_get("LLM_MAX_TOKENS", 4096))
 # Authentication
 # ---------------------------------------------------------------------------
 DEV_AUTH_BYPASS: bool = str(_get("DEV_AUTH_BYPASS", "0")).strip() in ("1", "true", "yes")
-DEV_USER: str         = _get("DEV_USER", "kla")
+DEV_USER: str         = _get("DEV_USER", "klm")
 
 KEYCLOAK_PUBLIC_URL: str = _get("KEYCLOAK_PUBLIC_URL", "")
 KEYCLOAK_REALM: str      = _get("KEYCLOAK_REALM", "")
@@ -120,7 +120,7 @@ if IS_PROD and not ANTHROPIC_API_KEY:
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
-SQLITE_DB_PATH: str = _get("SQLITE_DB_PATH", "../../data/kla/db/sqlite/pma.db")
+SQLITE_DB_PATH: str = _get("SQLITE_DB_PATH", "../../data/klm/db/sqlite/pma.db")
 
 # ---------------------------------------------------------------------------
 # Flask
@@ -140,14 +140,14 @@ SLOW_REQUEST_MS: int = int(_get("SLOW_REQUEST_MS", 3000))
 DATA_ROOT: Path = Path(str(_get("DATA_ROOT", str(_REPO_ROOT / "data"))))
 
 # Legacy single-user shortcut — kept for backward compat (used by ai_bp.py etc.)
-USER_DATA_ROOT: str = str(_get("USER_DATA_ROOT", str(_REPO_ROOT / "data" / "kla")))
+USER_DATA_ROOT: str = str(_get("USER_DATA_ROOT", str(_REPO_ROOT / "data" / "klm")))
 
 # ---------------------------------------------------------------------------
 # ChromaDB
 # ---------------------------------------------------------------------------
 CHROMA_HOST: str       = _get("CHROMA_HOST", "")
 CHROMA_PORT: int       = int(_get("CHROMA_PORT", 8001))
-CHROMA_PATH: str       = str(_get("CHROMA_PATH", str(_REPO_ROOT / "data" / "kla" / "db" / "chroma")))
+CHROMA_PATH: str       = str(_get("CHROMA_PATH", str(_REPO_ROOT / "data" / "klm" / "db" / "chroma")))
 CHROMA_COLLECTION: str = _get("CHROMA_COLLECTION", "md_corpus")
 
 # ---------------------------------------------------------------------------

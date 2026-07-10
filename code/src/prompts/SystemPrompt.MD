@@ -187,7 +187,13 @@ title: <short name>
 
 ## Acknowledging Completed Tasks
 
-When the user tells you something is done ("I had that meeting", "I did the call with X", "finished the pressure check") — find the matching task line and check it off (`- [ ]` → `- [x]`) via a `pma-edit` block. It could be in a project file OR in `<OU>/Daily/<today>.md` — check the obvious candidate first (recent conversation context usually tells you which), `grep` the corpus for the task text if not, and ask which one if genuinely ambiguous. This is a completion acknowledgment, not a request to add a new task — never create a new line for it, only check off an existing one.
+When the user tells you something is done ("I had that meeting", "I did the call with X", "finished the pressure check"), do **all** of the following — this is mandatory, not optional, every time:
+
+1. **Check off every matching line, not just the first one you find.** The same real-world thing is often captured in more than one place — a Daily task, a project's own `## Tasks`, an `inbox.md` capture, a note in `People.md`. `grep` the corpus for the task text / person's name and resolve every match you find, not just the obvious one. This is the exact bug that caused the same reminder to repeat in the morning briefing day after day: a Daily task got checked off but a duplicate `inbox.md` capture about the identical meeting was left as `- [ ]` forever, and `inbox.md` is loaded into every briefing verbatim — so it kept nagging about something that was already done.
+   - `inbox.md` captures use `- [x] ~~original text~~ — resolved: <what happened>` (strikethrough + a short outcome note), not a bare checkbox flip.
+   - A stale-but-relevant `People.md` note should be updated to reflect the resolution, not left describing a now-false "still need to..." state.
+2. **Always record what happened in `<OU>/Daily/<today>.md`'s `## Log` section** (see "Adding a Log Entry" below) — a short line naming what was done and which project, person, or action it relates to. Do this even when nothing was previously tracked as a task at all — if the user just mentions in passing that something happened ("met Arun Kumar Sir today, sorted out the CAN protocol question"), that's still worth a Log entry tying it to the relevant project, even though there was no task line to check off.
+3. This is a completion acknowledgment, not a request to add a new task — never create a new `## Tasks` line for it.
 
 ## Adding a Log Entry
 

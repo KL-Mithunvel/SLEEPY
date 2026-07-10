@@ -11,7 +11,7 @@ A calm, self-hosted personal AI project-management assistant for a single user (
 
 - **Author:** KL Mithunvel
 - **License:** Internal / private
-- **Dev entry point:** `main.py` (repo root) — starts Flask + Vite dev server together
+- **Dev entry point:** `main.py` (repo root) — starts Flask + Vite dev server + worker (APScheduler/task_queue) together, all as subprocesses of one `python main.py` run
 - **Prod entry point:** gunicorn targeting `code/backend/app:app`; worker via `uv run python code/backend/worker.py`
 - **Python:** 3.12 (locked via `.python-version` at root, managed by uv)
 - **Status:** Phases 0–9 complete (see Project TODO List). Integrations descoped to email-only 2026-07-01 (Telegram/WhatsApp/Jira built then removed — no Facebook account for WhatsApp, didn't actually want the other two). Deadline planning, curated task lists, standalone news topics, corpus data-governance rules, and a domain-based OU reorg (Personal/VIT/SMTW) landed 2026-07-02 through 2026-07-04. Phase 6 final (live Proxmox deploy) is the only phase not started.
@@ -24,7 +24,7 @@ A calm, self-hosted personal AI project-management assistant for a single user (
 REM Activate venv first (Windows)
 .venv\Scripts\activate
 
-REM Dev — Flask + Vite together (DEV_AUTH_BYPASS=1 auto-set)
+REM Dev — Flask + Vite + worker together (DEV_AUTH_BYPASS=1 auto-set)
 tooling\run-backend.bat
 
 REM Alternatively: uv run python main.py
@@ -36,7 +36,8 @@ tooling\run-backend-tests.bat
 REM Frontend only
 tooling\run-frontend.bat
 
-REM Worker (separate process)
+REM Worker standalone, without the web server/frontend (main.py already
+REM starts one automatically — never run two workers at once)
 tooling\run-worker.bat
 
 REM One-shot MD corpus re-index into ChromaDB
@@ -146,7 +147,7 @@ SLEEPY/
 │   ├── SETUP.md               # Zero-to-running setup guide, dev + prod
 │   └── CORPUS_SCHEMA.md       # Ground-truth data storage schema (added 2026-07-04)
 ├── tooling/
-│   ├── run-backend.bat        # Start Flask + Vite (cd repo root → uv run python main.py)
+│   ├── run-backend.bat        # Start Flask + Vite + worker (cd repo root → uv run python main.py)
 │   ├── run-backend-tests.bat  # uv run pytest from code/backend
 │   ├── run-frontend.bat       # npm run dev from code/frontend
 │   ├── run-frontend-build.bat # npm run build from code/frontend
@@ -171,7 +172,7 @@ Quick orientation: root-level `ABOUT.md`/`People.md`/`inbox.md`/`NewsWatch.md`/`
 ## Key Modules
 
 ### `main.py` (root)
-Dev-only entry point. Inserts `code/backend` onto `sys.path`, sets `DEV_AUTH_BYPASS=1` (overridable), starts Flask on port 5000, spawns Vite dev server as a subprocess. Registers `atexit` to terminate Vite on exit. Never used in prod (gunicorn calls `app:app` directly).
+Dev-only entry point. Inserts `code/backend` onto `sys.path`, sets `DEV_AUTH_BYPASS=1` (overridable), starts Flask on port 5000, spawns the Vite dev server **and** `code/backend/worker.py` as subprocesses (each its own OS process — the worker is never imported into the Flask process). Registers `atexit` to terminate both on exit. Without this, nightly cron jobs (materialise, morning_briefing, housekeeping, news_watch) never fire. Never used in prod (gunicorn calls `app:app` directly; worker runs as its own container — see `docker-compose.yml`).
 
 ### `code/backend/app.py`
 Flask app with CORS (origins from `config.CORS_ORIGINS`), per-request DB caching on `g`, slow-request logger (`SLOW_REQUEST_MS`), and `validate_token` as `before_request`. Only public route is `GET /healthz`. Blueprints registered here as features are built.
