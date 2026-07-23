@@ -161,3 +161,67 @@ def test_scan_todays_tasks_does_not_pull_from_project_files(tmp_path):
     # A project file's open tasks must NOT leak into the curated today view.
     _write_project(str(tmp_path), "SMTW", "proj.md", "---\nstatus: active\n---\n\n- [ ] Backlog item\n")
     assert task_scan.scan_todays_tasks(str(tmp_path)) == []
+
+
+def test_scan_todays_tasks_strips_tags_into_separate_fields(tmp_path):
+    _write_daily(
+        str(tmp_path), "SMTW",
+        "## Tasks\n\n- [ ] Ship release priority:high due:2026-07-10 SMTW/proj.md\n",
+    )
+    tasks = task_scan.scan_todays_tasks(str(tmp_path))
+    assert len(tasks) == 1
+    t = tasks[0]
+    assert t["description"] == "Ship release"
+    assert t["priority"] == "high"
+    assert t["project"] == "SMTW/proj.md"
+    assert t["due"] == "2026-07-10"
+    # raw text is untouched — toggle_task needs it verbatim
+    assert t["text"] == "Ship release priority:high due:2026-07-10 SMTW/proj.md"
+
+
+# ---------------------------------------------------------------------------
+# add_task
+# ---------------------------------------------------------------------------
+
+def test_add_task_creates_daily_file(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(str(tmp_path), "SMTW", "proj.md", "---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n")
+
+    ok = task_scan.add_task(str(tmp_path), "SMTW/proj.md", "Write the report", "high", "2026-08-01", conn)
+    assert ok is True
+
+    from datetime import date
+    daily_path = tmp_path / "SMTW" / "Daily" / f"{date.today().strftime('%Y-%m-%d')}.md"
+    content = daily_path.read_text(encoding="utf-8")
+    assert "- [ ] Write the report priority:high due:2026-08-01 SMTW/proj.md" in content
+
+
+def test_add_task_inserts_into_existing_daily_file(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(str(tmp_path), "SMTW", "proj.md", "---\nkey: proj\nstatus: active\n---\n\n")
+    _write_daily(str(tmp_path), "SMTW", "## Tasks\n\n- [ ] Existing task\n\n## Daily checklist\n")
+
+    ok = task_scan.add_task(str(tmp_path), "SMTW/proj.md", "New ad-hoc task", None, None, conn)
+    assert ok is True
+
+    from datetime import date
+    daily_path = tmp_path / "SMTW" / "Daily" / f"{date.today().strftime('%Y-%m-%d')}.md"
+    content = daily_path.read_text(encoding="utf-8")
+    assert "- [ ] Existing task" in content
+    assert "- [ ] New ad-hoc task SMTW/proj.md" in content
+
+
+def test_add_task_rejects_nonexistent_project(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    ok = task_scan.add_task(str(tmp_path), "SMTW/missing.md", "Some task", None, None, conn)
+    assert ok is False
+
+
+def test_add_task_rejects_path_traversal(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    ok = task_scan.add_task(str(tmp_path), "../outside.md", "Some task", None, None, conn)
+    assert ok is False

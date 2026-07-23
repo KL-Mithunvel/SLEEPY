@@ -8,6 +8,7 @@ Today Blueprint — endpoints that power the Today View.
 
 import logging
 import os
+import re
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
@@ -21,6 +22,9 @@ from auth_utils import require_perm
 logger = logging.getLogger(__name__)
 
 today_bp = Blueprint("today", __name__)
+
+_VALID_PRIORITIES = ("high", "medium", "low")
+_DUE_FORMAT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +111,39 @@ def toggle_task():
     ok = task_scan.toggle_task(config.USER_DATA_ROOT, rel_path, text, db)
     if not ok:
         return jsonify({"error": "Task line not found — it may have changed, try refreshing"}), 404
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/today/tasks/add
+# ---------------------------------------------------------------------------
+
+@today_bp.post("/api/today/tasks/add")
+@require_perm("ai:edit_md")
+def add_task():
+    """
+    Add an ad-hoc task straight to today's Active Tasks list, tagged to an
+    existing project (auto-applied, no confirm step).
+    Request body: {"project_rel_path": "OU/project.md", "text": "...",
+                    "priority": "high"|"medium"|"low"|null, "due": "YYYY-MM-DD"|null}
+    """
+    body = request.get_json(silent=True) or {}
+    project_rel_path = (body.get("project_rel_path") or "").strip()
+    text = (body.get("text") or "").strip()
+    priority = (body.get("priority") or "").strip().lower() or None
+    due = (body.get("due") or "").strip() or None
+
+    if not project_rel_path or not text:
+        return jsonify({"error": "project_rel_path and text are required"}), 400
+    if priority and priority not in _VALID_PRIORITIES:
+        return jsonify({"error": "priority must be high, medium, or low"}), 400
+    if due and not _DUE_FORMAT_RE.match(due):
+        return jsonify({"error": "due must be YYYY-MM-DD"}), 400
+
+    db = _db()
+    ok = task_scan.add_task(config.USER_DATA_ROOT, project_rel_path, text, priority, due, db)
+    if not ok:
+        return jsonify({"error": "Could not add task — invalid project path"}), 400
     return jsonify({"ok": True})
 
 

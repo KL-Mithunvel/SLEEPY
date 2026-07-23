@@ -376,6 +376,31 @@ def _section_lines(content: str, heading: str) -> list[str]:
     return out
 
 
+def _recurring_slugs(data_root: str, ou: str, cadences: tuple[str, ...]) -> set[str]:
+    """Slugs (relpath) of Recur files whose cadence regenerates a fresh task line
+    every period on its own (_daily_tasks/_weekly_tasks) — carry-forward must not
+    also drag an old unchecked instance of these forward, or it piles up a
+    never-ending duplicate trail alongside each day's fresh copy."""
+    slugs = set()
+    for recur_path in _find_recur_files(data_root, ou):
+        try:
+            content = recur_path.read_text(encoding="utf-8", errors="replace")
+            fm, _ = _parse_fm(content)
+            if str(fm.get("cadence") or "").strip().lower() in cadences:
+                slugs.add(_recur_slug(recur_path, data_root))
+        except Exception:
+            logger.exception("Recur cadence lookup failed: %s", recur_path)
+    return slugs
+
+
+_UNCHECKED_LINE_RE = re.compile(r"^\s*- \[ \]\s*(.+)$")
+_CHECKED_LINE_RE = re.compile(r"^\s*- \[[xX]\]\s*(.+)$")
+
+
+def _normalise_task_body(body: str) -> str:
+    return re.sub(r"^↳\s*", "", body.strip())
+
+
 def _carry_forward(data_root: str, ou: str, today: date) -> list[str]:
     ou_path = Path(data_root) / ou
     prev = None
@@ -387,14 +412,32 @@ def _carry_forward(data_root: str, ou: str, today: date) -> list[str]:
     if not prev:
         return []
 
+    self_regenerating = _recurring_slugs(data_root, ou, ("daily", "weekly"))
     content = prev.read_text(encoding="utf-8", errors="replace")
+    section = _section_lines(content, "Tasks")
+
+    # A line already has a completed duplicate sitting alongside it — e.g. the user
+    # ticked one copy of a task that got duplicated by a past run of this same bug.
+    # Carrying the unchecked twin forward again would resurrect it forever even
+    # though the task is done, so once any checked copy of the same text exists,
+    # stop carrying the unchecked one.
+    completed = {_normalise_task_body(m.group(1)) for line in section
+                 if (m := _CHECKED_LINE_RE.match(line))}
+
     result = []
-    for line in _section_lines(content, "Tasks"):
-        if "- [ ]" in line:
-            # Strip existing ↳, then re-add
-            stripped = re.sub(r"^(\s*- \[ \] )↳ ?", r"\1", line)
-            stripped = re.sub(r"^(\s*- \[ \] )", r"\1↳ ", stripped)
-            result.append(stripped)
+    seen = set()
+    for line in section:
+        m = _UNCHECKED_LINE_RE.match(line)
+        if not m:
+            continue
+        body = m.group(1)
+        if any(slug in body for slug in self_regenerating):
+            continue
+        normalised = _normalise_task_body(body)
+        if normalised in completed or normalised in seen:
+            continue
+        seen.add(normalised)
+        result.append(f"- [ ] ↳ {normalised}")
     return result
 
 

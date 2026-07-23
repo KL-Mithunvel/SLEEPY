@@ -1,17 +1,63 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useAuthStore } from '../stores/auth.js'
 import { useTodayStore } from '../stores/today.js'
 import { useAiStore } from '../stores/ai.js'
+import { useProjectsStore } from '../stores/projects.js'
 import { renderMd } from '../mdRender.js'
 
-const auth = useAuthStore()
 const today = useTodayStore()
 const ai = useAiStore()
+const projects = useProjectsStore()
+
+const PRIORITY_STYLES = {
+  high:   { bg: 'rgba(220,53,69,0.15)',  color: '#ea868f' },
+  medium: { bg: 'rgba(255,193,7,0.15)',  color: '#ffc107' },
+  low:    { bg: 'rgba(108,117,125,0.15)', color: '#adb5bd' },
+}
+
+// GET /api/projects lists every .md file in the corpus, not just real projects
+// (root-level files like ABOUT.md, and auto-generated Daily/Recur/Plans files
+// are in there too). Only offer real "<OU>/<slug>.md" project files — same
+// shape check ProjectsView.vue uses to decide what gets the structured editor
+// — and only ones still being worked on (completed/archived/on-hold would be
+// a dead end for "add today's task to this project").
+const activeProjects = computed(() =>
+  [...projects.projects]
+    .filter(p => (!p.status || p.status === 'active') && p.rel_path.split('/').length === 2)
+    .sort((a, b) => a.ou === b.ou ? a.name.localeCompare(b.name) : a.ou.localeCompare(b.ou))
+)
+
+const showAddTask = ref(false)
+const newTask = reactive({ projectRelPath: '', text: '', priority: '', due: '' })
+
+function openAddTask() {
+  if (!projects.projects.length) projects.fetchProjects()
+  showAddTask.value = true
+}
+
+async function submitNewTask() {
+  if (!newTask.text.trim() || !newTask.projectRelPath) return
+  const ok = await today.addTask({
+    projectRelPath: newTask.projectRelPath,
+    text: newTask.text.trim(),
+    priority: newTask.priority,
+    due: newTask.due,
+  })
+  if (ok) {
+    newTask.text = ''
+    newTask.priority = ''
+    newTask.due = ''
+    showAddTask.value = false
+  }
+}
 
 const now = new Date()
-const greeting = now.getHours() < 12 ? 'Good morning' : now.getHours() < 17 ? 'Good afternoon' : 'Good evening'
+const greeting = now.getHours() < 12
+  ? 'While you slept, work kept moving.'
+  : now.getHours() < 17
+    ? 'Still tracked. Still handled.'
+    : 'Another day, held together quietly.'
 
 const lastUserMsg = computed(() => {
   const u = [...ai.messages].reverse().find(m => m.role === 'user')
@@ -60,7 +106,7 @@ onMounted(() => {
 <template>
   <div>
     <!-- Header -->
-    <h5 class="mb-1 fw-semibold">{{ greeting }}, {{ auth.user?.name?.split(' ')[0] }}</h5>
+    <h5 class="mb-1 fw-semibold">{{ greeting }}</h5>
     <p class="mb-4" style="color: var(--text-muted-custom); font-size: 0.85rem;">
       Here's what needs your attention today.
     </p>
@@ -130,7 +176,7 @@ onMounted(() => {
               <span
                 v-if="!today.loadingNews && today.newsItems.length"
                 class="badge rounded-pill"
-                style="background: var(--accent, #6ea8fe20); color: var(--accent, #6ea8fe); font-size: 0.7rem;"
+                style="background: var(--accent-bg, #6ea8fe20); color: var(--accent, #6ea8fe); font-size: 0.7rem;"
               >{{ today.newsItems.length }}</span>
             </div>
             <div class="d-flex gap-1">
@@ -251,17 +297,64 @@ onMounted(() => {
           <span
             v-if="!today.loadingToday && today.tasks.length"
             class="badge rounded-pill"
-            style="background: var(--accent, #6ea8fe20); color: var(--accent, #6ea8fe); font-size: 0.7rem;"
+            style="background: var(--accent-bg, #6ea8fe20); color: var(--accent, #6ea8fe); font-size: 0.7rem;"
           >{{ today.tasks.length }}</span>
         </div>
-        <button
-          class="btn btn-sm btn-outline-secondary"
-          style="font-size: 0.78rem;"
-          :disabled="today.loadingToday"
-          @click="today.fetchToday()"
-        >
-          <i class="bi bi-arrow-clockwise me-1"></i>Refresh
-        </button>
+        <div class="d-flex gap-1">
+          <button
+            class="btn btn-sm"
+            :class="showAddTask ? 'btn-outline-secondary' : 'btn-outline-primary'"
+            style="font-size: 0.78rem;"
+            @click="showAddTask ? (showAddTask = false) : openAddTask()"
+          >
+            <i class="bi" :class="showAddTask ? 'bi-x-lg' : 'bi-plus-lg'"></i>
+            {{ showAddTask ? 'Cancel' : 'Add Task' }}
+          </button>
+          <button
+            class="btn btn-sm btn-outline-secondary"
+            style="font-size: 0.78rem;"
+            :disabled="today.loadingToday"
+            @click="today.fetchToday()"
+          >
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Add task form -->
+      <div v-if="showAddTask" class="p-2 mb-3 rounded" style="background: var(--bg-app, #13131f); border: 1px solid var(--border-color, rgba(255,255,255,0.07));">
+        <input
+          v-model="newTask.text"
+          placeholder="What needs doing?"
+          class="form-control form-control-sm dark-input mb-2"
+          style="font-size: 0.82rem;"
+          @keyup.enter="submitNewTask"
+        />
+        <div class="d-flex flex-wrap gap-2">
+          <select v-model="newTask.projectRelPath" class="form-select form-select-sm dark-input" style="max-width: 220px; font-size: 0.78rem;">
+            <option value="" disabled>Project…</option>
+            <option v-for="p in activeProjects" :key="p.rel_path" :value="p.rel_path">{{ p.ou }} / {{ p.name }}</option>
+          </select>
+          <select v-model="newTask.priority" class="form-select form-select-sm dark-input" style="max-width: 130px; font-size: 0.78rem;">
+            <option value="">No priority</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <input v-model="newTask.due" type="date" class="form-control form-control-sm dark-input" style="max-width: 160px; font-size: 0.78rem;" />
+          <button
+            class="btn btn-sm btn-primary ms-auto"
+            style="font-size: 0.78rem;"
+            :disabled="!newTask.text.trim() || !newTask.projectRelPath"
+            @click="submitNewTask"
+          >
+            <i class="bi bi-plus-lg me-1"></i>Add
+          </button>
+        </div>
+        <div v-if="!activeProjects.length && projects.loading" style="font-size: 0.74rem; color: var(--text-muted-custom);" class="mt-1">
+          Loading projects…
+        </div>
+        <div v-if="today.addTaskError" class="text-danger mt-1" style="font-size: 0.76rem;">{{ today.addTaskError }}</div>
       </div>
 
       <div v-if="today.loadingToday">
@@ -286,10 +379,17 @@ onMounted(() => {
             @change="today.toggleTask(task)"
           />
           <div class="flex-grow-1" style="min-width: 0;">
-            <div style="font-size: 0.82rem; color: var(--text-main, #e0e0e0);">{{ task.text }}</div>
+            <div class="d-flex align-items-center gap-2">
+              <span style="font-size: 0.82rem; color: var(--text-main, #e0e0e0);">{{ task.description || task.text }}</span>
+              <span
+                v-if="task.priority"
+                class="badge"
+                :style="`background: ${PRIORITY_STYLES[task.priority]?.bg}; color: ${PRIORITY_STYLES[task.priority]?.color}; font-size: 0.62rem;`"
+              >{{ task.priority }}</span>
+            </div>
             <div class="d-flex align-items-center gap-1 mt-1" style="font-size: 0.7rem; color: var(--text-muted-custom);">
               <i class="bi bi-file-earmark-text"></i>
-              <span>{{ task.ou }}</span>
+              <span>{{ task.project || task.ou }}</span>
               <span v-if="task.due" class="ms-auto flex-shrink-0">
                 <i class="bi bi-calendar-event me-1"></i>{{ task.due }}
               </span>

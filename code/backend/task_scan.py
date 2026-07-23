@@ -9,6 +9,7 @@ Public API:
 """
 
 import logging
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -22,6 +23,8 @@ logger = logging.getLogger(__name__)
 _SKIP_DIRS = frozenset(["db", "logs", "archive", "Archive", ".git", "__pycache__"])
 _TASK_LINE_RE = re.compile(r"^(\s*)- \[( |x|X|>)\] (.+)$")
 _DUE_RE = re.compile(r"\bdue:(\d{4}-\d{2}-\d{2})\b")
+_PRIORITY_RE = re.compile(r"\bpriority:(high|medium|low)\b", re.IGNORECASE)
+_PROJECT_REF_RE = re.compile(r"(?:^|\s)(\S+/\S+\.md)(?=\s|$)")
 _MAX_TASKS = 40
 
 
@@ -66,6 +69,29 @@ def _extract_due(text: str) -> date | None:
         return date.fromisoformat(m.group(1))
     except ValueError:
         return None
+
+
+def _clean_description(text: str) -> tuple[str, str | None, str | None]:
+    """Strip recognised tags (priority:/due:/trailing project-path/carry-forward
+    ↳ marker) out of a raw task-line text for display, returning
+    (clean_description, priority, project_rel_path). The raw `text` itself is
+    left untouched by callers — toggle_task needs it verbatim to find the line."""
+    working = text
+    priority = None
+    m = _PRIORITY_RE.search(working)
+    if m:
+        priority = m.group(1).lower()
+        working = working[:m.start()] + working[m.end():]
+    m = _DUE_RE.search(working)
+    if m:
+        working = working[:m.start()] + working[m.end():]
+    project = None
+    m = _PROJECT_REF_RE.search(working)
+    if m:
+        project = m.group(1)
+        working = working[:m.start()] + working[m.end():]
+    working = re.sub(r"^↳\s*", "", working.strip())
+    return re.sub(r"\s+", " ", working).strip(), priority, project
 
 
 # ---------------------------------------------------------------------------
@@ -146,9 +172,13 @@ def scan_todays_tasks(data_root: str) -> list[dict]:
                     continue
                 text = m.group(3).strip()
                 due = _extract_due(text)
+                description, priority, project = _clean_description(text)
                 tasks.append({
                     "rel_path": rel_path,
                     "text": text,
+                    "description": description,
+                    "priority": priority,
+                    "project": project,
                     "ou": ou,
                     "due": due.isoformat() if due else None,
                 })
@@ -191,3 +221,87 @@ def toggle_task(data_root: str, rel_path: str, text: str, conn) -> bool:
         return True
 
     return False
+
+
+def add_task(
+    data_root: str,
+    project_rel_path: str,
+    text: str,
+    priority: str | None,
+    due: str | None,
+    conn,
+) -> bool:
+    """
+    Append an ad-hoc task straight into today's <OU>/Daily/<today>.md '## Tasks'
+    section — tagged with the chosen project's rel_path (same trailing-path
+    convention materialiser uses for Recur/Plan-sourced lines) plus optional
+    priority:/due: tags. Creates today's Daily file if materialise_daily hasn't
+    run yet. Auto-applied via md_editor, no confirm gate (explicit user action).
+    Returns False if project_rel_path isn't a real .md file inside data_root, or
+    if the write fails validation.
+    """
+    root = Path(data_root)
+    norm_project = project_rel_path.replace("\\", "/").lstrip("/")
+    project_abs = root / norm_project
+    try:
+        root_resolved = root.resolve()
+        project_resolved = project_abs.resolve()
+    except OSError:
+        return False
+    if not str(project_resolved).startswith(str(root_resolved) + os.sep):
+        return False
+    if not norm_project.endswith(".md") or not project_abs.is_file():
+        return False
+
+    # Must be a real "<OU>/<slug>.md" project file, not a root-level file like
+    # ABOUT.md (no OU segment at all) or something under an auto-generated
+    # subfolder (Daily/Recur/Plans/...) — those aren't projects to attach a
+    # task to, and a bare root filename would make `ou` collide with an
+    # existing *file* of that name, breaking the Daily-file path below.
+    path_parts = norm_project.split("/")
+    if len(path_parts) != 2:
+        return False
+    ou = path_parts[0]
+    if ou not in [name for name, _ in _find_ous(data_root)]:
+        return False
+
+    today = date.today()
+    rel_path = f"{ou}/Daily/{today.strftime('%Y-%m-%d')}.md"
+    abs_path = root / rel_path
+
+    parts = [text.strip()]
+    if priority:
+        parts.append(f"priority:{priority.lower()}")
+    if due:
+        parts.append(f"due:{due}")
+    parts.append(norm_project)
+    line = f"- [ ] {' '.join(parts)}"
+
+    if abs_path.is_file():
+        content = abs_path.read_text(encoding="utf-8", errors="replace")
+        marker = "\n## Tasks\n"
+        idx = content.find(marker)
+        if idx == -1:
+            new_content = content.rstrip("\n") + f"\n\n## Tasks\n\n{line}\n"
+        else:
+            insert_at = idx + len(marker)
+            new_content = content[:insert_at] + line + "\n" + content[insert_at:]
+    else:
+        weekday = today.strftime("%A")
+        new_content = (
+            "---\n"
+            f"date: {today.strftime('%Y-%m-%d')} {weekday}\n"
+            "---\n\n"
+            "## Tasks\n\n"
+            f"{line}\n\n"
+            "## Daily checklist\n\n\n\n"
+            "## Log\n\n### Morning\n\n### Evening\n"
+        )
+
+    try:
+        proposal = md_editor.propose_edit(rel_path, new_content, f"Add task: {text[:60]}", conn)
+        md_editor.apply_edit(proposal["event_id"], conn)
+    except (ValueError, OSError):
+        logger.exception("task_scan: add_task failed for %s", rel_path)
+        return False
+    return True

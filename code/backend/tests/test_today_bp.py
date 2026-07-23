@@ -228,3 +228,66 @@ def test_toggle_task_not_found(client, monkeypatch, tmp_path):
 
     resp = client.post("/api/today/tasks/toggle", json={"rel_path": "SMTW/proj.md", "text": "Nonexistent task"})
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /api/today/tasks/add
+# ---------------------------------------------------------------------------
+
+def test_add_task_missing_fields(client):
+    resp = client.post("/api/today/tasks/add", json={"text": "Only text, no project"})
+    assert resp.status_code == 400
+
+
+def test_add_task_invalid_priority(client):
+    resp = client.post(
+        "/api/today/tasks/add",
+        json={"project_rel_path": "SMTW/proj.md", "text": "Task", "priority": "urgent"},
+    )
+    assert resp.status_code == 400
+
+
+def test_add_task_invalid_due_format(client):
+    resp = client.post(
+        "/api/today/tasks/add",
+        json={"project_rel_path": "SMTW/proj.md", "text": "Task", "due": "next monday"},
+    )
+    assert resp.status_code == 400
+
+
+def test_add_task_success(client, monkeypatch, tmp_path):
+    import config
+
+    data_root = str(tmp_path / "corpus_add")
+    proj_dir = os.path.join(data_root, "SMTW")
+    os.makedirs(proj_dir)
+    with open(os.path.join(proj_dir, "proj.md"), "w", encoding="utf-8") as f:
+        f.write("---\nkey: proj\nstatus: active\n---\n\n")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    resp = client.post(
+        "/api/today/tasks/add",
+        json={"project_rel_path": "SMTW/proj.md", "text": "Ship it", "priority": "high", "due": "2026-08-01"},
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+
+    from datetime import date
+    daily_path = os.path.join(data_root, "SMTW", "Daily", f"{date.today().strftime('%Y-%m-%d')}.md")
+    with open(daily_path, encoding="utf-8") as f:
+        content = f.read()
+    assert "- [ ] Ship it priority:high due:2026-08-01 SMTW/proj.md" in content
+
+
+def test_add_task_invalid_project_path(client, monkeypatch, tmp_path):
+    import config
+
+    data_root = str(tmp_path / "corpus_add2")
+    os.makedirs(data_root)
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    resp = client.post(
+        "/api/today/tasks/add",
+        json={"project_rel_path": "SMTW/nonexistent.md", "text": "Ship it"},
+    )
+    assert resp.status_code == 400

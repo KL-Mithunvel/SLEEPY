@@ -9,6 +9,7 @@ export const useTodayStore = defineStore('today', {
     loadingToday: false,
     loadingBriefing: false,
     error: null,
+    addTaskError: null,
 
     // News panel
     newsItems: [],
@@ -83,6 +84,23 @@ export const useTodayStore = defineStore('today', {
         this.tasks = this.tasks.filter(t => t !== task)
       } catch (e) {
         this.error = e.message
+      }
+    },
+
+    async addTask({ projectRelPath, text, priority, due }) {
+      this.addTaskError = null
+      try {
+        await apiPost('/api/today/tasks/add', {
+          project_rel_path: projectRelPath,
+          text,
+          priority: priority || null,
+          due: due || null,
+        })
+        await this.fetchToday()
+        return true
+      } catch (e) {
+        this.addTaskError = e.message
+        return false
       }
     },
 
