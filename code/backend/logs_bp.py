@@ -58,34 +58,55 @@ def _has_real_content(log_section: str) -> bool:
     return bool(stripped_lines)
 
 
+def _scan_daily_dir(daily_dir: str, ou: str, rel_prefix: str, result: list[dict]) -> None:
+    try:
+        entries = os.scandir(daily_dir)
+    except FileNotFoundError:
+        return
+    for entry in entries:
+        m = _DAILY_FILENAME_RE.match(entry.name)
+        if not entry.is_file() or not m:
+            continue
+        try:
+            content = open(entry.path, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        log_section = _extract_section(content, "Log")
+        if not _has_real_content(log_section):
+            continue
+        y, mo, d = m.groups()
+        result.append({
+            "filename": entry.name,
+            "rel_path": f"{rel_prefix}/{entry.name}",
+            "ou": ou,
+            "type": "daily",
+            "date": f"{d}-{mo}-{y}",
+            "sort_key": f"{y}-{mo}-{d}",
+        })
+
+
 def _list_logs() -> list[dict]:
     result = []
     for ou in _find_ous():
-        daily_dir = os.path.join(config.USER_DATA_ROOT, ou, "Daily")
+        ou_root = os.path.join(config.USER_DATA_ROOT, ou)
+        _scan_daily_dir(os.path.join(ou_root, "Daily"), ou, f"{ou}/Daily", result)
+
+        # Archived Daily files (housekeeping.archive_old_daily moves files >365
+        # days old to <OU>/Archive/Daily/<YYYY>/<date>.md) — without this they
+        # vanish from the Logs view entirely even though the Log content is
+        # still there on disk.
+        archive_daily_dir = os.path.join(ou_root, "Archive", "Daily")
         try:
-            entries = os.scandir(daily_dir)
+            year_dirs = os.scandir(archive_daily_dir)
         except FileNotFoundError:
-            continue
-        for entry in entries:
-            m = _DAILY_FILENAME_RE.match(entry.name)
-            if not entry.is_file() or not m:
+            year_dirs = []
+        for year_entry in year_dirs:
+            if not year_entry.is_dir():
                 continue
-            try:
-                content = open(entry.path, encoding="utf-8", errors="replace").read()
-            except OSError:
-                continue
-            log_section = _extract_section(content, "Log")
-            if not _has_real_content(log_section):
-                continue
-            y, mo, d = m.groups()
-            result.append({
-                "filename": entry.name,
-                "rel_path": f"{ou}/Daily/{entry.name}",
-                "ou": ou,
-                "type": "daily",
-                "date": f"{d}-{mo}-{y}",
-                "sort_key": f"{y}-{mo}-{d}",
-            })
+            _scan_daily_dir(
+                year_entry.path, ou,
+                f"{ou}/Archive/Daily/{year_entry.name}", result,
+            )
     result.sort(key=lambda x: x["sort_key"], reverse=True)
     for r in result:
         del r["sort_key"]
@@ -93,20 +114,27 @@ def _list_logs() -> list[dict]:
 
 
 def _safe_daily_abs(rel_path: str) -> str | None:
-    """Resolved absolute path only if it's a <OU>/Daily/<date>.md file inside USER_DATA_ROOT."""
+    """
+    Resolved absolute path only if it's a <OU>/Daily/<date>.md or an archived
+    <OU>/Archive/Daily/<YYYY>/<date>.md file inside USER_DATA_ROOT.
+    """
     norm = os.path.normpath(
         os.path.join(config.USER_DATA_ROOT, rel_path.replace("\\", "/").lstrip("/"))
     )
     root = os.path.normpath(config.USER_DATA_ROOT)
+    if not norm.startswith(root + os.sep):
+        return None
+
     parts = rel_path.replace("\\", "/").strip("/").split("/")
-    if (
-        norm.startswith(root + os.sep)
-        and len(parts) == 3
-        and parts[1] == "Daily"
-        and _DAILY_FILENAME_RE.match(parts[2])
-    ):
-        return norm
-    return None
+    is_daily = len(parts) == 3 and parts[1] == "Daily" and _DAILY_FILENAME_RE.match(parts[2])
+    is_archived_daily = (
+        len(parts) == 5
+        and parts[1] == "Archive"
+        and parts[2] == "Daily"
+        and re.fullmatch(r"\d{4}", parts[3])
+        and _DAILY_FILENAME_RE.match(parts[4])
+    )
+    return norm if (is_daily or is_archived_daily) else None
 
 
 # ---------------------------------------------------------------------------

@@ -9,8 +9,9 @@
 ```
 data/<user>/                       # USER_DATA_ROOT — a git repo of its own
 ├── ABOUT.md                       # user profile, preferences, working style
-├── People.md                      # contacts — one ## section per person
+├── People.md                      # contacts — bio/contact facts ONLY, one ## section per person (see "People.md" below)
 ├── inbox.md                       # quick captures, unprocessed items (the safe default)
+├── Scratchpad.md                  # general to-dos/ideas not tied to a project or OU (see "Scratchpad.md" below)
 ├── NewsWatch.md                   # standalone news/research interests — one ## section per topic
 ├── NewsStats.md                   # nightly-generated news activity summary — read-only
 ├── logs/                          # legacy, superseded by <OU>/Daily/ below
@@ -23,6 +24,8 @@ data/<user>/                       # USER_DATA_ROOT — a git repo of its own
     ├── Govern/<YYYY-MM>.md        # nightly-generated, team-owned recurring items by owner
     ├── People/<nick>.md           # OU-specific contacts (optional — root People.md is the default)
     └── Archive/                   # nightly-generated — completed projects, old daily files
+        ├── <slug>.md              # a project moved here by setting status: archived
+        └── Daily/<YYYY>/<date>.md # Daily files >365 days old, moved by housekeeping.archive_old_daily
 ```
 
 **OU naming is a life-domain choice, not a fixed taxonomy.** There is no hardcoded list of valid OU names anywhere in the code — `_find_ous()` (duplicated in `task_scan.py`, `housekeeping.py`, `goal_planner.py`, `materialiser.py`, `news_watch.py`) just lists whatever directories exist. As of 2026-07-04 this user's OUs are:
@@ -54,7 +57,7 @@ news_topics: [topic1, topic2]  # optional — enables nightly news search for th
 
 `key` and `status` are required — `housekeeping.py`'s `missing_frontmatter` checker flags files without them. Everything else is optional.
 
-`status` is exactly one of `active | on_hold | completed | archived` (added 2026-07-04, `project_editor.py`'s `set_status`). Setting `archived` physically moves the file from `<OU>/<slug>.md` to `<OU>/Archive/<slug>.md`; setting anything else while the file is in `Archive/` moves it back out. Every other status value is a frontmatter-only rewrite, no move.
+`status` is exactly one of `active | on_hold | completed | archived` (added 2026-07-04, `project_editor.py`'s `set_status`). Setting `archived` physically moves the file from `<OU>/<slug>.md` to `<OU>/Archive/<slug>.md`; setting anything else while the file is in `Archive/` moves it back out. Every other status value is a frontmatter-only rewrite, no move. The Projects GUI's structured editor has a dedicated "Archive" button (added 2026-07-28, next to the status dropdown) that does exactly this — the mechanism already existed, the button just makes it a one-click, discoverable action instead of a generic dropdown value.
 
 ### Template body — fixed section order
 
@@ -106,7 +109,7 @@ The Today view / "Active Tasks" panel reads **only** `<OU>/Daily/<today>.md`'s `
 - Creating a project with its own `## Tasks` list does **not** put those items in the Today view.
 - The AI only appends to a Daily file's `## Tasks` when the user *explicitly* asks to add something to today's list — never as a side effect of any other request.
 - A recurring habit ("every day", "once a week") becomes a `<OU>/Recur/<name>.md` template, not a one-off Daily line.
-- Telling the AI something is done ("I had that meeting") checks off **every** matching line, not just the first found — the same real-world thing is often duplicated across a Daily task, a project's own `## Tasks`, an `inbox.md` capture, and a `People.md` note. Added 2026-07-07 after a real bug: a Daily task got checked off but a duplicate `inbox.md` capture about the identical meeting was left unresolved, and since `inbox.md` is loaded into every morning briefing verbatim (see below), the same already-done thing kept nagging the user for days. It never creates a new `## Tasks` line.
+- Telling the AI something is done ("I had that meeting") checks off **every** matching line, not just the first found — the same real-world thing is often duplicated across a Daily task, a project's own `## Tasks`, and an `inbox.md` capture. Added 2026-07-07 after a real bug: a Daily task got checked off but a duplicate `inbox.md` capture about the identical meeting was left unresolved, and since `inbox.md` is loaded into every morning briefing verbatim (see below), the same already-done thing kept nagging the user for days. It never creates a new `## Tasks` line. If a legacy `People.md` note is found describing pending action state (pre-2026-07-28 drift — see "People.md" below), it gets stripped back to bio-only rather than rewritten with new pending state.
 
 ---
 
@@ -114,9 +117,43 @@ The Today view / "Active Tasks" panel reads **only** `<OU>/Daily/<today>.md`'s `
 
 Reflective, narrative record-keeping — what happened, distinct from `## Tasks` (actionable, checkable items) and a project's `## Notes` (durable reference context, not date-scoped). Structured as `### Morning`/`### Evening` sub-headings. The AI adds an entry on explicit request the same way it adds a Task (see "Task-Adding Rules" above) — **but as of 2026-07-07, acknowledging a completion is the one exception**: whenever the user confirms something is done, a Log entry recording what happened and which project/person/action it relates to is mandatory, even if that thing was never tracked as a formal task at all (an ad-hoc "met Arun Kumar Sir today" still gets logged). This is what makes "was this actually resolved" answerable later instead of relying on scattered checkbox state.
 
-The frontend Logs view (`GET /api/logs`, `logs_bp.py`) reads directly from these sections across every OU's `Daily/` folder — there is no separate log file. **The root-level `data/<user>/logs/` folder is legacy and unused** (superseded by this per-OU-Daily convention); if you see references to it in older notes, they're stale.
+The frontend Logs view (`GET /api/logs`, `logs_bp.py`) reads directly from these sections across every OU's `Daily/` folder, **including archived Daily files** under `<OU>/Archive/Daily/<YYYY>/<date>.md` (fixed 2026-07-28 — `logs_bp._list_logs()` previously only scanned the live `Daily/` folder, so a Log entry silently disappeared from the Logs view the moment `housekeeping.archive_old_daily` moved its file, even though the content was still on disk) — there is no separate log file. **The root-level `data/<user>/logs/` folder is legacy and unused** (superseded by this per-OU-Daily convention); if you see references to it in older notes, they're stale.
 
 **Briefing hygiene:** `ai_client._load_inbox()` strips already-checked (`- [x]`) lines out of `inbox.md` before it reaches the morning-briefing LLM — inbox.md itself is never pruned, items just get checked off in place, so without this filter a resolved capture would keep being fed into every briefing's context indefinitely.
+
+---
+
+## People.md — bio facts only, never plans (fixed 2026-07-28)
+
+`People.md` (and any OU-specific `<OU>/People/<nick>.md`) holds **durable facts about a person only**: name, role/relationship, contact info, and standing preferences ("prefers email over calls"). It never holds a plan, meeting agenda, or pending "still need to..." action item — those are actionable state, and actionable state belongs in a project's `## Tasks` (if tied to active work) or `inbox.md` (Data Storage Rules #1/#4 in `SystemPrompt.MD`), the same as any other action item, with the person's name in the text so it's still discoverable.
+
+This used to be a real inconsistency: the old "Acknowledging Completed Tasks" rule told the AI to update a stale People.md note "to reflect the resolution," which implicitly encouraged writing pending/resolved action state into a file meant to be pure bio. `housekeeping.py`'s `people_bio_only` checker now flags any task-shaped (`- [ ]`/`- [x]`) line found in a People file as a warning in `inbox.md`, so drift back into the old pattern gets caught automatically.
+
+---
+
+## Scratchpad.md — general parking lot (added 2026-07-28)
+
+Root-level file, no frontmatter, for to-dos and ideas that don't fit anywhere else:
+
+```markdown
+## Tasks
+
+- [ ] Renew passport
+
+## Notes
+
+Loose ideas not yet actionable.
+```
+
+Distinct from the other three places a "thing to do" can live:
+
+| File | Scope | Lifecycle |
+|---|---|---|
+| `inbox.md` | Unprocessed capture, safe default landing spot | Meant to be triaged into a project/Daily task, then checked off |
+| `<OU>/Daily/<date>.md` `## Tasks` | Active work, queued for today, always OU-scoped | Materialiser-owned, carries forward daily until done |
+| `Scratchpad.md` | General, not urgent, not tied to any project or OU | Durable — no automatic processing, not materialised, not carried anywhere; the user or AI checks items off in place |
+
+Never auto-generated or touched by any nightly job — purely a manually (or AI-on-request) maintained list, same write path as any other root file (`write_file`/`pma-edit`).
 
 ---
 

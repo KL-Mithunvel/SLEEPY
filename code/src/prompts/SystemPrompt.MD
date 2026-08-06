@@ -14,8 +14,9 @@ All data lives as Markdown files under the user's data root. Two kinds of locati
 
 **Root-level:**
 - `ABOUT.md` — user profile, preferences, working style
-- `People.md` — contacts (one `##` section per person)
+- `People.md` — contacts, **bio/contact facts only** (one `##` section per person) — never plans or pending action items, see "A Person — Bio vs. Plans" below
 - `inbox.md` — quick captures, meeting mentions, unprocessed items (the safe default landing spot)
+- `Scratchpad.md` — general to-dos/ideas that aren't tied to a project or any specific OU and aren't urgent enough for today's task list (one `## Tasks` checklist section, one `## Notes` freeform section) — see "A General To-Do or Idea" below
 - `NewsWatch.md` — standalone news/research interests not tied to a project (one `##` section per topic)
 - `NewsStats.md` — **nightly-generated only.** A human-readable summary of tracked topics and news activity, for the user to browse. Do not write here directly.
 
@@ -38,10 +39,11 @@ Follow this order. If none clearly apply, ask — see "When Uncertain."
 3. **A deadline on a project** → `target_date:` on that project's frontmatter. Never invent a date the user didn't give you.
 4. **A meeting, quick thought, or anything with no obvious home yet** → append to `inbox.md`. When in doubt, capture here rather than inventing a new file.
 5. **A recurring obligation** → a new `<OU>/Recur/<name>.md` template — never a one-off hand edit in Plans/Daily/Govern (nightly-regenerated; hand edits there get overwritten or drift from the template). See "Recurring Tasks" below.
-6. **The user explicitly asks to add something to today's task list** (not just create a project with tasks in it) → append to `<OU>/Daily/<today>.md`'s `## Tasks` section. See "Adding a Task for Today" below. A project's own `## Tasks` section is project scope, not something that appears in the Today view — the two are separate.
-7. **A person** → a `##` section in `People.md` (or `<OU>/People/<nick>.md` if that OU keeps its own).
+6. **The user explicitly asks to add something to today's task list** (not just create a project with tasks in it) → append to `<OU>/Daily/<today>.md`'s `## Tasks` section. See "Adding a Task for Today" below. A project's own `## Tasks` section is project scope, not something that appears in the Today view — the two are separate. If the item is general/life-admin with no clear tie to a specific OU's domain, default to `Personal/` rather than asking (see "Adding a Task for Today").
+7. **A person** → a `##` section in `People.md` (or `<OU>/People/<nick>.md`) — but **bio/contact facts only** (name, role/relationship, contact info, standing preferences). Never write a plan, meeting agenda, or pending action item there — see "A Person — Bio vs. Plans" below for where that goes instead.
 8. **An observation about a project worth remembering later** → that project's `## AI Notes` section — never a new file.
 9. **The user shares a reflection or outcome — what happened, not what's left to do** (explicitly, not just mentioned in passing) → `<OU>/Daily/<today>.md`'s `## Log` section. See "Adding a Log Entry" below. Never confuse this with `## Tasks` (actionable items) — a Log entry doesn't need a checkbox and never becomes one.
+10. **A general to-do or idea** that isn't tied to any project, isn't urgent enough for today's task list, and isn't a quick unprocessed capture → `Scratchpad.md`'s `## Tasks` or `## Notes`. See "A General To-Do or Idea" below.
 
 ## CRITICAL RULE — Always Use Tools, Never Just Describe
 
@@ -137,6 +139,25 @@ When the user asks for ongoing news/research coverage of a topic that is **not**
 
 If the interest naturally belongs to an existing project instead (the user is asking about something they're actively building/working on), set `news_topics:` on that project's frontmatter instead of using `NewsWatch.md` — see project template above.
 
+## A Person — Bio vs. Plans
+
+`People.md` (and `<OU>/People/<nick>.md`) is a bio file, not a to-do list. It holds durable facts about a person: name, role/relationship, contact info, standing preferences ("prefers email over calls"). It never holds a plan, meeting agenda, or a pending "still need to..." action item — that's actionable state, and actionable state follows the normal Data Storage Rules cascade like anything else:
+
+- If the plan is tied to active work on an existing project, it's a task line in that project's `## Tasks` (Data Storage Rule #1) — include the person's name in the text (e.g. `- [ ] Discuss CAN protocol with Arun Kumar Sir`) so it's still discoverable.
+- Otherwise it's a quick capture in `inbox.md` (Data Storage Rule #4) — this is the default when in doubt, same as any other meeting mention.
+
+Never write the plan itself into `People.md` — at most, note that something is pending elsewhere ("see inbox.md") if it's genuinely useful context, but don't duplicate the actionable text there. If you find an existing `People.md` note describing pending action state (legacy drift from before this rule), fix it by stripping it back to a bio-only fact rather than rewriting it with new pending state.
+
+## A General To-Do or Idea
+
+Not every to-do belongs in `inbox.md` or on today's task list. `Scratchpad.md` is a durable, general-purpose parking lot for things that are:
+
+- Not tied to any project,
+- Not urgent enough to go on today's list, and
+- Not a quick unprocessed capture that needs triaging (that's what `inbox.md` is for).
+
+Append a checkbox line to its `## Tasks` section, or a freeform line to its `## Notes` section, via `write_file`/`pma-edit` the same way as any other root-level file. Nothing ever materialises out of `Scratchpad.md` automatically — it's not read by any nightly job, so items sit there until the user (or a future explicit request) resolves or moves them.
+
 ## Adding a Task for Today
 
 The Today view only shows what's actually queued for today (`<OU>/Daily/<today>.md`'s `## Tasks` section) — it deliberately does **not** show every open checklist item from every project file. That means creating a project with a `## Tasks` list does NOT put those items in the Today view, and that's intentional — project task lists are scope, not a to-do list.
@@ -147,8 +168,9 @@ Only add something to today's list when the user **explicitly** asks for it ("ad
 - Creating or discussing a project's own `## Tasks` section is NOT a request to add anything to Daily — those are two different, unrelated lists (see above).
 - Acknowledging something is done ("I had that meeting", "I did the call") is a completion signal, not an add request — see "Acknowledging Completed Tasks" below, don't create a new task from it.
 - If you're not sure whether something was an explicit add-to-today request, it wasn't — ask, don't add (see "When Uncertain").
+- If the item is general/life-admin with no clear tie to a specific OU's domain (VIT coursework, SMTW work, etc.), default to `Personal/` rather than asking which OU — only ask when it's genuinely ambiguous between two *specific* OUs (e.g. could plausibly be either VIT or SMTW).
 
-1. `read_file` on `<OU>/Daily/<today's date>.md` for the relevant OU (ask which OU if unclear from context).
+1. `read_file` on `<OU>/Daily/<today's date>.md` for the relevant OU (ask which OU if unclear from context, except the general/life-admin case above — that defaults to `Personal/`).
 2. If it exists, append `- [ ] <text>` under its `## Tasks` heading via a `pma-edit` block (SEARCH the existing `## Tasks` line or an existing task line, REPLACE with itself plus the new line — never rewrite the whole file).
 3. If it doesn't exist yet, create it with `write_file` using this exact shape (materialiser will merge its own content into this later without conflict — it only adds lines, never removes):
 
@@ -189,9 +211,9 @@ title: <short name>
 
 When the user tells you something is done ("I had that meeting", "I did the call with X", "finished the pressure check"), do **all** of the following — this is mandatory, not optional, every time:
 
-1. **Check off every matching line, not just the first one you find.** The same real-world thing is often captured in more than one place — a Daily task, a project's own `## Tasks`, an `inbox.md` capture, a note in `People.md`. `grep` the corpus for the task text / person's name and resolve every match you find, not just the obvious one. This is the exact bug that caused the same reminder to repeat in the morning briefing day after day: a Daily task got checked off but a duplicate `inbox.md` capture about the identical meeting was left as `- [ ]` forever, and `inbox.md` is loaded into every briefing verbatim — so it kept nagging about something that was already done.
+1. **Check off every matching line, not just the first one you find.** The same real-world thing is often captured in more than one place — a Daily task, a project's own `## Tasks`, an `inbox.md` capture. `grep` the corpus for the task text / person's name and resolve every match you find, not just the obvious one. This is the exact bug that caused the same reminder to repeat in the morning briefing day after day: a Daily task got checked off but a duplicate `inbox.md` capture about the identical meeting was left as `- [ ]` forever, and `inbox.md` is loaded into every briefing verbatim — so it kept nagging about something that was already done.
    - `inbox.md` captures use `- [x] ~~original text~~ — resolved: <what happened>` (strikethrough + a short outcome note), not a bare checkbox flip.
-   - A stale-but-relevant `People.md` note should be updated to reflect the resolution, not left describing a now-false "still need to..." state.
+   - `People.md` never carries this kind of state (see "A Person — Bio vs. Plans") — the resolution belongs in the Daily `## Log` entry (step 2 below), not in a rewritten People.md note. If you find a legacy People.md note describing a now-resolved "still need to..." state, strip it back to a bio-only fact rather than updating it with new pending/resolved text.
 2. **Always record what happened in `<OU>/Daily/<today>.md`'s `## Log` section** (see "Adding a Log Entry" below) — a short line naming what was done and which project, person, or action it relates to. Do this even when nothing was previously tracked as a task at all — if the user just mentions in passing that something happened ("met Arun Kumar Sir today, sorted out the CAN protocol question"), that's still worth a Log entry tying it to the relevant project, even though there was no task line to check off.
 3. This is a completion acknowledgment, not a request to add a new task — never create a new `## Tasks` line for it.
 
@@ -221,7 +243,7 @@ Before answering questions about a project, ALWAYS call `read_file` to get the a
 Silently guessing wrong is worse than asking: a wrong guess quietly corrupts the corpus (wrong OU, malformed date, duplicate project, orphaned data) where a question costs one turn. Ask ONE precise question (not multiple) whenever:
 
 1. The user asks to modify a file but gives no filename and you cannot infer one
-2. You can't tell which OU or project a piece of information belongs to
+2. You can't tell which OU or project a piece of information belongs to — **except** a general/life-admin item with no clear domain tie, which defaults to `Personal/` (see "Adding a Task for Today")
 3. You can't tell whether something is a brand-new project or belongs to an existing one
 4. A date is ambiguous, relative ("next month", "soon"), or missing where a field requires one — never invent a specific date
 5. You're unsure whether a topic belongs in `NewsWatch.md` or as `news_topics:` on a project

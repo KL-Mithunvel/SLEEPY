@@ -349,6 +349,45 @@ def check_invalid_dates(data_root: str, user_nick: str) -> list[Finding]:
 
 
 # ---------------------------------------------------------------------------
+# Checker 5 — people_bio_only
+# ---------------------------------------------------------------------------
+
+def _people_files(data_root: str) -> list[tuple[Path, str]]:
+    """Root People.md plus every <OU>/People/*.md file. Returns (abs_path, display_location) pairs."""
+    results: list[tuple[Path, str]] = []
+    root_people = Path(data_root) / "People.md"
+    if root_people.is_file():
+        results.append((root_people, "People.md"))
+    for ou, ou_dir in _find_ous(data_root):
+        people_dir = ou_dir / "People"
+        if not people_dir.is_dir():
+            continue
+        for f in sorted(people_dir.glob("*.md")):
+            results.append((f, f"{ou}/People/{f.name}"))
+    return results
+
+
+@register_checker("people_bio_only")
+def check_people_bio_only(data_root: str, user_nick: str) -> list[Finding]:
+    """People.md is bio-only (see docs/CORPUS_SCHEMA.md) — a checkbox line is
+    drift back into writing plans/action items into a contact's bio."""
+    findings: list[Finding] = []
+    for abs_path, location in _people_files(data_root):
+        try:
+            content = abs_path.read_text(encoding="utf-8", errors="replace")
+            for lineno, line in enumerate(content.splitlines(), 1):
+                if _TASK_LINE_RE.match(line):
+                    findings.append(Finding(
+                        severity="warn",
+                        summary="task/action line in a People file — move to inbox.md or the relevant project",
+                        location=f"{location}:{lineno}",
+                    ))
+        except Exception:
+            logger.exception("people_bio_only error: %s", abs_path)
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Action — archive_old_daily
 # ---------------------------------------------------------------------------
 

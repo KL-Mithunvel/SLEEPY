@@ -177,6 +177,12 @@ async function onStatusChange(e) {
   }
 }
 
+async function archiveProject() {
+  const name = store.selectedPath?.split('/').pop() || 'this project'
+  if (!window.confirm(`Archive ${name}? This moves the file to its OU's Archive folder.`)) return
+  await store.setStatus('archived')
+}
+
 onMounted(() => store.fetchProjects())
 </script>
 
@@ -375,14 +381,23 @@ onMounted(() => store.fetchProjects())
             <!-- Status -->
             <div class="mb-3">
               <label class="form-label" style="font-size: 0.75rem; color: var(--text-muted-custom);">Status</label>
-              <select
-                class="form-select form-select-sm dark-input"
-                style="max-width: 200px;"
-                :value="store.structured.frontmatter.status"
-                @change="onStatusChange"
-              >
-                <option v-for="s in Object.keys(STATUS_STYLES)" :key="s" :value="s">{{ STATUS_STYLES[s].label }}</option>
-              </select>
+              <div class="d-flex align-items-center gap-2">
+                <select
+                  class="form-select form-select-sm dark-input"
+                  style="max-width: 200px;"
+                  :value="store.structured.frontmatter.status"
+                  @change="onStatusChange"
+                >
+                  <option v-for="s in Object.keys(STATUS_STYLES)" :key="s" :value="s">{{ STATUS_STYLES[s].label }}</option>
+                </select>
+                <button
+                  v-if="store.structured.frontmatter.status !== 'archived'"
+                  class="btn btn-sm btn-outline-secondary"
+                  style="font-size: 0.75rem;"
+                  title="Move this project to its OU's Archive folder"
+                  @click="archiveProject"
+                ><i class="bi bi-archive me-1"></i>Archive</button>
+              </div>
             </div>
 
             <!-- Freeform sections -->

@@ -111,6 +111,48 @@ def test_list_logs_display_date_format(client, monkeypatch, tmp_path):
     assert log["date"] == "18-06-2026"
 
 
+def test_list_logs_includes_archived_daily_files(client, monkeypatch, tmp_path):
+    """Daily files moved to <OU>/Archive/Daily/<year>/ by housekeeping.archive_old_daily
+    must still show up in the Logs view — see docs/CORPUS_SCHEMA.md."""
+    import config
+
+    root = tmp_path / "corpus_archived"
+    archive_dir = root / "VIT" / "Archive" / "Daily" / "2024"
+    archive_dir.mkdir(parents=True)
+    (archive_dir / "2024-01-15.md").write_text(
+        _daily_with_log("Old entry from last year."), encoding="utf-8",
+    )
+
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.get("/api/logs")
+    data = resp.get_json()
+    assert data["total"] == 1
+    assert data["logs"][0]["ou"] == "VIT"
+    assert data["logs"][0]["rel_path"] == "VIT/Archive/Daily/2024/2024-01-15.md"
+    assert data["logs"][0]["type"] == "daily"
+    assert data["logs"][0]["date"] == "15-01-2024"
+
+
+def test_list_logs_sorts_archived_and_current_together(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "corpus_mixed"
+    daily_dir = root / "SMTW" / "Daily"
+    daily_dir.mkdir(parents=True)
+    (daily_dir / "2026-06-18.md").write_text(_daily_with_log("Recent entry."), encoding="utf-8")
+
+    archive_dir = root / "SMTW" / "Archive" / "Daily" / "2024"
+    archive_dir.mkdir(parents=True)
+    (archive_dir / "2024-01-15.md").write_text(_daily_with_log("Old entry."), encoding="utf-8")
+
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.get("/api/logs")
+    logs = resp.get_json()["logs"]
+    assert [l["date"] for l in logs] == ["18-06-2026", "15-01-2024"]
+
+
 # ---------------------------------------------------------------------------
 # GET /api/logs/content
 # ---------------------------------------------------------------------------
@@ -135,6 +177,27 @@ def test_log_content_success_returns_only_log_section(client, monkeypatch, tmp_p
     assert "Stood up the server" in data["content"]
     assert "Secret task text" not in data["content"]
     assert data["rel_path"] == "SMTW/Daily/2026-06-18.md"
+
+
+def test_log_content_success_for_archived_daily_file(client, monkeypatch, tmp_path):
+    import config
+
+    root = tmp_path / "corpus_archived_content"
+    archive_dir = root / "SMTW" / "Archive" / "Daily" / "2024"
+    archive_dir.mkdir(parents=True)
+    (archive_dir / "2024-01-15.md").write_text(
+        "---\ndate: 2024-01-15 Monday\n---\n\n## Tasks\n\n- [ ] Secret old task\n\n"
+        "## Log\n\n### Evening\n\nArchived entry content.\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.get("/api/logs/content?path=SMTW/Archive/Daily/2024/2024-01-15.md")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "Archived entry content" in data["content"]
+    assert "Secret old task" not in data["content"]
 
 
 def test_log_content_missing_param(client):
