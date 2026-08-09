@@ -426,15 +426,18 @@ def chat_endpoint():
                 # Collect actions: tool-staged + any pma-edit blocks in response text
                 actions = staged_by_tools + _stage_pma_edits(result.text, db)
 
-                # Log to ai_events
+                # Log to ai_events — persists the full prompt/response text so
+                # past conversations are recoverable, not just token counts.
                 try:
                     db.execute(
                         """
                         INSERT INTO ai_events
-                            (event_type, model, input_tokens, output_tokens, accepted)
-                        VALUES ('ai_chat', ?, ?, ?, 1)
+                            (event_type, model, input_tokens, output_tokens, accepted,
+                             user_message, response_text)
+                        VALUES ('ai_chat', ?, ?, ?, 1, ?, ?)
                         """,
-                        (result.model, result.input_tokens, result.output_tokens),
+                        (result.model, result.input_tokens, result.output_tokens,
+                         last_user_msg, result.text),
                     )
                     db.commit()
                 except Exception:

@@ -79,7 +79,9 @@ Two different conventions, by field type — this used to be an internal contrad
 
 ## The Materialiser Pipeline (`materialiser.py`)
 
-Runs nightly at 00:05 IST (worker cron `materialise`), fully deterministic, idempotent — safe to re-run manually via `POST /api/corpus/materialise`.
+Runs nightly at 00:05 IST (worker cron `materialise`), fully deterministic, idempotent — safe to re-run manually via `POST /api/corpus/materialise`. Also runs once on every worker startup (`worker.py main()`, added 2026-08-07) — the cron only fires if the process happens to be up at exactly 00:05 IST, so a machine that was off overnight left `Active Tasks` empty until the next midnight; running it once at startup closes that gap without any risk of duplicating already-completed tasks (see idempotency notes below).
+
+Any `<OU>/Recur/<name>.md` with `status: inactive` in its frontmatter is skipped by all three stages (added 2026-08-07, `_is_recur_active()`). This is how a recurring commitment gets stopped once it's actually done — never delete the Recur file itself, since that would lose its `^R:` idempotency history in past `Plans/` files.
 
 ### Stage 1 — `materialise_non_daily`: Recur → Plans
 
@@ -89,7 +91,7 @@ For each `<OU>/Recur/<name>.md` with `cadence: monthly|quarterly|yearly`: comput
 
 Four sources, merged additively (never removes existing lines):
 
-1. **Carry-forward** — unchecked `- [ ]` lines from `## Tasks` in the most recent previous Daily file, prefixed `↳`.
+1. **Carry-forward** — unchecked `- [ ]` lines from `## Tasks` in the most recent previous Daily file, prefixed `↳`. A `- [-]` (cancelled) line never carries forward, and if a cancelled or checked duplicate of a line's text exists alongside an unchecked copy, the unchecked copy stops carrying too (added 2026-08-07) — use `- [-]` to drop a one-off task you no longer want resurfacing without lying that it's done.
 2. **Plan pipe** (`_apply_plan_pipe`) — Plan-file bullets whose `due:`/`start:` token matches today; the Plan-file line is rewritten `[ ]` → `[>]`.
 3. **`cadence: daily` / `cadence: weekly` Recur items** (`_daily_tasks`/`_weekly_tasks`) — unconditional every day for `daily`, matching `schedule: weekday:mon` etc. for `weekly`. **`cadence: daily` support was added 2026-07-04** — earlier it silently did nothing; only `weekly` and the separate `Recur/Daily.md` checklist file worked.
 4. **`Recur/Daily.md`** (special fixed filename, no frontmatter) — flat checklist, every line becomes a `## Daily checklist` item every day.
@@ -98,7 +100,7 @@ First run of the day creates the file fresh; subsequent runs merge only new, not
 
 ### Stage 3 — `materialise_govern`: team-owned Recur → Govern
 
-Recur files where `owners:` is set and doesn't include the current user go to `<OU>/Govern/<YYYY-MM>.md` grouped by owner, instead of the user's own Daily. **Note:** the materialiser side of this is implemented, but there is currently no frontend view or `GET` endpoint to browse Govern files — see "Not Yet Built."
+Recur files where `owners:` is set and doesn't include the current user go to `<OU>/Govern/<YYYY-MM>.md` grouped by owner, instead of the user's own Daily. Each month, unchecked tasks left over from the previous month's Govern file are carried into a `## Carry-overs` section, annotated `*(overdue from <YYYY-MM>)*` (added 2026-08-07) — otherwise a delegated task that slipped just silently disappeared the moment the month rolled over. **Note:** the materialiser side of this is implemented, but there is currently no frontend view or `GET` endpoint to browse Govern files — see "Not Yet Built."
 
 ---
 

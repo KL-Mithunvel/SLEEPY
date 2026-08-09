@@ -395,6 +395,13 @@ onMounted(() => {
               </span>
             </div>
           </div>
+          <button
+            class="btn btn-sm btn-cancel-task flex-shrink-0"
+            title="Not relevant — cancel (won't be recorded as done, won't come back tomorrow)"
+            @click="today.cancelTask(task)"
+          >
+            <i class="bi bi-x-lg"></i>
+          </button>
         </div>
       </div>
 
@@ -604,6 +611,19 @@ onMounted(() => {
 }
 .btn-feedback:hover { background: rgba(255,255,255,0.07); }
 .btn-feedback.active { background: rgba(110,168,254,0.15); border-color: rgba(110,168,254,0.4); }
+
+/* ---- Task cancel button ---- */
+.btn-cancel-task {
+  color: var(--text-muted-custom);
+  opacity: 0.5;
+  padding: 0.1rem 0.4rem;
+  line-height: 1;
+}
+.btn-cancel-task:hover {
+  opacity: 1;
+  color: #f87171;
+  background: rgba(248,113,113,0.1);
+}
 
 /* ---- Rendered markdown (briefing / AI replies) ---- */
 .md-rendered :deep(h1),

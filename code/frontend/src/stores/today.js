@@ -87,6 +87,15 @@ export const useTodayStore = defineStore('today', {
       }
     },
 
+    async cancelTask(task) {
+      try {
+        await apiPost('/api/today/tasks/cancel', { rel_path: task.rel_path, text: task.text })
+        this.tasks = this.tasks.filter(t => t !== task)
+      } catch (e) {
+        this.error = e.message
+      }
+    },
+
     async addTask({ projectRelPath, text, priority, due }) {
       this.addTaskError = null
       try {

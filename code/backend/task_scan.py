@@ -189,13 +189,11 @@ def scan_todays_tasks(data_root: str) -> list[dict]:
     return tasks[:_MAX_TASKS]
 
 
-def toggle_task(data_root: str, rel_path: str, text: str, conn) -> bool:
-    """
-    Flip a single '- [ ] <text>' line to '- [x] <text>' (exact text match) and
-    auto-apply via md_editor (no confirm gate — low-risk deterministic toggle).
-    Returns False if no exact match is found (e.g. file changed since the list
-    was fetched) or the edit fails validation.
-    """
+def _set_task_marker(data_root: str, rel_path: str, text: str, marker: str, summary: str, conn) -> bool:
+    """Flip a single '- [ ] <text>' line to '- [<marker>] <text>' (exact text
+    match) and auto-apply via md_editor (no confirm gate — the click itself is
+    the confirmation). Returns False if no exact match is found (e.g. file
+    changed since the list was fetched) or the edit fails validation."""
     abs_path = Path(data_root) / rel_path
     if not abs_path.is_file():
         return False
@@ -210,17 +208,39 @@ def toggle_task(data_root: str, rel_path: str, text: str, conn) -> bool:
             continue
         ending = line[len(stripped):]
         leading_ws = stripped[:len(stripped) - len(stripped.lstrip())]
-        lines[i] = f"{leading_ws}- [x] {text}{ending}"
+        lines[i] = f"{leading_ws}- [{marker}] {text}{ending}"
         new_content = "".join(lines)
         try:
-            proposal = md_editor.propose_edit(rel_path, new_content, f"Task done: {text[:60]}", conn)
+            proposal = md_editor.propose_edit(rel_path, new_content, f"{summary}: {text[:60]}", conn)
             md_editor.apply_edit(proposal["event_id"], conn)
         except ValueError:
-            logger.exception("task_scan: toggle failed validation for %s", rel_path)
+            logger.exception("task_scan: %s failed validation for %s", summary, rel_path)
             return False
         return True
 
     return False
+
+
+def toggle_task(data_root: str, rel_path: str, text: str, conn) -> bool:
+    """
+    Flip a single '- [ ] <text>' line to '- [x] <text>' (exact text match) and
+    auto-apply via md_editor (no confirm gate — low-risk deterministic toggle).
+    Returns False if no exact match is found (e.g. file changed since the list
+    was fetched) or the edit fails validation.
+    """
+    return _set_task_marker(data_root, rel_path, text, "x", "Task done", conn)
+
+
+def cancel_task(data_root: str, rel_path: str, text: str, conn) -> bool:
+    """
+    Flip a single '- [ ] <text>' line to '- [-] <text>' (cancelled — distinct
+    from done) and auto-apply via md_editor (no confirm gate). materialiser.py's
+    carry-forward never drags a `- [-]` line into tomorrow's Daily file, so this
+    is how a task that's no longer relevant stops resurfacing without being
+    falsely recorded as completed. Returns False if no exact match is found or
+    the edit fails validation.
+    """
+    return _set_task_marker(data_root, rel_path, text, "-", "Task cancelled", conn)
 
 
 def add_task(

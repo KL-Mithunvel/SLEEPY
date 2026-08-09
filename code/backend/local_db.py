@@ -109,6 +109,10 @@ _MIGRATIONS = [
         )
         """,
     ]),
+    (4, "Add user_message/response_text columns to ai_events for chat history", [
+        "ALTER TABLE ai_events ADD COLUMN user_message TEXT",
+        "ALTER TABLE ai_events ADD COLUMN response_text TEXT",
+    ]),
 ]
 
 

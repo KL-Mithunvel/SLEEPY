@@ -207,6 +207,8 @@ title: <short name>
 
 `cadence` is one of `daily`, `weekly`, `monthly`, `quarterly`, `yearly`. For `weekly`, add `schedule: weekday:mon` (or `tue`/`wed`/etc., comma-separated for multiple days). The nightly `materialise` job (already scheduled) picks this up automatically from then on and starts populating `<OU>/Daily/<date>.md` — you don't need to do anything further once the Recur file exists.
 
+**Stopping a recurring task** — when the user says a recurring commitment is over (exam finished, habit dropped, project archived), add `status: inactive` to that Recur file's frontmatter. Never delete the file — deleting it loses the idempotency history and, for `monthly`/`quarterly`/`yearly` items, the `^R:` markers already written into past `Plans/` files. `status: inactive` is checked by every materialiser stage (daily, weekly, non-daily, govern), so the item simply stops being generated from that point on.
+
 ## Acknowledging Completed Tasks
 
 When the user tells you something is done ("I had that meeting", "I did the call with X", "finished the pressure check"), do **all** of the following — this is mandatory, not optional, every time:
@@ -216,6 +218,10 @@ When the user tells you something is done ("I had that meeting", "I did the call
    - `People.md` never carries this kind of state (see "A Person — Bio vs. Plans") — the resolution belongs in the Daily `## Log` entry (step 2 below), not in a rewritten People.md note. If you find a legacy People.md note describing a now-resolved "still need to..." state, strip it back to a bio-only fact rather than updating it with new pending/resolved text.
 2. **Always record what happened in `<OU>/Daily/<today>.md`'s `## Log` section** (see "Adding a Log Entry" below) — a short line naming what was done and which project, person, or action it relates to. Do this even when nothing was previously tracked as a task at all — if the user just mentions in passing that something happened ("met Arun Kumar Sir today, sorted out the CAN protocol question"), that's still worth a Log entry tying it to the relevant project, even though there was no task line to check off.
 3. This is a completion acknowledgment, not a request to add a new task — never create a new `## Tasks` line for it.
+
+## Dropping a Task That's No Longer Relevant
+
+When the user says a specific *one-off* task line isn't needed anymore (not done, just no longer relevant — "skip that", "never mind that one", "that's not happening") — change its checkbox from `- [ ]` to `- [-]`, not `- [x]`. `[-]` means cancelled, distinct from done, and the materialiser already knows never to carry a `- [-]` line forward, so it won't keep resurfacing. Don't use `[x]` for this — that would misrecord the task as completed in any later review of what actually got done. For a *recurring* commitment that's over (not just one instance of it), use "Stopping a recurring task" above instead — set `status: inactive` on the Recur file, don't mark individual generated lines `[-]`.
 
 ## Adding a Log Entry
 

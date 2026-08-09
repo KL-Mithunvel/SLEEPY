@@ -231,6 +231,50 @@ def test_toggle_task_not_found(client, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# POST /api/today/tasks/cancel
+# ---------------------------------------------------------------------------
+
+def test_cancel_task_missing_fields(client):
+    resp = client.post("/api/today/tasks/cancel", json={})
+    assert resp.status_code == 400
+
+
+def test_cancel_task_success(client, monkeypatch, tmp_path):
+    import config
+
+    data_root = str(tmp_path / "corpus_cancel")
+    proj_dir = os.path.join(data_root, "SMTW")
+    os.makedirs(proj_dir)
+    proj_file = os.path.join(proj_dir, "proj.md")
+    with open(proj_file, "w", encoding="utf-8") as f:
+        f.write("---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n- [ ] Deploy server\n")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    resp = client.post("/api/today/tasks/cancel", json={"rel_path": "SMTW/proj.md", "text": "Deploy server"})
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+
+    with open(proj_file, encoding="utf-8") as f:
+        content = f.read()
+    assert "- [-] Deploy server" in content
+    assert "- [ ] Deploy server" not in content
+
+
+def test_cancel_task_not_found(client, monkeypatch, tmp_path):
+    import config
+
+    data_root = str(tmp_path / "corpus_cancel2")
+    proj_dir = os.path.join(data_root, "SMTW")
+    os.makedirs(proj_dir)
+    with open(os.path.join(proj_dir, "proj.md"), "w", encoding="utf-8") as f:
+        f.write("---\nkey: proj\nstatus: active\n---\n\n- [ ] Deploy server\n")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    resp = client.post("/api/today/tasks/cancel", json={"rel_path": "SMTW/proj.md", "text": "Nonexistent task"})
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # POST /api/today/tasks/add
 # ---------------------------------------------------------------------------
 

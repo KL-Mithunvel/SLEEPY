@@ -117,6 +117,48 @@ def test_toggle_task_missing_file_returns_false(tmp_path, conn, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# cancel_task
+# ---------------------------------------------------------------------------
+
+def test_cancel_task_marks_cancelled_not_done(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(
+        str(tmp_path), "SMTW", "proj.md",
+        "---\nstatus: active\n---\n\n- [ ] Deploy server\n- [ ] Write tests\n",
+    )
+    ok = task_scan.cancel_task(str(tmp_path), "SMTW/proj.md", "Deploy server", conn)
+    assert ok is True
+
+    content = (tmp_path / "SMTW" / "proj.md").read_text(encoding="utf-8")
+    assert "- [-] Deploy server" in content
+    assert "- [x] Deploy server" not in content   # not recorded as done
+    assert "- [ ] Write tests" in content         # other task untouched
+
+
+def test_cancel_task_no_match_returns_false(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(str(tmp_path), "SMTW", "proj.md", "---\nstatus: active\n---\n\n- [ ] Real task\n")
+    ok = task_scan.cancel_task(str(tmp_path), "SMTW/proj.md", "Nonexistent task", conn)
+    assert ok is False
+
+
+def test_cancelled_task_dropped_by_next_scan(tmp_path, conn, monkeypatch):
+    """A cancelled task shouldn't show up as still-open in the Active Tasks scan."""
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(
+        str(tmp_path), "SMTW", "proj.md",
+        "---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n- [ ] Deploy server\n",
+    )
+    assert task_scan.cancel_task(str(tmp_path), "SMTW/proj.md", "Deploy server", conn) is True
+
+    tasks = task_scan.scan_open_tasks(str(tmp_path))
+    assert tasks == []
+
+
+# ---------------------------------------------------------------------------
 # scan_todays_tasks
 # ---------------------------------------------------------------------------
 

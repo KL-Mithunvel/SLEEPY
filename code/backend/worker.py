@@ -80,6 +80,13 @@ def main():
     scheduler.start()
     logger.info("Scheduler started with %d jobs", count)
 
+    # The 00:05 IST materialise cron only fires if the worker happens to be
+    # running at that exact moment — if the machine was off or main.py wasn't
+    # started, Active Tasks silently stays empty until the next midnight.
+    # Materialise is fully idempotent (see materialiser.py docstring), so it's
+    # always safe to also run it once on every startup.
+    _enqueue_scheduled("materialise", {})
+
     try:
         while True:
             _drain_once()

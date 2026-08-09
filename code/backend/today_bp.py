@@ -115,6 +115,31 @@ def toggle_task():
 
 
 # ---------------------------------------------------------------------------
+# POST /api/today/tasks/cancel
+# ---------------------------------------------------------------------------
+
+@today_bp.post("/api/today/tasks/cancel")
+@require_perm("ai:edit_md")
+def cancel_task():
+    """
+    Mark a single task line cancelled — `- [-]`, distinct from done — so it
+    stops resurfacing without being falsely recorded as completed (auto-applied,
+    no confirm step). Request body: {"rel_path": "OU/project.md", "text": "exact task text"}
+    """
+    body = request.get_json(silent=True) or {}
+    rel_path = (body.get("rel_path") or "").strip()
+    text = (body.get("text") or "").strip()
+    if not rel_path or not text:
+        return jsonify({"error": "rel_path and text are required"}), 400
+
+    db = _db()
+    ok = task_scan.cancel_task(config.USER_DATA_ROOT, rel_path, text, db)
+    if not ok:
+        return jsonify({"error": "Task line not found — it may have changed, try refreshing"}), 404
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
 # POST /api/today/tasks/add
 # ---------------------------------------------------------------------------
 

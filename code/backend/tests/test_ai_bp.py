@@ -180,3 +180,36 @@ def test_edit_reject_idempotent(client):
     # Reject a non-existent event — should succeed silently (UPDATE 0 rows)
     resp = client.post("/api/ai/edit/99999/reject")
     assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# POST /api/ai/chat — persists full prompt/response text, not just token counts
+# ---------------------------------------------------------------------------
+
+def test_chat_persists_user_message_and_response(client, monkeypatch):
+    import llm
+
+    def fake_chat_stream(messages, *, system=None, tools=None, model=None):
+        yield "Focus on "
+        yield "Alpha today."
+        yield llm.ChatResult(text="Focus on Alpha today.", model="mock-model",
+                              input_tokens=10, output_tokens=5)
+
+    monkeypatch.setattr(llm, "chat_stream", fake_chat_stream)
+
+    resp = client.post(
+        "/api/ai/chat",
+        json={"messages": [{"role": "user", "content": "What should I focus on?"}]},
+    )
+    assert resp.status_code == 200
+    assert "Focus on Alpha today." in resp.get_data(as_text=True)
+
+    from app import get_db
+    with client.application.app_context():
+        db = get_db()
+        row = db.execute(
+            "SELECT user_message, response_text FROM ai_events "
+            "WHERE event_type = 'ai_chat' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert row["user_message"] == "What should I focus on?"
+    assert row["response_text"] == "Focus on Alpha today."

@@ -208,6 +208,14 @@ def _owners_list(fm: dict) -> list[str]:
     return [str(o).strip() for o in owners]
 
 
+def _is_recur_active(fm: dict) -> bool:
+    """A Recur file is active unless explicitly paused via `status: inactive` —
+    the same status vocabulary as project files, so stopping a recurring
+    commitment (e.g. exam prep once the exam is actually done) doesn't require
+    deleting the template and losing its history/idempotency markers."""
+    return str(fm.get("status") or "").strip().lower() != "inactive"
+
+
 # ---------------------------------------------------------------------------
 # Bullet builder
 # ---------------------------------------------------------------------------
@@ -291,6 +299,8 @@ def materialise_non_daily(
                 cadence = str(fm.get("cadence") or "").strip().lower()
 
                 if cadence not in ("monthly", "quarterly", "yearly"):
+                    continue
+                if not _is_recur_active(fm):
                     continue
                 if not _is_user_owned(fm, user_nick):
                     continue
@@ -395,6 +405,7 @@ def _recurring_slugs(data_root: str, ou: str, cadences: tuple[str, ...]) -> set[
 
 _UNCHECKED_LINE_RE = re.compile(r"^\s*- \[ \]\s*(.+)$")
 _CHECKED_LINE_RE = re.compile(r"^\s*- \[[xX]\]\s*(.+)$")
+_CANCELLED_LINE_RE = re.compile(r"^\s*- \[-\]\s*(.+)$")
 
 
 def _normalise_task_body(body: str) -> str:
@@ -416,17 +427,22 @@ def _carry_forward(data_root: str, ou: str, today: date) -> list[str]:
     content = prev.read_text(encoding="utf-8", errors="replace")
     section = _section_lines(content, "Tasks")
 
-    # A line already has a completed duplicate sitting alongside it — e.g. the user
-    # ticked one copy of a task that got duplicated by a past run of this same bug.
-    # Carrying the unchecked twin forward again would resurrect it forever even
-    # though the task is done, so once any checked copy of the same text exists,
-    # stop carrying the unchecked one.
-    completed = {_normalise_task_body(m.group(1)) for line in section
-                 if (m := _CHECKED_LINE_RE.match(line))}
+    # A line already has a completed or cancelled duplicate sitting alongside it —
+    # e.g. the user ticked one copy of a task that got duplicated by a past run of
+    # this same bug, or explicitly marked a copy `- [-]` because it's no longer
+    # relevant. Carrying the unchecked twin forward again would resurrect it
+    # forever even though the task is done/dropped, so once any checked or
+    # cancelled copy of the same text exists, stop carrying the unchecked one.
+    resolved = set()
+    for line in section:
+        m = _CHECKED_LINE_RE.match(line) or _CANCELLED_LINE_RE.match(line)
+        if m:
+            resolved.add(_normalise_task_body(m.group(1)))
 
     result = []
     seen = set()
     for line in section:
+        # `- [-]` (cancelled) lines never carry forward — only `- [ ]` does.
         m = _UNCHECKED_LINE_RE.match(line)
         if not m:
             continue
@@ -434,7 +450,7 @@ def _carry_forward(data_root: str, ou: str, today: date) -> list[str]:
         if any(slug in body for slug in self_regenerating):
             continue
         normalised = _normalise_task_body(body)
-        if normalised in completed or normalised in seen:
+        if normalised in resolved or normalised in seen:
             continue
         seen.add(normalised)
         result.append(f"- [ ] ↳ {normalised}")
@@ -491,6 +507,8 @@ def _weekly_tasks(data_root: str, ou: str, today: date, existing: str) -> list[s
             fm, _ = _parse_fm(content)
             if str(fm.get("cadence") or "").strip().lower() != "weekly":
                 continue
+            if not _is_recur_active(fm):
+                continue
             if not _weekly_matches(fm.get("schedule"), today):
                 continue
             slug = _recur_slug(recur_path, data_root)
@@ -519,6 +537,8 @@ def _daily_tasks(data_root: str, ou: str, today: date, existing: str) -> list[st
             content = recur_path.read_text(encoding="utf-8", errors="replace")
             fm, _ = _parse_fm(content)
             if str(fm.get("cadence") or "").strip().lower() != "daily":
+                continue
+            if not _is_recur_active(fm):
                 continue
             slug = _recur_slug(recur_path, data_root)
             if slug in existing:
@@ -662,17 +682,95 @@ def _append_govern_owner(govern_path: Path, owner: str, bullet: str) -> None:
     govern_path.write_text(content, encoding="utf-8")
 
 
+def _all_unchecked_bodies(content: str) -> list[str]:
+    result = []
+    for line in content.splitlines():
+        m = _UNCHECKED_LINE_RE.match(line)
+        if m:
+            result.append(m.group(1))
+    return result
+
+
+def _prev_month_label(month_label: str) -> str:
+    year, month = (int(x) for x in month_label.split("-"))
+    return f"{year - 1}-12" if month == 1 else f"{year}-{month - 1:02d}"
+
+
+_OVERDUE_SUFFIX_RE = re.compile(r"\s*\*\(overdue from \d{4}-\d{2}\)\*\s*$")
+
+
+def _strip_overdue_annotation(text: str) -> str:
+    return _OVERDUE_SUFFIX_RE.sub("", text)
+
+
+def _carry_govern_overdue(govern_path: Path, data_root: str, ou: str, month_label: str) -> int:
+    """Unchecked tasks from the previous month's Govern file are carried into this
+    month's file under `## Carry-overs`, annotated `*(overdue from <YYYY-MM>)*` —
+    otherwise a delegated task that slipped just silently disappears the moment
+    the month rolls over, since each month's Govern file starts empty."""
+    prev_month_label = _prev_month_label(month_label)
+    prev_path = Path(data_root) / ou / "Govern" / f"{prev_month_label}.md"
+    if not prev_path.is_file():
+        return 0
+
+    prev_content = prev_path.read_text(encoding="utf-8", errors="replace")
+    current = govern_path.read_text(encoding="utf-8", errors="replace") if govern_path.is_file() else ""
+    existing_bodies = {
+        _normalise_task_body(_strip_overdue_annotation(b))
+        for b in _all_unchecked_bodies(current)
+    }
+
+    new_lines = []
+    for body in _all_unchecked_bodies(prev_content):
+        normalised = _normalise_task_body(body)
+        if normalised in existing_bodies:
+            continue
+        existing_bodies.add(normalised)
+        new_lines.append(f"- [ ] {normalised} *(overdue from {prev_month_label})*")
+
+    if not new_lines:
+        return 0
+
+    if not govern_path.is_file():
+        _ensure_govern(govern_path, month_label)
+        current = govern_path.read_text(encoding="utf-8", errors="replace")
+
+    heading = "\n## Carry-overs"
+    insertion = "\n".join(new_lines) + "\n"
+    if heading not in current:
+        if not current.endswith("\n"):
+            current += "\n"
+        current += f"## Carry-overs\n\n{insertion}"
+    else:
+        idx = current.index(heading)
+        section_start = current.find("\n", idx + 1) + 1
+        next_heading = current.find("\n## ", section_start)
+        if next_heading == -1:
+            if not current.endswith("\n"):
+                current += "\n"
+            current += insertion
+        else:
+            current = current[:next_heading] + "\n" + insertion + current[next_heading:]
+
+    govern_path.write_text(current, encoding="utf-8")
+    return len(new_lines)
+
+
 def materialise_govern(
     data_root: str, user_nick: str = "ADMIN", today: date | None = None
 ) -> dict:
     if today is None:
         today = date.today()
 
-    stats = {"ous": 0, "written": 0, "skipped": 0}
+    stats = {"ous": 0, "written": 0, "skipped": 0, "carried_over": 0}
     month_label = today.strftime("%Y-%m")
 
     for ou in _find_ous(data_root):
         stats["ous"] += 1
+
+        govern_path = Path(data_root) / ou / "Govern" / f"{month_label}.md"
+        stats["carried_over"] += _carry_govern_overdue(govern_path, data_root, ou, month_label)
+
         for recur_path in _find_recur_files(data_root, ou):
             try:
                 content = recur_path.read_text(encoding="utf-8", errors="replace")
@@ -680,6 +778,8 @@ def materialise_govern(
                 cadence = str(fm.get("cadence") or "").strip().lower()
 
                 if cadence not in ("monthly", "quarterly", "yearly", "weekly"):
+                    continue
+                if not _is_recur_active(fm):
                     continue
                 if _is_user_owned(fm, user_nick):
                     continue
