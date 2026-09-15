@@ -52,7 +52,7 @@ services:
       - no-new-privileges:true
     depends_on:
       chromadb:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "127.0.0.1:5000:5000"
     healthcheck:
@@ -119,16 +119,19 @@ services:
       # instead of the shared pma_data mount that has the SQLite DB and the
       # full corpus on it. A compromised chromadb container can now only
       # touch its own vector index, not the rest of the app's data.
-      - pma_chroma_data:/chroma_data
+      #
+      # 1.5.9 hardcodes /data as its persist path and ignores
+      # PERSIST_DIRECTORY entirely (confirmed empirically — writes landed in
+      # the container's ephemeral /data while /chroma_data sat stale, so
+      # every recreate would have silently dropped the whole vector index).
+      - pma_chroma_data:/data
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
-      - PERSIST_DIRECTORY=/chroma_data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 20s
-      timeout: 5s
-      retries: 5
+    # No healthcheck: the 1.5.9 image is minimal (no curl/wget/python/busybox,
+    # just /bin/sh), so there's no in-container tool left to run an HTTP
+    # check with. backend/worker depend on service_started instead of
+    # service_healthy below.
 
 volumes:
   pma_data:
