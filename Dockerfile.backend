@@ -20,8 +20,9 @@ WORKDIR /app
 ENV PYTHONPATH=/app/code/backend
 ENV PYTHONUNBUFFERED=1
 
-# curl is used by docker-compose's healthcheck; python:3.12-slim doesn't ship it.
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# curl is used by docker-compose's healthcheck; git is required by GitPython
+# (md_editor.py's commit flow) — python:3.12-slim ships neither.
+RUN apt-get update && apt-get install -y --no-install-recommends curl git \
     && rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user — no reason gunicorn/the worker need root inside the container.
