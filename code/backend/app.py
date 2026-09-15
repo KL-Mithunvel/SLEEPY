@@ -3,6 +3,7 @@ import time
 
 from flask import Flask, g, jsonify, request
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import auth_utils
 import config
@@ -12,6 +13,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+# nginx sits directly in front in prod (see tooling/nginx-klm.smtw.in.conf) and
+# sets X-Forwarded-For/X-Forwarded-Proto — without this, every login_events row
+# would log nginx's own address (127.0.0.1) instead of the real client IP.
+# Trusting exactly one proxy hop.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 # Bearer-token auth only, no cookies — supports_credentials isn't needed and
 # widens the CORS surface for no benefit.
 CORS(app, origins=config.CORS_ORIGINS)
@@ -73,31 +79,9 @@ def healthz():
 
 
 # ---------------------------------------------------------------------------
-# Auth info endpoints
-# ---------------------------------------------------------------------------
-
-@app.get("/api/auth/config")
-def auth_config():
-    return jsonify({
-        "devBypass": config.DEV_AUTH_BYPASS,
-    })
-
-
-@app.get("/api/auth/me")
-def auth_me():
-    user = g.user
-    return jsonify({
-        "sub": user["sub"],
-        "name": user["name"],
-        "email": user["email"],
-        "role": user["role"],
-        "permissions": list(user["permissions"]),
-    })
-
-
-# ---------------------------------------------------------------------------
 # Blueprints
 # ---------------------------------------------------------------------------
+from auth_bp import auth_bp                    # noqa: E402
 from ai_bp import ai_bp                        # noqa: E402
 from corpus_bp import corpus_bp                # noqa: E402
 from integrations_bp import integrations_bp    # noqa: E402
@@ -105,6 +89,7 @@ from today_bp import today_bp                  # noqa: E402
 from projects_bp import projects_bp            # noqa: E402
 from logs_bp import logs_bp                    # noqa: E402
 
+app.register_blueprint(auth_bp)
 app.register_blueprint(ai_bp)
 app.register_blueprint(corpus_bp)
 app.register_blueprint(integrations_bp)
