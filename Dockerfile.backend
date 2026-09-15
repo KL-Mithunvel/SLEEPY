@@ -21,8 +21,10 @@ ENV PYTHONPATH=/app/code/backend
 ENV PYTHONUNBUFFERED=1
 
 # curl is used by docker-compose's healthcheck; git is required by GitPython
-# (md_editor.py's commit flow) — python:3.12-slim ships neither.
-RUN apt-get update && apt-get install -y --no-install-recommends curl git \
+# (md_editor.py's commit flow); tzdata makes the TZ=Asia/Kolkata env var
+# (set in docker-compose.yml, for the IST-wall-clock cron schedule) actually
+# resolve — python:3.12-slim ships none of the three.
+RUN apt-get update && apt-get install -y --no-install-recommends curl git tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # GeoIP database for admin login monitoring (geoip_lookup.py) — DB-IP City
@@ -52,11 +54,15 @@ USER sleepy
 
 EXPOSE 5000
 
-# Single worker — single-user personal app, no request concurrency needed,
-# and every worker process costs RAM on a memory-constrained host.
+# Single process (RAM is tight on a t3.micro), but gthread + a few threads
+# instead of the plain sync worker class — otherwise the one process is
+# fully blocked for the entire duration of any /api/ai/chat SSE stream,
+# unable to serve so much as /healthz until it finishes.
 CMD ["uv", "run", "gunicorn", \
      "--bind", "0.0.0.0:5000", \
      "--workers", "1", \
+     "--worker-class", "gthread", \
+     "--threads", "4", \
      "--timeout", "120", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \

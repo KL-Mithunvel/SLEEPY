@@ -1,0 +1,15 @@
+# Never let secrets into the build context — they must only reach the
+# container via the read-only volume mount in docker-compose.yml. Without
+# this, `COPY code/ code/` in Dockerfile.backend bakes the real secrets
+# file straight into the image layers, defeating the entire point of the
+# mount (anyone with the image, not just the running container, gets them).
+code/backend/secrets_*.py
+!code/backend/example_secrets_*.py
+
+.git/
+.venv/
+data/
+code/frontend/node_modules/
+code/frontend/dist/
+__pycache__/
+*.pyc

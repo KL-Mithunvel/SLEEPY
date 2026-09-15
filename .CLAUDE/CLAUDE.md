@@ -14,7 +14,7 @@ A calm, self-hosted personal AI project-management assistant for a single user (
 - **Dev entry point:** `main.py` (repo root) — starts Flask + Vite dev server + worker (APScheduler/task_queue) together, all as subprocesses of one `python main.py` run
 - **Prod entry point:** gunicorn targeting `code/backend/app:app`; worker via `uv run python code/backend/worker.py`
 - **Python:** 3.12 (locked via `.python-version` at root, managed by uv)
-- **Status:** Phases 0–9 complete (see Project TODO List). Integrations descoped to email-only 2026-07-01 (Telegram/WhatsApp/Jira built then removed — no Facebook account for WhatsApp, didn't actually want the other two). Deadline planning, curated task lists, standalone news topics, corpus data-governance rules, and a domain-based OU reorg (Personal/VIT/SMTW) landed 2026-07-02 through 2026-07-04. Phase 6 final (live Proxmox deploy) is the only phase not started.
+- **Status:** All phases complete, live in production. Integrations descoped to email-only 2026-07-01 (Telegram/WhatsApp/Jira built then removed — no Facebook account for WhatsApp, didn't actually want the other two). Deadline planning, curated task lists, standalone news topics, corpus data-governance rules, and a domain-based OU reorg (Personal/VIT/SMTW) landed 2026-07-02 through 2026-07-04. Phase 6 final landed 2026-09-15/16 as a live deploy to **AWS EC2** (`klm.smtw.in`, not the originally-planned Proxmox VM — that plan was never executed, ground truth moved) with a **self-contained username/password auth system** (not Keycloak — dropped when the user couldn't set up TOTP 2FA; see Key Modules).
 
 ---
 
@@ -66,24 +66,24 @@ docker compose -f docker-compose.dev.yml up -d
 | Vector index | ChromaDB | Derived MD index for RAG | Yes (reindex) |
 | App state | SQLite | Sessions, task_queue, ai_events, job history | Mostly — task_queue history is permanent |
 
-### Services (Docker Compose — prod on Proxmox)
+### Services (Docker Compose — prod on AWS EC2)
 
 | Service | Role |
 |---|---|
-| `backend` | Flask (gunicorn). Routes, auth, MD patch flow, AI proxy |
+| `backend` | Flask (gunicorn, 1 worker). Routes, auth, MD patch flow, AI proxy |
 | `worker` | Separate process: APScheduler + task_queue drainer. Never inside web |
 | `frontend` | Vue 3 + Vite SPA, served as static PWA |
-| `chromadb` | Vector store for MD corpus chunks |
-| `keycloak` | OIDC auth (reuse `Office.smtw.in` realm, `pma` client). Not in dev — use `DEV_AUTH_BYPASS=1` |
-| `caddy` | HTTPS + Let's Encrypt reverse proxy |
+| `chromadb` | Vector store for MD corpus chunks — kept as its own container even though it's the only consumer besides backend/worker reads, since the worker writes (md_reindex/index_sync) while the backend reads (RAG) from separate OS processes, which Chroma's embedded PersistentClient isn't safe for |
+
+TLS/reverse-proxy is **not** a container — the AWS box's own nginx (already had a working certbot cert for `klm.smtw.in`) reverse-proxies to `backend`/`frontend`, which publish to `127.0.0.1` only. See `tooling/nginx-klm.smtw.in.conf` and `tooling/aws-ssh.sh`.
 
 ### Dev vs prod mode
 
 | | Dev | Prod |
 |---|---|---|
 | Entry point | `python main.py` (root) | `gunicorn code/backend/app:app` |
-| Auth | `DEV_AUTH_BYPASS=1` — synthetic "owner" user | Keycloak live |
-| Frontend | Vite dev server (`localhost:5173`) | Built static files served by caddy |
+| Auth | `DEV_AUTH_BYPASS=1` — synthetic "admin" user | Self-issued JWT (HS256) — see `auth_utils.py`/`auth_bp.py` |
+| Frontend | Vite dev server (`localhost:5173`) | Built static files, host nginx → frontend container |
 | DB path | `data/klm/db/sqlite/pma.db` (relative to `code/backend/`) | Same path, mounted volume |
 
 ### Module layout
@@ -117,7 +117,11 @@ SLEEPY/
 │   │   ├── goal_planner.py    # Nightly project deadline planning (target_date → ## Plan + email digest)
 │   │   ├── news_watch.py      # Anthropic Batches API news search (project topics + NewsWatch.md)
 │   │   ├── integrations.py    # O365 Graph API email (send_email) — only integration since 2026-07-01
-│   │   ├── app.py             # Flask app factory; registers all *_bp.py blueprints below
+│   │   ├── app.py             # Flask app factory; calls local_db.init_db(); registers all *_bp.py blueprints below
+│   │   ├── auth_bp.py         # POST /api/auth/login|logout, GET /api/auth/me|config
+│   │   ├── admin_bp.py        # GET /api/admin/login-events — admin:security only
+│   │   ├── geoip_lookup.py    # IP → (city, country) via a local DB-IP City Lite .mmdb, no external API
+│   │   ├── manage_users.py    # CLI: create-user/list-users/reset-password/delete-user (no signup UI)
 │   │   ├── ai_bp.py           # POST /api/ai/chat (SSE), /api/ai/edit/<id>/confirm|reject
 │   │   ├── today_bp.py        # GET /api/today, briefing, capture, task toggle
 │   │   ├── projects_bp.py     # GET/PUT /api/projects — corpus file browser + direct editor
@@ -126,7 +130,7 @@ SLEEPY/
 │   │   ├── logs_bp.py         # Daily/weekly log endpoints
 │   │   ├── secrets_app.py     # Gitignored — never commit
 │   │   ├── example_secrets_app.py  # Template — checked in
-│   │   └── tests/              # 138 tests across 12 files — run via tooling/run-backend-tests.bat
+│   │   └── tests/              # run via tooling/run-backend-tests.bat
 │   └── frontend/              # Vue 3 + Vite SPA
 │       ├── src/
 │       │   ├── main.js        # App bootstrap
@@ -152,8 +156,10 @@ SLEEPY/
 │   ├── run-frontend.bat       # npm run dev from code/frontend
 │   ├── run-frontend-build.bat # npm run build from code/frontend
 │   ├── run-worker.bat         # Standalone worker process
-│   └── diagnose.py            # Startup health-check script (config/DB/worker/integrations)
-├── Dockerfile.backend / Dockerfile.frontend / Caddyfile / docker-compose.yml   # Prod deploy
+│   ├── diagnose.py            # Startup health-check script (config/DB/worker/integrations)
+│   ├── aws-ssh.sh             # plink-based SSH launcher for the AWS box (pinned host key)
+│   └── nginx-klm.smtw.in.conf # Reference for the host nginx reverse-proxy config on the AWS box
+├── Dockerfile.backend / Dockerfile.frontend / docker-compose.yml   # Prod deploy (AWS EC2)
 └── docker-compose.dev.yml     # ChromaDB dev service
 ```
 
@@ -175,22 +181,36 @@ Quick orientation: root-level `ABOUT.md`/`People.md`/`inbox.md`/`NewsWatch.md`/`
 Dev-only entry point. Inserts `code/backend` onto `sys.path`, sets `DEV_AUTH_BYPASS=1` (overridable), starts Flask on port 5000, spawns the Vite dev server **and** `code/backend/worker.py` as subprocesses (each its own OS process — the worker is never imported into the Flask process). Registers `atexit` to terminate both on exit. Without this, nightly cron jobs (materialise, morning_briefing, housekeeping, news_watch) never fire. Never used in prod (gunicorn calls `app:app` directly; worker runs as its own container — see `docker-compose.yml`).
 
 ### `code/backend/app.py`
-Flask app with CORS (origins from `config.CORS_ORIGINS`), per-request DB caching on `g`, slow-request logger (`SLOW_REQUEST_MS`), and `validate_token` as `before_request`. Only public route is `GET /healthz`. Blueprints registered here as features are built.
+Flask app with CORS (origins from `config.CORS_ORIGINS`), `ProxyFix` (trusts one hop — nginx sits directly in front in prod, sets `X-Forwarded-For`), a module-level `local_db.init_db()` call (**must** happen here — `main.py`/`worker.py` call it too but gunicorn imports `app:app` directly with neither wrapper; this was missing for a while and every DB-touching route 500'd in prod until caught during the Phase 6 final deploy — see `test_app_boot.py`), per-request DB caching on `g`, slow-request logger (`SLOW_REQUEST_MS`), and `validate_token` as `before_request`. Only public routes: `GET /healthz`, `GET /api/auth/config`, `POST /api/auth/login`. Blueprints registered here as features are built.
 
 ### `code/backend/config.py`
-Loads from `secrets_app`; all modules import from `config`, never from `secrets_app` directly. Key exports: `CLAUDE_API_KEY`, `KEYCLOAK_*`, `SQLITE_DB_PATH`, `DEBUG`, `CORS_ORIGINS`, `SLOW_REQUEST_MS`, `USER_DATA_ROOT`.  `USER_DATA_ROOT` resolves relative to `config.py`'s own directory (not cwd) — defaults to `../../data/klm` → `data/klm/` at repo root.
+Loads from `secrets_app`; all modules import from `config`, never from `secrets_app` directly. Key exports: `CLAUDE_API_KEY`, `AUTH_SECRET_KEY`, `AUTH_TOKEN_TTL_DAYS`, `GEOIP_DB_PATH`, `SQLITE_DB_PATH`, `DEBUG`, `CORS_ORIGINS`, `SLOW_REQUEST_MS`, `USER_DATA_ROOT`. `USER_DATA_ROOT` resolves relative to `config.py`'s own directory (not cwd) — defaults to `../../data/klm` → `data/klm/` at repo root. Prod guards refuse to boot with `APP_ENV=production` if `ANTHROPIC_API_KEY` or `AUTH_SECRET_KEY` is blank, or if `DEV_AUTH_BYPASS` is on.
 
 ### `code/backend/auth_utils.py`
-- `validate_token()` — `before_request` handler; sets `g.user` or returns 401. Skips `/healthz` and OPTIONS. In dev bypass mode, synthesises `owner` user.
-- `compute_permissions(roles: list[str]) → set[str]` — union of all permission keys for the given roles.
-- `has_perm(perm_key: str) → bool` — checks `g.user`; `owner` role bypasses all.
+Self-issued JWT (HS256) — no external identity provider (Keycloak was dropped 2026-09-16; the user couldn't set up TOTP 2FA, so auth moved fully in-app).
+- `hash_password`/`verify_password` — `werkzeug.security` (pbkdf2:sha256), no extra dependency.
+- `issue_token(username, role) → str` — HS256, signed with `config.AUTH_SECRET_KEY`, expires after `AUTH_TOKEN_TTL_DAYS`. Stateless — no revocation list; logging out is a client-side token discard.
+- `validate_token()` — `before_request` handler; local HS256 decode (no network), sets `g.user` or returns 401. In dev bypass mode, synthesises an `admin` user.
+- `compute_permissions(roles: list[str]) → set[str]` — union of permission keys for the given roles; `"admin"` is expanded to **every** declared `config_rbac.PERMISSIONS` key rather than looked up in the table (see below), since the frontend's nav-visibility check reads this list directly.
+- `has_perm(perm_key: str) → bool` — checks `g.user`; `"admin"` role bypasses all.
 - `require_perm(perm_key: str)` — route decorator; returns 403 on failure.
-- JWKS client cached globally; evicted + retried once on decode failure (handles key rotation).
+- `is_locked_out(conn, username) → bool` — brute-force check: ≥5 failed `login_events` rows for that username in the last 15 minutes. No separate attempts table.
 
 ### `code/backend/config_rbac.py`
-- `ROLES = ("owner",)` — single role, single user. Add roles only when a second user exists.
-- `PERMISSIONS` dict — `"module:action" → (role_tuple,)`. Never put `"admin"` in tuples.
-- `OWNER_REALM_ROLES` — Keycloak realm role names that map to `"owner"`.
+- `ROLES = ("admin", "user")` — two roles. `user` = full personal-assistant access (same scope the old single `owner` role had). `admin` = everything `user` has, plus login-monitoring visibility.
+- `PERMISSIONS` dict — `"module:action" → (role_tuple,)`. Every key grants `("user",)` (or `()` for `admin:security`, which nobody in the table gets — admins get it via the `compute_permissions` expansion above). Never put `"admin"` in a tuple — that convention predates the two-role split and still holds (`test_no_admin_in_permission_tuples`).
+
+### `code/backend/auth_bp.py`
+`POST /api/auth/login` — verifies against the `users` table, logs every attempt (success or fail) to `login_events` with IP/user-agent/geo, issues a token on success. `POST /api/auth/logout` — stateless, just for symmetry. `GET /api/auth/me`, `GET /api/auth/config` (public, `{devBypass}` only).
+
+### `code/backend/admin_bp.py`
+`GET /api/admin/login-events` — paginated, gated by `admin:security`. Backs the frontend's `/admin` Security view.
+
+### `code/backend/geoip_lookup.py`
+`resolve(ip) → (city, country)`, both `None` on any failure (missing DB, lookup miss) — never raises, never blocks login. Backed by a DB-IP City Lite `.mmdb` (CC-BY 4.0) downloaded at **Docker build time** in `Dockerfile.backend` (dated monthly URL, current-month-then-last-month fallback, gives up silently on both 404s) — not committed to git, ~127MB uncompressed. Not present in local dev; that's expected.
+
+### `code/backend/manage_users.py`
+CLI for the two fixed accounts (`create-user`/`list-users`/`reset-password`/`delete-user`) — no self-service signup needed for a personal/two-account tool. `getpass` hangs on piped stdin on Windows (reads the console directly, unlike POSIX) — fine for real interactive use, just can't be scripted non-interactively on Windows.
 
 ### `code/backend/local_db.py`
 - `init_db()` — applies pending migrations from `_MIGRATIONS` list. Called once at startup.
@@ -243,7 +263,7 @@ The confirm-gated AI edit flow: `validate_edit`/`propose_edit` (writes a pending
 Separate process (`uv run python code/backend/worker.py`). Calls `local_db.init_db()`, starts APScheduler from `SCHEDULED_TASKS`, then loops every 5s calling `_drain_once()` which claims and dispatches all pending tasks. Handles `KeyboardInterrupt`/`SystemExit` gracefully.
 
 ### `code/frontend/src/stores/auth.js`
-Keycloak auth store (Pinia). Fetches `/api/auth/config`, inits Keycloak with `login-required` + PKCE S256, then fetches `/api/auth/me` for `role` + `permissions`. The frontend never parses the JWT directly. In dev bypass mode, the backend synthesises the me response.
+In-app auth store (Pinia) — `login(username, password)`/`logout()` against `/api/auth/*`, token kept in `localStorage` (survives a reload) and attached as a Bearer header by `api.js`. `handleUnauthorized()` is called by `api.js` on any 401, clearing the stored token so `App.vue` drops back to `LoginView.vue`. In dev bypass mode, the backend synthesises the `/api/auth/me` response and `getToken()` returns `null`.
 
 ### `code/frontend/src/api.js`
 Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Injects Bearer token from auth store before every request. No view calls `fetch` directly.
@@ -263,6 +283,8 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | `ai_events` | Every AI interaction (diffs, accepted/rejected, tokens) | Immutable — set `voided=1`, never DELETE |
 | `task_queue` | Async job queue — status: pending → running → done / failed | Read/write |
 | `md_chunks_meta` | LlamaIndex chunk tracking for MD corpus | Rebuild on reindex |
+| `users` | Login accounts — `username, password_hash, role` | Read/write, via `manage_users.py` only |
+| `login_events` | Every login attempt — `username, success, ip_address, user_agent, geo_city, geo_country` | Append-only |
 
 ### `ai_events` columns
 `id, event_type, prompt_hash, model, diff, accepted (1/0/NULL), voided, latency_ms, input_tokens, output_tokens, created_at`
@@ -276,7 +298,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 
 | Convention | Value / Rule |
 |---|---|
-| `DEV_AUTH_BYPASS` | `1` = skip Keycloak, synthesise `owner` user. Set by `main.py` by default. **Never `1` in prod.** |
+| `DEV_AUTH_BYPASS` | `1` = skip login, synthesise `admin` user. Set by `main.py` by default. **Never `1` in prod** — `config.py` refuses to boot if `APP_ENV=production` and this is on. |
 | `SQLITE_DB_PATH` | Default: `"../../data/klm/db/sqlite/pma.db"` (relative to `code/backend/`). Override with env var. Tests force `:memory:`. |
 | `USER_DATA_ROOT` | Default: `data/klm/` (resolved relative to `code/backend/__file__`). Override with env var. |
 | AI commit author | `Arivu Baalan <arivu@smtw.in>` — every GitPython commit from the AI uses this author, never the dev's identity |
@@ -296,7 +318,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | Path | Contents | Git-tracked? |
 |---|---|---|
 | `data/klm/` | MD corpus + SQLite + ChromaDB | No (gitignored) |
-| `code/backend/secrets_app.py` | API keys, Keycloak config, DB path | **Never commit** |
+| `code/backend/secrets_app.py` | API keys, `AUTH_SECRET_KEY`, DB path | **Never commit** |
 | `code/backend/example_secrets_app.py` | Template with placeholder values | Yes |
 | `.venv/` | Root virtualenv (uv) | No (gitignored) |
 | `code/frontend/node_modules/` | npm dependencies | No (gitignored) |

@@ -52,3 +52,6 @@ scratch/
 
 # --- Docker volumes (if bind-mounted locally) ---
 volumes/
+
+# --- Ad-hoc local scripts / screenshots (never commit — a smoke-test script once held live prod passwords)
+tooling/_*

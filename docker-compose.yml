@@ -8,11 +8,11 @@ version: "3.9"
 #
 # Before first deploy:
 #   1. Copy code/backend/example_secrets_app.py → code/backend/secrets_app.py and fill in values
+#      (never let it into the build context — see .dockerignore)
 #   2. Create ./data/klm/ directory tree and ensure it is a git repo
 #   3. `docker compose build` then `docker compose up -d`
 #
-# Keycloak reuses the existing Office.smtw.in realm — no separate keycloak service here.
-# Set KEYCLOAK_PUBLIC_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID in secrets_app.py.
+# Auth is self-issued JWT (see auth_utils.py) — no external identity provider.
 #
 # ChromaDB stays its own container rather than an embedded PersistentClient:
 # the worker process writes (md_reindex/index_sync) while the backend process
@@ -38,8 +38,15 @@ services:
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
       - CORS_ORIGINS=https://klm.smtw.in
+      # Nightly cron schedule (scheduled_tasks.py) is written in IST wall-clock
+      # terms (e.g. 06:30 morning briefing) — without this the container's
+      # default UTC clock fires everything 5.5 hours off.
+      - TZ=Asia/Kolkata
     volumes:
-      - ./code/backend/secrets_app.py:/app/backend/secrets_app.py:ro
+      # Path must match where `import secrets_app` actually looks (PYTHONPATH=
+      # /app/code/backend, set below) — mounting to /app/backend/ silently
+      # does nothing (config.py falls back to no secrets_app at all).
+      - ./code/backend/secrets_app.py:/app/code/backend/secrets_app.py:ro
       - pma_data:/data
     security_opt:
       - no-new-privileges:true
@@ -72,8 +79,9 @@ services:
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
       - CORS_ORIGINS=https://klm.smtw.in
+      - TZ=Asia/Kolkata
     volumes:
-      - ./code/backend/secrets_app.py:/app/backend/secrets_app.py:ro
+      - ./code/backend/secrets_app.py:/app/code/backend/secrets_app.py:ro
       - pma_data:/data
     security_opt:
       - no-new-privileges:true
@@ -96,8 +104,12 @@ services:
   # ChromaDB — vector store
   # ---------------------------------------------------------------------------
   chromadb:
-    # Pin to a known version rather than `latest` — verify/bump before first deploy.
-    image: chromadb/chroma:0.5.20
+    # Must match the chromadb Python client version (pyproject.toml) — the
+    # wire protocol isn't backward compatible across major versions. Was
+    # pinned to 0.5.20 against a 1.5.9 client, which silently broke every
+    # index write (KeyError('_type') on every upsert — 0 chunks ever
+    # indexed) until caught live during the Phase 6 final deploy.
+    image: chromadb/chroma:1.5.9
     restart: unless-stopped
     expose:
       - "8000"
