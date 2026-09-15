@@ -48,6 +48,7 @@ Thumbs.db
 # --- Logs / scratch ---
 scratch/
 *.log
+*.log.err
 
 # --- Docker volumes (if bind-mounted locally) ---
 volumes/
