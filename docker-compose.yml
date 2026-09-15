@@ -1,7 +1,10 @@
 version: "3.9"
 
-# Production Docker Compose — deploy on Proxmox Ubuntu VM
-# Exposed public URL: https://pa.mspv.app (Caddy handles TLS)
+# Production Docker Compose — deploy on an AWS EC2 host
+# Exposed public URL: https://klm.smtw.in (TLS terminated by the host's own
+# nginx + certbot, NOT by a container — backend/frontend publish to
+# 127.0.0.1 only and the host nginx reverse-proxies to them; see
+# tooling/nginx-klm.smtw.in.conf).
 #
 # Before first deploy:
 #   1. Copy code/backend/example_secrets_app.py → code/backend/secrets_app.py and fill in values
@@ -10,6 +13,11 @@ version: "3.9"
 #
 # Keycloak reuses the existing Office.smtw.in realm — no separate keycloak service here.
 # Set KEYCLOAK_PUBLIC_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID in secrets_app.py.
+#
+# ChromaDB stays its own container rather than an embedded PersistentClient:
+# the worker process writes (md_reindex/index_sync) while the backend process
+# reads (RAG queries) concurrently — two separate OS processes hitting the
+# same embedded on-disk store is exactly what Chroma's docs warn against.
 
 services:
 
@@ -29,7 +37,7 @@ services:
       - DATA_ROOT=/data
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
-      - CORS_ORIGINS=https://pa.mspv.app
+      - CORS_ORIGINS=https://klm.smtw.in
     volumes:
       - ./code/backend/secrets_app.py:/app/backend/secrets_app.py:ro
       - pma_data:/data
@@ -38,8 +46,8 @@ services:
     depends_on:
       chromadb:
         condition: service_healthy
-    expose:
-      - "5000"
+    ports:
+      - "127.0.0.1:5000:5000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/healthz"]
       interval: 30s
@@ -63,7 +71,7 @@ services:
       - DATA_ROOT=/data
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
-      - CORS_ORIGINS=https://pa.mspv.app
+      - CORS_ORIGINS=https://klm.smtw.in
     volumes:
       - ./code/backend/secrets_app.py:/app/backend/secrets_app.py:ro
       - pma_data:/data
@@ -81,8 +89,8 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
     restart: unless-stopped
-    expose:
-      - "80"
+    ports:
+      - "127.0.0.1:8080:80"
 
   # ---------------------------------------------------------------------------
   # ChromaDB — vector store
@@ -110,23 +118,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ---------------------------------------------------------------------------
-  # Caddy — HTTPS reverse proxy (auto TLS via Let's Encrypt)
-  # ---------------------------------------------------------------------------
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - backend
-      - frontend
-
 volumes:
   pma_data:
     driver: local
@@ -135,5 +126,3 @@ volumes:
       o: bind
       device: ./data
   pma_chroma_data:
-  caddy_data:
-  caddy_config:
