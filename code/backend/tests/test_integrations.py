@@ -1,7 +1,7 @@
 """
-Unit tests for code/backend/integrations.py — chunking/formatting helpers and
-the config-guard behavior of send_telegram/list_recent_mail (no real network
-calls are made; HTTP is monkeypatched where needed).
+Unit tests for code/backend/integrations.py — the O365 Graph API send_email
+config-guard and success/failure paths (no real network calls are made;
+HTTP and token acquisition are monkeypatched).
 """
 
 import os
@@ -15,64 +15,76 @@ os.environ.setdefault("SQLITE_DB_PATH", ":memory:")
 import integrations
 
 
-def test_chunk_message_under_limit_is_single_chunk():
-    assert integrations._chunk_message("short message") == ["short message"]
-
-
-def test_chunk_message_splits_many_lines():
-    text = "\n".join(f"line {i} " + "x" * 50 for i in range(200))
-    chunks = integrations._chunk_message(text)
-    assert len(chunks) > 1
-    assert all(len(c) <= integrations._TELEGRAM_MAX_LEN for c in chunks)
-    assert "\n".join(chunks) == text
-
-
-def test_chunk_message_hard_splits_a_single_oversized_line():
-    # A line with no newlines at all still must not exceed the cap.
-    text = "x" * 5000
-    chunks = integrations._chunk_message(text)
-    assert all(len(c) <= integrations._TELEGRAM_MAX_LEN for c in chunks)
-    assert "".join(chunks) == text
-
-
-def test_telegramize_converts_headings_to_bold():
-    result = integrations._telegramize("## Heading\nbody text\n### Sub")
-    assert "## " not in result
-    assert "*Heading*" in result
-    assert "*Sub*" in result
-    assert "body text" in result
-
-
-def test_send_telegram_not_configured_returns_false(monkeypatch):
-    import config
-    monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "")
-    monkeypatch.setattr(config, "TELEGRAM_DEFAULT_CHAT_ID", "")
-    assert integrations.send_telegram("hello") is False
-
-
-def test_send_telegram_chunks_and_sends_sequentially(monkeypatch):
-    import config
-    monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "token")
-    monkeypatch.setattr(config, "TELEGRAM_DEFAULT_CHAT_ID", "123")
-
-    calls = []
-
-    def _fake_http_json(url, *, method="GET", headers=None, body=None, timeout=15):
-        calls.append(body)
-        return {"ok": True}
-
-    monkeypatch.setattr(integrations, "_http_json", _fake_http_json)
-
-    long_message = "\n".join(f"line {i}" * 30 for i in range(300))
-    assert integrations.send_telegram(long_message) is True
-    assert len(calls) > 1
-    assert all(len(c["text"]) <= integrations._TELEGRAM_MAX_LEN for c in calls)
-
-
-def test_list_recent_mail_not_configured_returns_empty(monkeypatch):
+def test_send_email_not_configured_returns_false(monkeypatch):
     import config
     monkeypatch.setattr(config, "O365_CLIENT_ID", "")
     monkeypatch.setattr(config, "O365_CLIENT_SECRET", "")
     monkeypatch.setattr(config, "O365_TENANT_ID", "")
     monkeypatch.setattr(config, "O365_MAILBOX", "")
-    assert integrations.list_recent_mail() == []
+    assert integrations.send_email("to@example.com", "subject", "body") is False
+
+
+def test_send_email_success_posts_expected_payload(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "O365_CLIENT_ID", "client-id")
+    monkeypatch.setattr(config, "O365_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr(config, "O365_TENANT_ID", "tenant-id")
+    monkeypatch.setattr(config, "O365_MAILBOX", "klm@smtw.in")
+
+    monkeypatch.setattr(integrations, "_get_graph_token", lambda: "fake-token")
+
+    calls = []
+
+    def _fake_http_json(url, *, method="GET", headers=None, body=None, timeout=15):
+        calls.append((url, method, headers, body))
+        return {}
+
+    monkeypatch.setattr(integrations, "_http_json", _fake_http_json)
+
+    assert integrations.send_email("to@example.com", "subject", "body text") is True
+    assert len(calls) == 1
+    url, method, headers, body = calls[0]
+    assert url == "https://graph.microsoft.com/v1.0/users/klm@smtw.in/sendMail"
+    assert method == "POST"
+    assert headers == {"Authorization": "Bearer fake-token"}
+    assert body["message"]["subject"] == "subject"
+    assert body["message"]["body"] == {"contentType": "Text", "content": "body text"}
+    assert body["message"]["toRecipients"] == [{"emailAddress": {"address": "to@example.com"}}]
+
+
+def test_send_email_uses_html_body_when_provided(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "O365_CLIENT_ID", "client-id")
+    monkeypatch.setattr(config, "O365_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr(config, "O365_TENANT_ID", "tenant-id")
+    monkeypatch.setattr(config, "O365_MAILBOX", "klm@smtw.in")
+
+    monkeypatch.setattr(integrations, "_get_graph_token", lambda: "fake-token")
+
+    captured = {}
+
+    def _fake_http_json(url, *, method="GET", headers=None, body=None, timeout=15):
+        captured.update(body=body)
+        return {}
+
+    monkeypatch.setattr(integrations, "_http_json", _fake_http_json)
+
+    assert integrations.send_email(
+        "to@example.com", "subject", "plain fallback", body_html="<p>hi</p>"
+    ) is True
+    assert captured["body"]["message"]["body"] == {"contentType": "HTML", "content": "<p>hi</p>"}
+
+
+def test_send_email_returns_false_on_error(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "O365_CLIENT_ID", "client-id")
+    monkeypatch.setattr(config, "O365_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr(config, "O365_TENANT_ID", "tenant-id")
+    monkeypatch.setattr(config, "O365_MAILBOX", "klm@smtw.in")
+
+    def _raise(*args, **kwargs):
+        raise RuntimeError("token acquisition failed")
+
+    monkeypatch.setattr(integrations, "_get_graph_token", _raise)
+
+    assert integrations.send_email("to@example.com", "subject", "body") is False

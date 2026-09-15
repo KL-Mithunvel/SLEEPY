@@ -16,6 +16,7 @@ code/backend/secrets_*.py
 *.pem
 *.key
 *.crt
+*.ppk
 
 # --- Claude Code local settings (personal permission overrides, not shared) ---
 # Was previously only excluded by this machine's global gitignore — added here
