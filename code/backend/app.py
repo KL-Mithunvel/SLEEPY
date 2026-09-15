@@ -12,6 +12,12 @@ import local_db
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
+# Idempotent (guarded by db_version) — main.py and worker.py both call this
+# explicitly too, but gunicorn imports this module directly with neither of
+# those wrappers, so app.py must initialize its own DB connection here or
+# every DB-touching route 500s with "_db_path is None".
+local_db.init_db()
+
 app = Flask(__name__)
 # nginx sits directly in front in prod (see tooling/nginx-klm.smtw.in.conf) and
 # sets X-Forwarded-For/X-Forwarded-Proto — without this, every login_events row
