@@ -39,4 +39,4 @@ CMD ["uv", "run", "gunicorn", \
      "--timeout", "120", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
-     "code/backend/app:app"]
+     "app:app"]
