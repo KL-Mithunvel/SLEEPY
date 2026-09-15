@@ -15,6 +15,7 @@ from flask import Blueprint, g, jsonify, request
 
 import auth_utils
 import config
+import geoip_lookup
 import local_db
 
 logger = logging.getLogger(__name__)
@@ -23,9 +24,14 @@ auth_bp = Blueprint("auth_bp", __name__, url_prefix="/api/auth")
 
 
 def _log_attempt(conn, username: str, success: bool):
+    ip = request.remote_addr
+    city, country = geoip_lookup.resolve(ip)
     conn.execute(
-        "INSERT INTO login_events (username, success, ip_address, user_agent) VALUES (?, ?, ?, ?)",
-        (username, 1 if success else 0, request.remote_addr, request.headers.get("User-Agent", "")),
+        """
+        INSERT INTO login_events (username, success, ip_address, user_agent, geo_city, geo_country)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (username, 1 if success else 0, ip, request.headers.get("User-Agent", ""), city, country),
     )
     conn.commit()
 

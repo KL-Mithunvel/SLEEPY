@@ -82,6 +82,7 @@ def healthz():
 # Blueprints
 # ---------------------------------------------------------------------------
 from auth_bp import auth_bp                    # noqa: E402
+from admin_bp import admin_bp                  # noqa: E402
 from ai_bp import ai_bp                        # noqa: E402
 from corpus_bp import corpus_bp                # noqa: E402
 from integrations_bp import integrations_bp    # noqa: E402
@@ -90,6 +91,7 @@ from projects_bp import projects_bp            # noqa: E402
 from logs_bp import logs_bp                    # noqa: E402
 
 app.register_blueprint(auth_bp)
+app.register_blueprint(admin_bp)
 app.register_blueprint(ai_bp)
 app.register_blueprint(corpus_bp)
 app.register_blueprint(integrations_bp)

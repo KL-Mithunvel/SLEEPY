@@ -15,6 +15,7 @@ dependencies = [
     "llama-index>=0.14.22",
     "pyjwt[crypto]>=2.13.0",
     "msal>=1.31.0",
+    "maxminddb>=2.6.2",
 ]
 
 [dependency-groups]

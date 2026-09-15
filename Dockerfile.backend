@@ -25,6 +25,23 @@ ENV PYTHONUNBUFFERED=1
 RUN apt-get update && apt-get install -y --no-install-recommends curl git \
     && rm -rf /var/lib/apt/lists/*
 
+# GeoIP database for admin login monitoring (geoip_lookup.py) — DB-IP City
+# Lite, CC-BY 4.0. Downloaded here rather than committed to git: ~127MB
+# uncompressed. Dated monthly URL — tries the current month, falls back to
+# last month, and gives up silently if both 404 (geoip_lookup.py degrades
+# gracefully to "unknown location" with no missing file, never a build or
+# boot failure). Bump/refresh by rebuilding the image periodically.
+RUN mkdir -p /app/geoip && \
+    MONTH=$(date -u +%Y-%m) && \
+    PREV_MONTH=$(date -u -d "$(date -u +%Y-%m-01) -1 month" +%Y-%m) && \
+    (curl -fsSL "https://download.db-ip.com/free/dbip-city-lite-${MONTH}.mmdb.gz" -o /tmp/geoip.mmdb.gz \
+      || curl -fsSL "https://download.db-ip.com/free/dbip-city-lite-${PREV_MONTH}.mmdb.gz" -o /tmp/geoip.mmdb.gz \
+      || true) && \
+    if [ -f /tmp/geoip.mmdb.gz ]; then \
+      gunzip -c /tmp/geoip.mmdb.gz > /app/geoip/dbip-city-lite.mmdb; \
+      rm -f /tmp/geoip.mmdb.gz; \
+    fi
+
 # Run as a non-root user — no reason gunicorn/the worker need root inside the container.
 # uid/gid pinned to 1000 to match the host user that owns the bind-mounted
 # ./data directory (the MD corpus + SQLite DB) — a mismatched uid can read

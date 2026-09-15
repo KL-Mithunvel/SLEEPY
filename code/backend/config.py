@@ -98,6 +98,11 @@ DEV_USER: str         = _get("DEV_USER", "klm")
 AUTH_SECRET_KEY: str     = _get("AUTH_SECRET_KEY", "")
 AUTH_TOKEN_TTL_DAYS: int = int(_get("AUTH_TOKEN_TTL_DAYS", 7))
 
+# DB-IP City Lite .mmdb, downloaded at Docker build time (see
+# Dockerfile.backend) — not present in local dev, geoip_lookup.py handles
+# that gracefully.
+GEOIP_DB_PATH: str = _get("GEOIP_DB_PATH", str(_REPO_ROOT / "geoip" / "dbip-city-lite.mmdb"))
+
 # Explicit prod flag — deliberately NOT inferred from KEYCLOAK_PUBLIC_URL being set,
 # since secrets_app.py commonly has real Keycloak values filled in well before the
 # app is actually deployed (e.g. while still running locally with DEV_AUTH_BYPASS=1).

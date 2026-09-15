@@ -211,6 +211,8 @@ markupsafe==3.0.3
     #   werkzeug
 marshmallow==3.26.2
     # via dataclasses-json
+maxminddb==3.2.0
+    # via backend
 mdurl==0.1.2
     # via markdown-it-py
 mmh3==5.2.1
