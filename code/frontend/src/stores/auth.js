@@ -1,14 +1,43 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
+const TOKEN_KEY = 'sleepy_token'
+
+function _loadStoredToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+function _storeToken(token) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // localStorage unavailable (private browsing, blocked site data, etc.) —
+    // the session just won't persist across reloads.
+  }
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const loading = ref(true)
   const authenticated = ref(false)
   const user = ref(null)
+  const error = ref('')
 
   // Internal — not exposed
-  let _keycloak = null
   let _devBypass = false
+  let _token = null
+
+  async function _fetchMe() {
+    const headers = {}
+    if (_token) headers['Authorization'] = `Bearer ${_token}`
+    const res = await fetch('/api/auth/me', { headers })
+    if (!res.ok) throw new Error('not authenticated')
+    return res.json()
+  }
 
   async function init() {
     try {
@@ -17,27 +46,19 @@ export const useAuthStore = defineStore('auth', () => {
 
       if (cfg.devBypass) {
         _devBypass = true
-        const meRes = await fetch('/api/auth/me')
-        if (meRes.ok) {
-          user.value = await meRes.json()
-          authenticated.value = true
-        }
-        loading.value = false
+        user.value = await _fetchMe()
+        authenticated.value = true
         return
       }
 
-      // Keycloak PKCE flow
-      const Keycloak = (await import('keycloak-js')).default
-      _keycloak = new Keycloak({ url: cfg.url, realm: cfg.realm, clientId: cfg.clientId })
-
-      const authed = await _keycloak.init({ onLoad: 'login-required', pkceMethod: 'S256' })
-      if (authed) {
-        const meRes = await fetch('/api/auth/me', {
-          headers: { Authorization: `Bearer ${_keycloak.token}` },
-        })
-        if (meRes.ok) {
-          user.value = await meRes.json()
+      _token = _loadStoredToken()
+      if (_token) {
+        try {
+          user.value = await _fetchMe()
           authenticated.value = true
+        } catch {
+          _token = null
+          _storeToken(null)
         }
       }
     } catch (e) {
@@ -47,14 +68,65 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function getToken() {
-    if (_devBypass) return null
-    if (_keycloak) {
-      await _keycloak.updateToken(30)
-      return _keycloak.token
+  async function login(username, password) {
+    error.value = ''
+    let res
+    try {
+      res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+    } catch {
+      error.value = 'Could not reach the server'
+      return false
     }
-    return null
+
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      error.value = data.error || 'Login failed'
+      return false
+    }
+
+    _token = data.token
+    _storeToken(_token)
+    try {
+      user.value = await _fetchMe()
+      authenticated.value = true
+      return true
+    } catch {
+      error.value = 'Login succeeded but session could not be established'
+      _token = null
+      _storeToken(null)
+      return false
+    }
   }
 
-  return { loading, authenticated, user, init, getToken }
+  async function logout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } catch {
+      // best-effort — the client-side token discard below is what matters
+    }
+    _token = null
+    _storeToken(null)
+    authenticated.value = false
+    user.value = null
+  }
+
+  /** Called by api.js when a request comes back 401 — the token expired or was invalidated. */
+  function handleUnauthorized() {
+    if (_devBypass) return
+    _token = null
+    _storeToken(null)
+    authenticated.value = false
+    user.value = null
+  }
+
+  async function getToken() {
+    if (_devBypass) return null
+    return _token
+  }
+
+  return { loading, authenticated, user, error, init, login, logout, getToken, handleUnauthorized }
 })

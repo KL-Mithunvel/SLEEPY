@@ -4,6 +4,7 @@ import { RouterView } from 'vue-router'
 import { useAuthStore } from './stores/auth.js'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import AppTopbar from './components/layout/AppTopbar.vue'
+import LoginView from './views/LoginView.vue'
 
 const auth = useAuthStore()
 onMounted(() => auth.init())
@@ -16,6 +17,8 @@ onMounted(() => auth.init())
       <span class="visually-hidden">Loading…</span>
     </div>
   </div>
+
+  <LoginView v-else-if="!auth.authenticated" />
 
   <div v-else class="app-layout">
     <AppSidebar />

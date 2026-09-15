@@ -14,6 +14,8 @@ async function _fetch(method, path, body) {
     body: body !== undefined ? JSON.stringify(body) : undefined,
   })
 
+  if (res.status === 401) auth.handleUnauthorized()
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     const error = new Error(err.error || 'API error')
@@ -46,6 +48,8 @@ export async function apiStream(path, body, onEvent) {
     headers,
     body: JSON.stringify(body),
   })
+
+  if (res.status === 401) auth.handleUnauthorized()
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
