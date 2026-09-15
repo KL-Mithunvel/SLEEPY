@@ -1,11 +1,21 @@
 """
-Layer 1 — RBAC unit tests (no HTTP, no DB).
+Layer 1 — RBAC + in-app auth unit tests (no HTTP except where noted).
 These run first. If they fail, nothing else should be trusted.
 """
 
+import datetime
+
+import jwt
 import pytest
+
 import config_rbac
-from auth_utils import compute_permissions, has_perm, require_perm
+from auth_utils import (
+    compute_permissions,
+    hash_password,
+    verify_password,
+    issue_token,
+    is_locked_out,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -48,19 +58,84 @@ def test_all_granted_roles_are_known():
 # compute_permissions
 # ---------------------------------------------------------------------------
 
-def test_owner_gets_all_permissions():
-    perms = compute_permissions(["owner"])
+def test_admin_gets_all_permissions():
+    perms = compute_permissions(["admin"])
     for key in config_rbac.PERMISSIONS:
-        assert key in perms, f"owner missing permission: {key!r}"
+        assert key in perms, f"admin missing permission: {key!r}"
+
+
+def test_user_does_not_get_admin_security():
+    perms = compute_permissions(["user"])
+    assert "admin:security" not in perms
+
+
+def test_user_gets_normal_app_permissions():
+    perms = compute_permissions(["user"])
+    assert "projects:read" in perms
+    assert "ai:suggest" in perms
 
 
 def test_empty_roles_get_no_permissions():
     perms = compute_permissions([])
-    # Wildcard permissions are still granted
     wildcard_keys = {k for k, v in config_rbac.PERMISSIONS.items() if v == ("*",)}
     non_wildcard = set(config_rbac.PERMISSIONS) - wildcard_keys
     for key in non_wildcard:
         assert key not in perms
+
+
+# ---------------------------------------------------------------------------
+# Password hashing
+# ---------------------------------------------------------------------------
+
+def test_password_hash_roundtrip():
+    h = hash_password("correct horse battery staple")
+    assert verify_password("correct horse battery staple", h) is True
+
+
+def test_password_hash_rejects_wrong_password():
+    h = hash_password("correct horse battery staple")
+    assert verify_password("wrong password", h) is False
+
+
+def test_password_hash_is_not_plaintext():
+    h = hash_password("hunter2")
+    assert h != "hunter2"
+
+
+# ---------------------------------------------------------------------------
+# Self-issued JWT (HS256)
+# ---------------------------------------------------------------------------
+
+def test_issue_token_roundtrip(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret")
+    token = issue_token("klm", "user")
+    payload = jwt.decode(token, "test-secret", algorithms=["HS256"])
+    assert payload["sub"] == "klm"
+    assert payload["role"] == "user"
+    assert "jti" in payload
+
+
+def test_issue_token_rejects_with_wrong_secret(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret")
+    token = issue_token("klm", "user")
+    with pytest.raises(jwt.InvalidSignatureError):
+        jwt.decode(token, "a-different-secret", algorithms=["HS256"])
+
+
+def test_expired_token_rejected(monkeypatch):
+    import config
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    expired_payload = {
+        "sub": "klm", "role": "user", "jti": "x",
+        "iat": now - datetime.timedelta(days=8),
+        "exp": now - datetime.timedelta(days=1),
+    }
+    token = jwt.encode(expired_payload, "test-secret", algorithm="HS256")
+    with pytest.raises(jwt.ExpiredSignatureError):
+        jwt.decode(token, "test-secret", algorithms=["HS256"])
 
 
 # ---------------------------------------------------------------------------
@@ -83,55 +158,9 @@ def test_auth_me_with_bypass(client):
     resp = client.get("/api/auth/me")
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["role"] == "owner"
+    assert data["role"] == "admin"
     assert "projects:read" in data["permissions"]
-
-
-# ---------------------------------------------------------------------------
-# validate_token() with DEV_AUTH_BYPASS=0 — the real Keycloak path.
-# S1 regression: a validly-signed token with no OWNER_REALM_ROLES must NOT
-# silently become owner. Covers the exact gap the security review flagged
-# (138 green tests previously existed with zero coverage of this branch).
-# ---------------------------------------------------------------------------
-
-class _FakeSigningKey:
-    key = "fake-key"
-
-
-def _mock_jwt_stack(monkeypatch, payload):
-    import auth_utils
-    monkeypatch.setattr(auth_utils, "_get_jwks_client", lambda: type(
-        "FakeJwks", (), {"get_signing_key_from_jwt": staticmethod(lambda t: _FakeSigningKey())}
-    )())
-    import jwt as jwt_module
-    monkeypatch.setattr(jwt_module, "decode", lambda *a, **k: payload)
-
-
-def test_token_with_no_app_role_is_rejected(client, monkeypatch):
-    import config
-    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
-    monkeypatch.setattr(config, "KEYCLOAK_CLIENT_ID", "pma")
-    _mock_jwt_stack(monkeypatch, {
-        "azp": "pma", "sub": "u1", "realm_access": {"roles": ["some-other-realm-role"]},
-        "resource_access": {},
-    })
-
-    resp = client.get("/api/auth/me", headers={"Authorization": "Bearer faketoken"})
-    assert resp.status_code == 403
-
-
-def test_token_with_owner_realm_role_is_accepted(client, monkeypatch):
-    import config
-    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
-    monkeypatch.setattr(config, "KEYCLOAK_CLIENT_ID", "pma")
-    _mock_jwt_stack(monkeypatch, {
-        "azp": "pma", "sub": "u1", "name": "Real User", "email": "u1@smtw.in",
-        "realm_access": {"roles": ["owner"]}, "resource_access": {},
-    })
-
-    resp = client.get("/api/auth/me", headers={"Authorization": "Bearer faketoken"})
-    assert resp.status_code == 200
-    assert resp.get_json()["role"] == "owner"
+    assert "admin:security" in data["permissions"]
 
 
 def test_missing_token_rejected_without_bypass(client, monkeypatch):
@@ -142,98 +171,98 @@ def test_missing_token_rejected_without_bypass(client, monkeypatch):
 
 
 def test_auth_config_accessible_without_token(client, monkeypatch):
-    """S3 regression: the frontend must fetch this before it has a token to
-    initialise Keycloak at all — requiring auth here deadlocks login in prod."""
+    """The frontend must fetch this before it has a token at all."""
     import config
     monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
     resp = client.get("/api/auth/config")
     assert resp.status_code == 200
-    data = resp.get_json()
-    assert "clientId" in data
+    assert "devBypass" in resp.get_json()
 
 
-def test_wrong_client_id_rejected(client, monkeypatch):
+def test_real_token_accepted(client, monkeypatch):
     import config
     monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
-    monkeypatch.setattr(config, "KEYCLOAK_CLIENT_ID", "pma")
-    _mock_jwt_stack(monkeypatch, {
-        "azp": "some-other-client", "sub": "u1",
-        "realm_access": {"roles": ["owner"]}, "resource_access": {},
-    })
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret")
 
-    resp = client.get("/api/auth/me", headers={"Authorization": "Bearer faketoken"})
-    assert resp.status_code == 401
-
-
-# ---------------------------------------------------------------------------
-# S7 regression: issuer verification with a REAL RSA-signed token (not a
-# mocked jwt.decode) — proves PyJWT's own issuer check is actually wired in,
-# not just that the right kwarg is passed.
-# ---------------------------------------------------------------------------
-
-def _make_rsa_keypair():
-    from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.hazmat.primitives import serialization
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    private_pem = key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    public_key = key.public_key()
-    return private_pem, public_key
-
-
-def _mock_real_jwks(monkeypatch, public_key):
-    import auth_utils
-    monkeypatch.setattr(auth_utils, "_get_jwks_client", lambda: type(
-        "FakeJwks", (), {"get_signing_key_from_jwt": staticmethod(lambda t: type(
-            "FakeSigningKey", (), {"key": public_key}
-        )())}
-    )())
-
-
-def test_real_token_wrong_issuer_rejected(client, monkeypatch):
-    import config
-    import jwt as real_jwt
-
-    private_pem, public_key = _make_rsa_keypair()
-    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
-    monkeypatch.setattr(config, "KEYCLOAK_CLIENT_ID", "pma")
-    monkeypatch.setattr(config, "KEYCLOAK_PUBLIC_URL", "https://auth.office.smtw.in")
-    monkeypatch.setattr(config, "KEYCLOAK_REALM", "Office.smtw.in")
-    _mock_real_jwks(monkeypatch, public_key)
-
-    token = real_jwt.encode(
-        {
-            "azp": "pma", "sub": "u1", "iss": "https://evil.example.com/realms/fake",
-            "realm_access": {"roles": ["owner"]},
-        },
-        private_pem, algorithm="RS256",
-    )
-
-    resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
-    assert resp.status_code == 401
-
-
-def test_real_token_correct_issuer_accepted(client, monkeypatch):
-    import config
-    import jwt as real_jwt
-
-    private_pem, public_key = _make_rsa_keypair()
-    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
-    monkeypatch.setattr(config, "KEYCLOAK_CLIENT_ID", "pma")
-    monkeypatch.setattr(config, "KEYCLOAK_PUBLIC_URL", "https://auth.office.smtw.in")
-    monkeypatch.setattr(config, "KEYCLOAK_REALM", "Office.smtw.in")
-    _mock_real_jwks(monkeypatch, public_key)
-
-    token = real_jwt.encode(
-        {
-            "azp": "pma", "sub": "u1", "iss": "https://auth.office.smtw.in/realms/Office.smtw.in",
-            "realm_access": {"roles": ["owner"]},
-        },
-        private_pem, algorithm="RS256",
-    )
+    from auth_utils import issue_token
+    token = issue_token("klm", "user")
 
     resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["sub"] == "klm"
+    assert data["role"] == "user"
+
+
+def test_tampered_token_rejected(client, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret")
+
+    from auth_utils import issue_token
+    token = issue_token("klm", "user") + "tampered"
+
+    resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+
+
+def test_token_signed_with_wrong_secret_rejected(client, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "the-real-secret")
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    forged = jwt.encode(
+        {"sub": "klm", "role": "admin", "jti": "x", "iat": now,
+         "exp": now + datetime.timedelta(days=1)},
+        "attacker-guessed-secret", algorithm="HS256",
+    )
+
+    resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {forged}"})
+    assert resp.status_code == 401
+
+
+def test_token_with_unknown_role_rejected(client, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret")
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    token = jwt.encode(
+        {"sub": "klm", "role": "superuser", "jti": "x", "iat": now,
+         "exp": now + datetime.timedelta(days=1)},
+        "test-secret", algorithm="HS256",
+    )
+
+    resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Lockout
+# ---------------------------------------------------------------------------
+
+def test_is_locked_out_false_when_no_failures(app):
+    import local_db
+    conn = local_db.get_db()
+    try:
+        assert is_locked_out(conn, "nobody-has-tried-this-user") is False
+    finally:
+        local_db.return_db(conn)
+
+
+def test_is_locked_out_true_after_threshold(app):
+    import local_db
+    from auth_utils import LOCKOUT_MAX_ATTEMPTS
+
+    conn = local_db.get_db()
+    try:
+        for _ in range(LOCKOUT_MAX_ATTEMPTS):
+            conn.execute(
+                "INSERT INTO login_events (username, success) VALUES (?, 0)",
+                ("lockout-test-user",),
+            )
+        conn.commit()
+        assert is_locked_out(conn, "lockout-test-user") is True
+    finally:
+        local_db.return_db(conn)

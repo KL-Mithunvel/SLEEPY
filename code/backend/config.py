@@ -92,10 +92,11 @@ LLM_MAX_TOKENS: int         = int(_get("LLM_MAX_TOKENS", 4096))
 DEV_AUTH_BYPASS: bool = str(_get("DEV_AUTH_BYPASS", "0")).strip() in ("1", "true", "yes")
 DEV_USER: str         = _get("DEV_USER", "klm")
 
-KEYCLOAK_PUBLIC_URL: str = _get("KEYCLOAK_PUBLIC_URL", "")
-KEYCLOAK_REALM: str      = _get("KEYCLOAK_REALM", "")
-KEYCLOAK_CLIENT_ID: str  = _get("KEYCLOAK_CLIENT_ID", "pma")
-KEYCLOAK_HOST_IP: str    = _get("KEYCLOAK_HOST_IP", "")
+# In-app auth — self-issued JWT (HS256), no external identity provider.
+# AUTH_SECRET_KEY must be set for real (never blank) in prod: generate via
+# `python -c "import secrets; print(secrets.token_hex(32))"`.
+AUTH_SECRET_KEY: str     = _get("AUTH_SECRET_KEY", "")
+AUTH_TOKEN_TTL_DAYS: int = int(_get("AUTH_TOKEN_TTL_DAYS", 7))
 
 # Explicit prod flag — deliberately NOT inferred from KEYCLOAK_PUBLIC_URL being set,
 # since secrets_app.py commonly has real Keycloak values filled in well before the
@@ -115,6 +116,13 @@ if IS_PROD and not ANTHROPIC_API_KEY:
     raise RuntimeError(
         "APP_ENV=production but no ANTHROPIC_API_KEY is set — refusing to start with the "
         "personal Claude Code OAuth token fallback in prod. Set ANTHROPIC_API_KEY."
+    )
+
+if IS_PROD and not AUTH_SECRET_KEY:
+    raise RuntimeError(
+        "APP_ENV=production but no AUTH_SECRET_KEY is set — refusing to start, since an "
+        "empty HS256 signing key would let anyone forge a valid login token. Generate one "
+        "via: python -c \"import secrets; print(secrets.token_hex(32))\""
     )
 
 # ---------------------------------------------------------------------------

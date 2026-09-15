@@ -113,6 +113,30 @@ _MIGRATIONS = [
         "ALTER TABLE ai_events ADD COLUMN user_message TEXT",
         "ALTER TABLE ai_events ADD COLUMN response_text TEXT",
     ]),
+    (5, "Add users and login_events tables for in-app auth", [
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            username        TEXT NOT NULL UNIQUE,
+            password_hash   TEXT NOT NULL,
+            role            TEXT NOT NULL,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS login_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            username        TEXT NOT NULL,
+            success         INTEGER NOT NULL,
+            ip_address      TEXT,
+            user_agent      TEXT,
+            geo_city        TEXT,
+            geo_country     TEXT,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_login_events_username_created ON login_events (username, created_at)",
+    ]),
 ]
 
 

@@ -79,9 +79,6 @@ def healthz():
 @app.get("/api/auth/config")
 def auth_config():
     return jsonify({
-        "url": config.KEYCLOAK_PUBLIC_URL,
-        "realm": config.KEYCLOAK_REALM,
-        "clientId": config.KEYCLOAK_CLIENT_ID,
         "devBypass": config.DEV_AUTH_BYPASS,
     })
 

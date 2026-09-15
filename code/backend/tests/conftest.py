@@ -27,5 +27,5 @@ def client(app):
 
 @pytest.fixture()
 def owner_client(client):
-    """Test client that presents as the owner role (dev bypass sets this automatically)."""
+    """Test client that presents as the admin role (dev bypass sets this automatically)."""
     return client

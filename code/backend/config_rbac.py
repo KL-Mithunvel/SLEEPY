@@ -1,36 +1,42 @@
 # RBAC policy — single source of truth for access control.
-# Single-user app: one "owner" role with full access.
-# Add more roles only when a second user exists.
+# Two roles: "user" (full personal-assistant access — this is still a
+# single/two-person tool, "user" isn't restricted from anything on their
+# own data) and "admin" (everything "user" has, plus visibility into
+# login/security monitoring). "admin" bypass is handled in code
+# (auth_utils.has_perm / compute_permissions), never listed as a grantee
+# in PERMISSIONS below — see test_no_admin_in_permission_tuples.
 
-ROLES = ("owner",)  # ordered most → least privileged
+ROLES = ("admin", "user")  # ordered most → least privileged
 
 PERMISSIONS = {
     # Projects
-    "projects:read":   ("owner",),
-    "projects:write":  ("owner",),
+    "projects:read":   ("user",),
+    "projects:write":  ("user",),
 
     # AI actions
-    "ai:suggest":      ("owner",),
-    "ai:edit_md":      ("owner",),
+    "ai:suggest":      ("user",),
+    "ai:edit_md":      ("user",),
 
     # Logs / briefings
-    "logs:read":       ("owner",),
-    "logs:write":      ("owner",),
+    "logs:read":       ("user",),
+    "logs:write":      ("user",),
 
     # Corpus actions
-    "corpus:news_watch":      ("owner",),
-    "corpus:materialise":     ("owner",),
-    "corpus:move_line":       ("owner",),
-    "corpus:housekeeping":    ("owner",),
-    "corpus:weekly_review":   ("owner",),
+    "corpus:news_watch":      ("user",),
+    "corpus:materialise":     ("user",),
+    "corpus:move_line":       ("user",),
+    "corpus:housekeeping":    ("user",),
+    "corpus:weekly_review":   ("user",),
 
     # Integration actions
-    "integrations:send":    ("owner",),
-    "integrations:sync":    ("owner",),
+    "integrations:send":    ("user",),
+    "integrations:sync":    ("user",),
 
     # Admin
-    "admin:reindex":   ("owner",),
-}
+    "admin:reindex":   ("user",),
 
-# Keycloak realm roles that map to the app-level "owner"
-OWNER_REALM_ROLES = {"owner", "mspv-apps-admin", "admin"}
+    # Security monitoring — granted to "user" by nobody; admins get it via
+    # the code-level bypass (compute_permissions expands to every key here
+    # for role="admin"), not via this tuple.
+    "admin:security":  (),
+}

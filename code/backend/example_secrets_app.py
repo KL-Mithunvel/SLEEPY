@@ -9,12 +9,11 @@ ANTHROPIC_API_KEY = "sk-ant-..."     # preferred key name going forward
 # CLAUDE_API_KEY = "sk-ant-..."      # legacy alias — also accepted
 
 # ---------------------------------------------------------------------------
-# Keycloak (leave blank for local dev with DEV_AUTH_BYPASS=1)
+# In-app auth (leave blank for local dev with DEV_AUTH_BYPASS=1; required in
+# prod — config.py refuses to start with APP_ENV=production and this blank)
 # ---------------------------------------------------------------------------
-KEYCLOAK_HOST_IP    = ""             # LAN IP for direct JWKS fetch; empty = use public URL
-KEYCLOAK_PUBLIC_URL = "https://auth.office.smtw.in"
-KEYCLOAK_REALM      = "Office.smtw.in"
-KEYCLOAK_CLIENT_ID  = "pma"
+AUTH_SECRET_KEY = ""      # generate via: python -c "import secrets; print(secrets.token_hex(32))"
+AUTH_TOKEN_TTL_DAYS = 7   # how long a login stays valid before re-authenticating
 
 # ---------------------------------------------------------------------------
 # SQLite DB path (absolute, or relative to code/backend/)
