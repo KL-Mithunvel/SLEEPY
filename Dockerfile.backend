@@ -26,7 +26,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl git \
     && rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user — no reason gunicorn/the worker need root inside the container.
-RUN groupadd -r sleepy && useradd -r -g sleepy -d /app sleepy \
+# uid/gid pinned to 1000 to match the host user that owns the bind-mounted
+# ./data directory (the MD corpus + SQLite DB) — a mismatched uid can read
+# those files but not write to them ("attempt to write a readonly database").
+RUN groupadd -r -g 1000 sleepy && useradd -r -u 1000 -g sleepy -d /app sleepy \
     && chown -R sleepy:sleepy /app
 USER sleepy
 
