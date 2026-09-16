@@ -102,7 +102,7 @@ Send notifications directly to a Telegram chat/group.
 ### Configuration
 ```python
 # secrets_app.py
-TELEGRAM_BOT_TOKEN = "123456789:AABBCCDDEEFFaabbccddeeff1234567890"
+TELEGRAM_BOT_TOKEN = "your-telegram-bot-token"    # from @BotFather
 TELEGRAM_CHAT_ID = "-100123456789"    # negative for groups, positive for DMs
 ```
 
