@@ -72,3 +72,56 @@ def test_send_email_tool_accepts_owner_email(conn, monkeypatch):
     tool = _get_send_email_tool(conn)
     result = tool.handler({"to": "klm@smtw.in", "subject": "Hi", "body": "Legit"})
     assert "queued" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# move_file / delete_file — staged, confirm-gated corpus file ops
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def data_root(tmp_path, monkeypatch):
+    import config
+    root = str(tmp_path / "data")
+    os.makedirs(root)
+    monkeypatch.setattr(config, "USER_DATA_ROOT", root)
+    return root
+
+
+def _get_tool(conn, name):
+    import tools_registry
+    tools = tools_registry.build_tools(conn)
+    return next(t for t in tools if t.name == name)
+
+
+def test_move_file_tool_stages_pending_move(conn, data_root):
+    src = os.path.join(data_root, "SMTW", "a.md")
+    os.makedirs(os.path.dirname(src))
+    with open(src, "w") as f:
+        f.write("# A")
+
+    tool = _get_tool(conn, "move_file")
+    result = tool.handler({"src_path": "SMTW/a.md", "dst_path": "VIT/a.md"})
+    assert "staged for user review" in result.lower()
+
+
+def test_move_file_tool_reports_error_for_missing_source(conn, data_root):
+    tool = _get_tool(conn, "move_file")
+    result = tool.handler({"src_path": "SMTW/ghost.md", "dst_path": "VIT/ghost.md"})
+    assert result.startswith("[error:")
+
+
+def test_delete_file_tool_stages_pending_delete(conn, data_root):
+    path = os.path.join(data_root, "SMTW", "dup.md")
+    os.makedirs(os.path.dirname(path))
+    with open(path, "w") as f:
+        f.write("# Dup")
+
+    tool = _get_tool(conn, "delete_file")
+    result = tool.handler({"path": "SMTW/dup.md"})
+    assert "staged for user review" in result.lower()
+
+
+def test_delete_file_tool_reports_error_for_missing_file(conn, data_root):
+    tool = _get_tool(conn, "delete_file")
+    result = tool.handler({"path": "SMTW/ghost.md"})
+    assert result.startswith("[error:")

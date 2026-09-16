@@ -182,6 +182,42 @@ def test_edit_reject_idempotent(client):
     assert resp.status_code == 200
 
 
+def test_edit_confirm_dispatches_pending_move(client, monkeypatch, tmp_path):
+    """The generic /confirm route must apply a pending md_move (not just
+    md_edit) via md_editor.apply_pending."""
+    import config
+    import git
+    import local_db
+    import md_editor
+
+    data_root = str(tmp_path / "move-corpus")
+    os.makedirs(data_root)
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    repo = git.Repo.init(data_root)
+    repo.config_writer().set_value("user", "name", "T").release()
+    repo.config_writer().set_value("user", "email", "t@t.com").release()
+
+    src = os.path.join(data_root, "SMTW", "wrong-ou.md")
+    os.makedirs(os.path.dirname(src))
+    with open(src, "w") as f:
+        f.write("# Project")
+    repo.index.add(["SMTW/wrong-ou.md"])
+    repo.index.commit("seed")
+
+    conn = local_db.get_db()
+    try:
+        result = md_editor.propose_move("SMTW/wrong-ou.md", "VIT/wrong-ou.md", "fix OU", conn)
+    finally:
+        local_db.return_db(conn)
+
+    resp = client.post(f"/api/ai/edit/{result['event_id']}/confirm")
+    assert resp.status_code == 200
+    assert resp.get_json()["committed"] is True
+    assert not os.path.exists(src)
+    assert os.path.isfile(os.path.join(data_root, "VIT", "wrong-ou.md"))
+
+
 # ---------------------------------------------------------------------------
 # POST /api/ai/chat — persists full prompt/response text, not just token counts
 # ---------------------------------------------------------------------------

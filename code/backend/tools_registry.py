@@ -1,5 +1,5 @@
 """
-LLM tool registry — builds the 9 Tool objects per-request.
+LLM tool registry — builds the 11 Tool objects per-request.
 
 Call build_tools(conn) at the start of each chat request.
 Each handler is a closure that captures the db connection and data roots.
@@ -211,6 +211,37 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
         except ValueError as e:
             return f"[error: {e}]"
 
+    def h_move_file(inp: dict) -> str:
+        src_path = inp["src_path"]
+        dst_path = inp["dst_path"]
+        summary = inp.get("summary") or f"Move {src_path} to {dst_path}"
+        try:
+            result = md_editor.propose_move(src_path, dst_path, summary, conn)
+            if staged_actions is not None:
+                staged_actions.append(result)
+            eid = result.get("event_id", "?")
+            return (
+                f"Move staged for user review (event_id={eid}). "
+                "Tell the user to look for the card in the UI and click Apply to confirm."
+            )
+        except ValueError as e:
+            return f"[error: {e}]"
+
+    def h_delete_file(inp: dict) -> str:
+        file_path = inp["path"]
+        summary = inp.get("summary") or f"Delete {file_path}"
+        try:
+            result = md_editor.propose_delete(file_path, summary, conn)
+            if staged_actions is not None:
+                staged_actions.append(result)
+            eid = result.get("event_id", "?")
+            return (
+                f"Delete staged for user review (event_id={eid}). "
+                "Tell the user to look for the card in the UI and click Apply to confirm."
+            )
+        except ValueError as e:
+            return f"[error: {e}]"
+
     return [
         Tool(
             name="load_skill",
@@ -338,5 +369,57 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
                 "required": ["path", "content"],
             },
             handler=h_write_file,
+        ),
+        Tool(
+            name="move_file",
+            description=(
+                "Relocate or rename an existing markdown file in the user corpus — e.g. fixing a "
+                "project written under the wrong OU, or renaming a slug. Use this instead of "
+                "write_file when the content isn't changing, only its path. The move is staged "
+                "for user confirmation; it is NOT applied immediately."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "src_path": {
+                        "type": "string",
+                        "description": "Current relative path, e.g. 'SMTW/wrong-ou-project.md'.",
+                    },
+                    "dst_path": {
+                        "type": "string",
+                        "description": "New relative path, e.g. 'VIT/wrong-ou-project.md'. Must end in .md and must not already exist.",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "One-line reason for the move.",
+                    },
+                },
+                "required": ["src_path", "dst_path"],
+            },
+            handler=h_move_file,
+        ),
+        Tool(
+            name="delete_file",
+            description=(
+                "Permanently remove an existing markdown file from the user corpus — e.g. an "
+                "orphaned duplicate left behind by a previous move. The delete is staged for "
+                "user confirmation, showing the full file content that would be removed; it is "
+                "NOT applied immediately."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path of the file to delete, e.g. 'SMTW/Archive/old-duplicate.md'.",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "One-line reason for the deletion.",
+                    },
+                },
+                "required": ["path"],
+            },
+            handler=h_delete_file,
         ),
     ]

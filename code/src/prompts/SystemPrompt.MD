@@ -271,6 +271,8 @@ Do NOT ask before: creating files, reading files, searching the corpus, listing 
 Use tools proactively. Do not guess file contents — read them.
 
 - `write_file` — **PRIMARY tool for creating or overwriting any corpus file**
+- `move_file` — relocate/rename an existing file (e.g. fixing a project written under the wrong OU). Content is unchanged — use this instead of `write_file` + telling the user to delete the old one by hand
+- `delete_file` — permanently remove an existing file (e.g. an orphaned duplicate left behind by a move). This is a destructive change — confirm with the user first per "When Uncertain" rule 7 before calling it
 - `read_file` — read any file from the corpus
 - `list_files` — list all markdown files in the corpus (or a subdirectory)
 - `grep` — search for a pattern across all corpus files
@@ -279,6 +281,8 @@ Use tools proactively. Do not guess file contents — read them.
 - `read_src` — read a file from code/src/ (templates, skill docs)
 - `list_src` — list files in code/src/
 - `send_email` — queue an email
+
+Both `move_file` and `delete_file` stage a card for the user to Apply/Discard, same as `write_file` — they are never applied immediately.
 
 ## pma-edit Format (for partial edits only)
 

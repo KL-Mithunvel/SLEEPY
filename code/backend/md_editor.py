@@ -6,13 +6,25 @@ Every AI-proposed file change goes through:
   2. propose_edit()        — write ai_events row (accepted=NULL), return diff for user review
   3. apply_edit() / reject_edit() — user confirms or cancels
 
+Three operations, one shared confirm-gate pattern (propose → pending
+ai_events row → user/route confirms → apply_* commits, or reject_edit
+cancels):
+    write  (propose_edit/apply_edit)   — create or overwrite one file's content
+    move   (propose_move/apply_move)   — relocate/rename a file (`git mv`)
+    delete (propose_delete/apply_delete) — remove a file (`git rm`)
+
 Public API:
     validate_edit(rel_path, new_content)           → raises ValueError on policy violation
     compute_diff(original, new_content, rel_path)  → unified diff string
     scan_diff_for_secrets(diff)                    → list of matched pattern names (added lines only)
     propose_edit(rel_path, new_content, summary, conn) → dict with event_id + diff
     apply_edit(event_id, conn)                     → commit sha (EditConflict if file changed since proposal)
-    reject_edit(event_id, conn)                    → None
+    propose_move(src_rel, dst_rel, summary, conn)  → dict with event_id + diff
+    apply_move(event_id, conn)                     → commit sha (EditConflict if src/dst changed since proposal)
+    propose_delete(rel_path, summary, conn)        → dict with event_id + diff
+    apply_delete(event_id, conn)                   → commit sha (EditConflict if file changed since proposal)
+    apply_pending(event_id, conn)                  → dispatches to the right apply_* by event_type
+    reject_edit(event_id, conn)                    → None (works for any pending event type)
     corpus_git_lock()                              → context manager serialising commits across processes
     ensure_corpus_gitignore()                      → keeps db/ out of the corpus repo
     ai_actor()                                     → the git.Actor for every AI/background commit
@@ -345,6 +357,7 @@ def propose_edit(
         "rel_path": norm,
         "summary": summary,
         "is_new": is_new,
+        "op": "write",
     }
 
 
@@ -425,10 +438,256 @@ def apply_edit(event_id: int, conn: sqlite3.Connection) -> str:
 
 
 def reject_edit(event_id: int, conn: sqlite3.Connection) -> None:
-    """Mark a pending AI edit as rejected (accepted=0)."""
+    """Mark a pending AI edit as rejected (accepted=0). Works for any pending
+    event type (md_edit/md_move/md_delete) — rejecting never touches the
+    filesystem, so there's nothing type-specific to do."""
     conn.execute(
         "UPDATE ai_events SET accepted = 0 WHERE id = ? AND accepted IS NULL",
         (event_id,),
     )
     conn.commit()
     logger.info("Rejected edit event_id=%d", event_id)
+
+
+# ---------------------------------------------------------------------------
+# Move — rename/relocate an existing file (e.g. fixing a wrong-OU write)
+# ---------------------------------------------------------------------------
+
+def validate_move(src_rel: str, dst_rel: str) -> tuple[str, str]:
+    """Validate both sides of a move. Returns (src_norm, dst_norm)."""
+    src_norm = validate_path(src_rel)
+    dst_norm = validate_path(dst_rel)
+    if src_norm == dst_norm:
+        raise ValueError("Source and destination are the same path")
+    return src_norm, dst_norm
+
+
+def propose_move(
+    src_rel: str,
+    dst_rel: str,
+    summary: str,
+    conn: sqlite3.Connection,
+) -> dict:
+    """
+    Validate + dry-run an AI-proposed move: relocate/rename one corpus file.
+    No content changes are possible in a move, so (unlike propose_edit) there
+    is no secret scan here — nothing new is being added to the corpus.
+
+    Returns:
+        {"event_id", "diff", "src_path", "dst_path", "summary", "op": "move"}
+    """
+    src_norm, dst_norm = validate_move(src_rel, dst_rel)
+
+    src_abs = os.path.join(config.USER_DATA_ROOT, src_norm)
+    dst_abs = os.path.join(config.USER_DATA_ROOT, dst_norm)
+
+    content = _read_current(src_abs)
+    if content is None:
+        raise ValueError(f"Source file does not exist: {src_norm}")
+    if _read_current(dst_abs) is not None:
+        raise ValueError(
+            f"Destination already exists: {dst_norm} — delete it first or choose another path"
+        )
+
+    diff = f"rename {src_norm} => {dst_norm}\n--- a/{src_norm}\n+++ b/{dst_norm}"
+
+    payload = json.dumps({
+        "op": "move",
+        "src_rel": src_norm,
+        "dst_rel": dst_norm,
+        "summary": summary,
+        "diff": diff,
+        "src_base_hash": _content_hash(content),
+    })
+
+    cur = conn.execute(
+        "INSERT INTO ai_events (event_type, diff) VALUES ('md_move', ?)",
+        (payload,),
+    )
+    conn.commit()
+    event_id = cur.lastrowid
+
+    logger.info("Proposed move event_id=%d for %s -> %s", event_id, src_norm, dst_norm)
+    return {
+        "event_id": event_id,
+        "diff": diff,
+        "src_path": src_norm,
+        "dst_path": dst_norm,
+        "summary": summary,
+        "op": "move",
+    }
+
+
+def apply_move(event_id: int, conn: sqlite3.Connection) -> str:
+    """Apply a pending move via `git mv` (one atomic commit — no in-between
+    state where the file exists at neither, or both, paths)."""
+    row = conn.execute(
+        "SELECT diff FROM ai_events WHERE id = ? AND event_type = 'md_move' AND accepted IS NULL",
+        (event_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError(f"No pending md_move for event_id={event_id}")
+
+    payload = json.loads(row["diff"])
+    src_norm = payload["src_rel"]
+    dst_norm = payload["dst_rel"]
+    summary = payload.get("summary", "AI move")
+
+    validate_move(src_norm, dst_norm)
+
+    src_abs = os.path.join(config.USER_DATA_ROOT, src_norm)
+    dst_abs = os.path.join(config.USER_DATA_ROOT, dst_norm)
+
+    with corpus_git_lock():
+        current = _read_current(src_abs)
+        current_hash = None if current is None else _content_hash(current)
+        if current_hash != payload.get("src_base_hash"):
+            raise EditConflict(
+                f"{src_norm} changed or disappeared on disk after this move was proposed — "
+                "discard it and ask again"
+            )
+        if _read_current(dst_abs) is not None:
+            raise EditConflict(
+                f"{dst_norm} now exists — moving there would overwrite it; discard and ask again"
+            )
+
+        os.makedirs(os.path.dirname(dst_abs), exist_ok=True)
+
+        repo = _get_repo()
+        ensure_corpus_gitignore()
+        src_rel_to_repo = os.path.relpath(src_abs, config.USER_DATA_ROOT)
+        dst_rel_to_repo = os.path.relpath(dst_abs, config.USER_DATA_ROOT)
+        repo.git.mv(src_rel_to_repo, dst_rel_to_repo)
+        author = ai_actor()
+        commit = repo.index.commit(
+            f"AI: {summary}",
+            author=author,
+            committer=author,
+        )
+        sha = commit.hexsha
+
+    conn.execute("UPDATE ai_events SET accepted = 1 WHERE id = ?", (event_id,))
+    conn.commit()
+
+    logger.info("Applied move event_id=%d -> commit %s (%s -> %s)", event_id, sha[:8], src_norm, dst_norm)
+    return sha
+
+
+# ---------------------------------------------------------------------------
+# Delete — remove an existing file
+# ---------------------------------------------------------------------------
+
+def propose_delete(
+    rel_path: str,
+    summary: str,
+    conn: sqlite3.Connection,
+) -> dict:
+    """
+    Validate + dry-run an AI-proposed delete. The diff is a plain
+    all-lines-removed unified diff so the confirm card shows exactly what
+    content is being destroyed, not just a filename.
+
+    Returns:
+        {"event_id", "diff", "rel_path", "summary", "op": "delete"}
+    """
+    norm = validate_path(rel_path)
+    abs_path = os.path.join(config.USER_DATA_ROOT, norm)
+
+    current = _read_current(abs_path)
+    if current is None:
+        raise ValueError(f"File does not exist: {norm}")
+
+    diff = compute_diff(current, "", norm)
+
+    payload = json.dumps({
+        "op": "delete",
+        "rel_path": norm,
+        "summary": summary,
+        "diff": diff,
+        "base_hash": _content_hash(current),
+    })
+
+    cur = conn.execute(
+        "INSERT INTO ai_events (event_type, diff) VALUES ('md_delete', ?)",
+        (payload,),
+    )
+    conn.commit()
+    event_id = cur.lastrowid
+
+    logger.info("Proposed delete event_id=%d for %s", event_id, norm)
+    return {
+        "event_id": event_id,
+        "diff": diff,
+        "rel_path": norm,
+        "summary": summary,
+        "op": "delete",
+    }
+
+
+def apply_delete(event_id: int, conn: sqlite3.Connection) -> str:
+    """Apply a pending delete via `git rm` + commit."""
+    row = conn.execute(
+        "SELECT diff FROM ai_events WHERE id = ? AND event_type = 'md_delete' AND accepted IS NULL",
+        (event_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError(f"No pending md_delete for event_id={event_id}")
+
+    payload = json.loads(row["diff"])
+    norm = payload["rel_path"]
+    summary = payload.get("summary", "AI delete")
+
+    validate_path(norm)
+    abs_path = os.path.join(config.USER_DATA_ROOT, norm)
+
+    with corpus_git_lock():
+        current = _read_current(abs_path)
+        current_hash = None if current is None else _content_hash(current)
+        if current_hash != payload.get("base_hash"):
+            raise EditConflict(
+                f"{norm} changed or was already removed on disk after this delete was proposed — "
+                "discard it and ask again"
+            )
+
+        repo = _get_repo()
+        ensure_corpus_gitignore()
+        rel_to_repo = os.path.relpath(abs_path, config.USER_DATA_ROOT)
+        repo.git.rm(rel_to_repo)
+        author = ai_actor()
+        commit = repo.index.commit(
+            f"AI: {summary}",
+            author=author,
+            committer=author,
+        )
+        sha = commit.hexsha
+
+    conn.execute("UPDATE ai_events SET accepted = 1 WHERE id = ?", (event_id,))
+    conn.commit()
+
+    logger.info("Applied delete event_id=%d -> commit %s (%s)", event_id, sha[:8], norm)
+    return sha
+
+
+# ---------------------------------------------------------------------------
+# Generic dispatcher — the confirm route doesn't need to know the op ahead
+# of time, just the event_id
+# ---------------------------------------------------------------------------
+
+def apply_pending(event_id: int, conn: sqlite3.Connection) -> str:
+    """Look up a pending ai_events row and apply it via the matching
+    op-specific apply_* function."""
+    row = conn.execute(
+        "SELECT event_type FROM ai_events WHERE id = ? AND accepted IS NULL",
+        (event_id,),
+    ).fetchone()
+    if not row:
+        raise ValueError(f"No pending AI event for event_id={event_id}")
+
+    event_type = row["event_type"]
+    if event_type == "md_edit":
+        return apply_edit(event_id, conn)
+    if event_type == "md_move":
+        return apply_move(event_id, conn)
+    if event_type == "md_delete":
+        return apply_delete(event_id, conn)
+    raise ValueError(f"Unsupported pending event type: {event_type!r}")
