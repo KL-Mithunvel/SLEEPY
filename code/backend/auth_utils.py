@@ -152,7 +152,7 @@ def is_locked_out(conn, username: str, ip_address: str | None = None) -> bool:
     pair = conn.execute(
         """
         SELECT COUNT(*) AS n FROM login_events
-        WHERE username = ? AND success = 0
+        WHERE username = ? AND success = 0 AND voided = 0
           AND COALESCE(ip_address, '') = ?
           AND created_at >= datetime('now', 'localtime', ?)
         """,
@@ -165,12 +165,32 @@ def is_locked_out(conn, username: str, ip_address: str | None = None) -> bool:
     by_ip = conn.execute(
         """
         SELECT COUNT(*) AS n FROM login_events
-        WHERE success = 0 AND ip_address = ?
+        WHERE success = 0 AND voided = 0 AND ip_address = ?
           AND created_at >= datetime('now', 'localtime', ?)
         """,
         (ip, window),
     ).fetchone()
     return by_ip["n"] >= LOCKOUT_IP_MAX_ATTEMPTS
+
+
+def unlock_user(conn, username: str) -> int:
+    """
+    Manual override for a legitimate user locked out early (lockout would
+    otherwise self-clear after LOCKOUT_WINDOW_MINUTES anyway). Flags recent
+    failed login_events as voided rather than deleting them, so the audit
+    trail (login_events is append-only elsewhere in this codebase) survives
+    an unlock. Returns the number of rows voided. Does not touch the per-IP
+    counter's other usernames — this only clears failures for `username`.
+    """
+    cur = conn.execute(
+        """
+        UPDATE login_events SET voided = 1
+        WHERE username = ? AND success = 0 AND voided = 0
+        """,
+        (username,),
+    )
+    conn.commit()
+    return cur.rowcount
 
 
 # ---------------------------------------------------------------------------

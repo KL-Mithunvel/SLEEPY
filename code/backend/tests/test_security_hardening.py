@@ -442,6 +442,114 @@ def test_per_ip_lockout_across_usernames(client, monkeypatch):
     assert resp.status_code == 429
 
 
+def test_unlock_user_clears_lockout(client, monkeypatch, create_user):
+    """manage_users.py unlock-user (auth_utils.unlock_user) lets a legitimate
+    user back in immediately instead of waiting out LOCKOUT_WINDOW_MINUTES."""
+    import auth_utils
+    import config
+    import local_db
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", _SECRET)
+    create_user("dana", "the-real-password", role="user")
+
+    who = {"REMOTE_ADDR": "203.0.113.50"}
+    for _ in range(auth_utils.LOCKOUT_MAX_ATTEMPTS):
+        client.post("/api/auth/login", json={"username": "dana", "password": "wrong"}, environ_base=who)
+    resp = client.post("/api/auth/login", json={"username": "dana", "password": "the-real-password"}, environ_base=who)
+    assert resp.status_code == 429
+
+    conn = local_db.get_db()
+    try:
+        n = auth_utils.unlock_user(conn, "dana")
+    finally:
+        local_db.return_db(conn)
+    assert n == auth_utils.LOCKOUT_MAX_ATTEMPTS
+
+    resp = client.post("/api/auth/login", json={"username": "dana", "password": "the-real-password"}, environ_base=who)
+    assert resp.status_code == 200
+
+
+def test_unlock_user_preserves_audit_rows_voided_not_deleted(client, monkeypatch, create_user):
+    """login_events stays append-only — unlock flags rows voided=1, never DELETEs."""
+    import auth_utils
+    import config
+    import local_db
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", _SECRET)
+    create_user("erin2", "the-real-password", role="user")
+
+    who = {"REMOTE_ADDR": "203.0.113.51"}
+    client.post("/api/auth/login", json={"username": "erin2", "password": "wrong"}, environ_base=who)
+
+    conn = local_db.get_db()
+    try:
+        before = conn.execute(
+            "SELECT COUNT(*) AS n FROM login_events WHERE username = 'erin2'"
+        ).fetchone()["n"]
+        auth_utils.unlock_user(conn, "erin2")
+        after = conn.execute(
+            "SELECT COUNT(*) AS n FROM login_events WHERE username = 'erin2'"
+        ).fetchone()["n"]
+        voided = conn.execute(
+            "SELECT COUNT(*) AS n FROM login_events WHERE username = 'erin2' AND voided = 1"
+        ).fetchone()["n"]
+    finally:
+        local_db.return_db(conn)
+    assert before == after  # nothing deleted
+    assert voided == before  # everything flagged instead
+
+
+def test_unlock_user_does_not_affect_other_usernames(client, monkeypatch, create_user):
+    import auth_utils
+    import config
+    import local_db
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", _SECRET)
+    create_user("frank2", "pw-frank", role="user")
+    create_user("gina", "pw-gina", role="user")
+
+    ip = {"REMOTE_ADDR": "203.0.113.52"}
+    for _ in range(auth_utils.LOCKOUT_MAX_ATTEMPTS):
+        client.post("/api/auth/login", json={"username": "gina", "password": "wrong"}, environ_base=ip)
+
+    conn = local_db.get_db()
+    try:
+        auth_utils.unlock_user(conn, "frank2")  # frank2 never failed — 0 rows to void
+    finally:
+        local_db.return_db(conn)
+
+    resp = client.post("/api/auth/login", json={"username": "gina", "password": "pw-gina"}, environ_base=ip)
+    assert resp.status_code == 429  # gina is still locked out
+
+
+def test_manage_users_unlock_user_cli(monkeypatch, app, create_user):
+    """The manage_users.py CLI path, not just the auth_utils helper."""
+    import auth_utils
+    import config
+    import local_db
+    import manage_users
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", _SECRET)
+    create_user("holly", "pw-holly", role="user")
+
+    conn = local_db.get_db()
+    try:
+        for _ in range(3):
+            conn.execute(
+                "INSERT INTO login_events (username, success, ip_address) VALUES ('holly', 0, '203.0.113.53')"
+            )
+        conn.commit()
+    finally:
+        local_db.return_db(conn)
+
+    manage_users.unlock_user("holly")
+
+    conn = local_db.get_db()
+    try:
+        remaining = conn.execute(
+            "SELECT COUNT(*) AS n FROM login_events WHERE username = 'holly' AND success = 0 AND voided = 0"
+        ).fetchone()["n"]
+    finally:
+        local_db.return_db(conn)
+    assert remaining == 0
+
+
 def test_login_events_fields_are_bounded(client, monkeypatch):
     import config
     import local_db

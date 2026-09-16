@@ -141,6 +141,12 @@ _MIGRATIONS = [
         "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
         "CREATE INDEX IF NOT EXISTS idx_login_events_ip_created ON login_events (ip_address, created_at)",
     ]),
+    (7, "Add login_events.voided for manual lockout-clear (manage_users.py unlock-user)", [
+        # Same convention as ai_events.voided: never DELETE audit rows, just
+        # flag them out of the lockout COUNT so a manual unlock doesn't erase
+        # login history.
+        "ALTER TABLE login_events ADD COLUMN voided INTEGER NOT NULL DEFAULT 0",
+    ]),
 ]
 
 

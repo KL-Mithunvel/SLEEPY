@@ -8,6 +8,8 @@ Usage (from code/backend/, or via `uv run python code/backend/manage_users.py ..
     list-users
     reset-password <username>
     delete-user <username>
+    unlock-user <username>          clear a brute-force lockout early (it also
+                                     self-clears after LOCKOUT_WINDOW_MINUTES)
 """
 
 import argparse
@@ -93,6 +95,23 @@ def delete_user(username: str):
         local_db.return_db(conn)
 
 
+def unlock_user(username: str):
+    conn = local_db.get_db()
+    try:
+        # A bare user lookup so "no such user" is distinguishable from
+        # "user exists but had nothing to clear" (0 voided rows either way).
+        exists = conn.execute(
+            "SELECT 1 FROM users WHERE username = ?", (username,)
+        ).fetchone()
+        if not exists:
+            print(f"No such user: {username}", file=sys.stderr)
+            sys.exit(1)
+        n = auth_utils.unlock_user(conn, username)
+        print(f"Cleared {n} failed login attempt(s) for {username} — account unlocked.")
+    finally:
+        local_db.return_db(conn)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -109,6 +128,9 @@ def main():
     p_delete = sub.add_parser("delete-user")
     p_delete.add_argument("username")
 
+    p_unlock = sub.add_parser("unlock-user")
+    p_unlock.add_argument("username")
+
     args = parser.parse_args()
 
     local_db.init_db()
@@ -121,6 +143,8 @@ def main():
         reset_password(args.username)
     elif args.command == "delete-user":
         delete_user(args.username)
+    elif args.command == "unlock-user":
+        unlock_user(args.username)
 
 
 if __name__ == "__main__":
