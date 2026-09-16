@@ -1,0 +1,67 @@
+name: CI
+
+# Mechanical backstop for Development Rule 10 ("test before every commit"):
+# runs the same two gates the workflow already requires by hand —
+# tooling/run-backend-tests.bat and `npm run build` — on every push and PR
+# to main or prod. Doesn't deploy anything; deploys stay a manual,
+# permission-gated step on the EC2 box per
+# ".CLAUDE/CLAUDE.md#dev-prod-environment-separation--deploy-workflow".
+
+on:
+  push:
+    branches: [main, prod]
+  pull_request:
+    branches: [main, prod]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code/backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install dependencies
+        working-directory: .
+        run: uv sync
+
+      - name: Run backend tests
+        # Mirrors tooling/run-backend-tests.bat exactly: cd code/backend, bare
+        # `uv run pytest` — uv discovers the repo-root pyproject.toml/uv.lock
+        # by walking up from cwd, same as the local wrapper relies on.
+        env:
+          DEV_AUTH_BYPASS: "1"
+          SQLITE_DB_PATH: ":memory:"
+        run: uv run pytest
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code/frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: code/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
