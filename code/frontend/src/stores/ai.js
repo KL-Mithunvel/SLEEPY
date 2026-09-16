@@ -1,6 +1,27 @@
 import { defineStore } from 'pinia'
 import { apiPost, apiStream } from '../api.js'
 
+// A staged action's op ('write' | 'move' | 'delete') decides which fields it
+// carries (rel_path vs. src_path/dst_path) and how to describe it in chat.
+function describeStagedAction(action) {
+  if (action.op === 'move') {
+    return {
+      content: `I'll move \`${action.src_path}\` to \`${action.dst_path}\` — ${action.summary}`,
+      historyContent: `[Proposed move: ${action.src_path} -> ${action.dst_path}: ${action.summary}]`,
+    }
+  }
+  if (action.op === 'delete') {
+    return {
+      content: `I'll delete \`${action.rel_path}\` — ${action.summary}`,
+      historyContent: `[Proposed delete of ${action.rel_path}: ${action.summary}]`,
+    }
+  }
+  return {
+    content: `I'll update \`${action.rel_path}\` — ${action.summary}`,
+    historyContent: `[Proposed edit to ${action.rel_path}: ${action.summary}]`,
+  }
+}
+
 export const useAiStore = defineStore('ai', {
   state: () => ({
     messages: [],
@@ -75,11 +96,12 @@ export const useAiStore = defineStore('ai', {
                 this.messages[placeholderIdx].content
 
               for (const action of (result.actions || [])) {
+                const { content, historyContent } = describeStagedAction(action)
                 this.messages.push({
                   role: 'assistant',
                   type: 'edit',
-                  content: `I'll update \`${action.rel_path}\` — ${action.summary}`,
-                  historyContent: `[Proposed edit to ${action.rel_path}: ${action.summary}]`,
+                  content,
+                  historyContent,
                   edit: action,
                   settled: false,
                   confirmed: false,
@@ -113,8 +135,16 @@ export const useAiStore = defineStore('ai', {
         await apiPost(`/api/ai/edit/${msg.edit.event_id}/confirm`, {})
         msg.settled = true
         msg.confirmed = true
-        msg.content = `Applied — \`${msg.edit.rel_path}\` committed.`
-        msg.historyContent = `[Edit applied to ${msg.edit.rel_path}: ${msg.edit.summary}]`
+        if (msg.edit.op === 'move') {
+          msg.content = `Applied — moved \`${msg.edit.src_path}\` to \`${msg.edit.dst_path}\`.`
+          msg.historyContent = `[Move applied: ${msg.edit.src_path} -> ${msg.edit.dst_path}]`
+        } else if (msg.edit.op === 'delete') {
+          msg.content = `Applied — \`${msg.edit.rel_path}\` deleted.`
+          msg.historyContent = `[Delete applied: ${msg.edit.rel_path}]`
+        } else {
+          msg.content = `Applied — \`${msg.edit.rel_path}\` committed.`
+          msg.historyContent = `[Edit applied to ${msg.edit.rel_path}: ${msg.edit.summary}]`
+        }
       } catch (e) {
         this.error = e.message
       }
@@ -128,7 +158,12 @@ export const useAiStore = defineStore('ai', {
         msg.settled = true
         msg.confirmed = false
         msg.content = `Discarded. Tell me what you meant and I'll try again.`
-        msg.historyContent = `[Edit to ${msg.edit.rel_path} was discarded by user — they will clarify]`
+        const label = msg.edit.op === 'move'
+          ? `move of ${msg.edit.src_path} to ${msg.edit.dst_path}`
+          : msg.edit.op === 'delete'
+            ? `delete of ${msg.edit.rel_path}`
+            : `edit to ${msg.edit.rel_path}`
+        msg.historyContent = `[${label} was discarded by user — they will clarify]`
       } catch (e) {
         this.error = e.message
       }

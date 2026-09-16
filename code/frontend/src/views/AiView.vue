@@ -50,6 +50,12 @@ function diffLineClass(line) {
   return 'diff-context'
 }
 
+function opIcon(op) {
+  if (op === 'move') return 'bi-arrow-left-right'
+  if (op === 'delete') return 'bi-trash3'
+  return 'bi-pencil-square'
+}
+
 const TOOL_LABELS = {
   load_skill:    'Loading skill',
   grep:          'Searching files',
@@ -126,18 +132,35 @@ function toolLabel(name) {
 
         <!-- AI edit proposal -->
         <div v-else-if="msg.type === 'edit'" class="msg-row msg-row--ai">
-          <div class="msg-edit-card">
+          <div class="msg-edit-card" :class="{ 'msg-edit-card--danger': msg.edit.op === 'delete' && !msg.settled }">
             <!-- Header -->
             <div class="msg-edit-header">
-              <i class="bi bi-pencil-square me-2" style="color: var(--accent);"></i>
+              <i
+                :class="['bi', 'me-2', opIcon(msg.edit.op)]"
+                :style="{ color: msg.edit.op === 'delete' ? '#f87171' : 'var(--accent)' }"
+              ></i>
               <span style="font-size: 0.82rem;">
                 <template v-if="msg.settled && msg.confirmed">
                   <i class="bi bi-check-circle-fill text-success me-1"></i>
-                  Applied — <code style="font-size: 0.78rem;">{{ msg.edit.rel_path }}</code>
+                  <template v-if="msg.edit.op === 'move'">
+                    Applied — moved <code style="font-size: 0.78rem;">{{ msg.edit.src_path }}</code> to <code style="font-size: 0.78rem;">{{ msg.edit.dst_path }}</code>
+                  </template>
+                  <template v-else-if="msg.edit.op === 'delete'">
+                    Applied — deleted <code style="font-size: 0.78rem;">{{ msg.edit.rel_path }}</code>
+                  </template>
+                  <template v-else>
+                    Applied — <code style="font-size: 0.78rem;">{{ msg.edit.rel_path }}</code>
+                  </template>
                 </template>
                 <template v-else-if="msg.settled && !msg.confirmed">
                   <i class="bi bi-x-circle me-1" style="color: #f87171;"></i>
                   Discarded
+                </template>
+                <template v-else-if="msg.edit.op === 'move'">
+                  Proposed move: <code style="font-size: 0.78rem;">{{ msg.edit.src_path }}</code> → <code style="font-size: 0.78rem;">{{ msg.edit.dst_path }}</code>
+                </template>
+                <template v-else-if="msg.edit.op === 'delete'">
+                  Proposed delete of <code style="font-size: 0.78rem;">{{ msg.edit.rel_path }}</code>
                 </template>
                 <template v-else>
                   Proposed edit to <code style="font-size: 0.78rem;">{{ msg.edit.rel_path }}</code>
@@ -160,11 +183,11 @@ function toolLabel(name) {
             <!-- Actions -->
             <div v-if="!msg.settled" class="msg-edit-actions">
               <button
-                class="btn btn-sm btn-success"
+                :class="['btn', 'btn-sm', msg.edit.op === 'delete' ? 'btn-danger' : 'btn-success']"
                 style="font-size: 0.78rem;"
                 @click="ai.confirmEdit(i)"
               >
-                <i class="bi bi-check-lg me-1"></i>Apply
+                <i class="bi bi-check-lg me-1"></i>{{ msg.edit.op === 'delete' ? 'Confirm Delete' : 'Apply' }}
               </button>
               <button
                 class="btn btn-sm btn-outline-secondary"
@@ -315,6 +338,10 @@ function toolLabel(name) {
   border: 1px solid var(--border-color, rgba(255,255,255,0.07));
   border-radius: 10px;
   overflow: hidden;
+}
+
+.msg-edit-card--danger {
+  border-color: rgba(248,113,113,0.4);
 }
 
 .msg-edit-header {
