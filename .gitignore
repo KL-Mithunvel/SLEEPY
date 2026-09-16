@@ -5,9 +5,6 @@ __pycache__/
 .venv/
 *.egg-info/
 
-# --- uv ---
-.python-version
-
 # --- Secrets (never commit) ---
 code/backend/secrets_*.py
 !code/backend/example_secrets_*.py
