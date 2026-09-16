@@ -1,9 +1,13 @@
 """
 Today Blueprint — endpoints that power the Today View.
 
-  GET  /api/today           aggregated daily view: last briefing + active tasks
-  POST /api/today/briefing  generate (or regenerate) the morning briefing via LLM
-  POST /api/today/capture   quick-capture a line to inbox.md (auto-applied, no confirm step)
+  GET  /api/today                 aggregated daily view: last briefing + active tasks
+  POST /api/today/briefing        generate (or regenerate) the morning briefing via LLM
+  POST /api/today/tasks/toggle    mark a curated task done
+  POST /api/today/tasks/cancel    mark a curated task cancelled
+  POST /api/today/tasks/promote   copy a project-backlog task into today's curated list
+  POST /api/today/tasks/add       add an ad-hoc task straight to today's curated list
+  POST /api/today/capture         quick-capture a line to inbox.md (auto-applied, no confirm step)
 """
 
 import logging
@@ -145,6 +149,32 @@ def cancel_task():
 
     db = _db()
     ok = task_scan.cancel_task(config.USER_DATA_ROOT, rel_path, text, db)
+    if not ok:
+        return jsonify({"error": "Task line not found — it may have changed, try refreshing"}), 404
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/today/tasks/promote
+# ---------------------------------------------------------------------------
+
+@today_bp.post("/api/today/tasks/promote")
+@require_perm("ai:edit_md")
+def promote_task():
+    """
+    Copy one open task from a project's own backlog into today's curated
+    Active Tasks list (auto-applied, no confirm step). The project's own
+    line is left untouched — this adds a same-day copy alongside it.
+    Request body: {"rel_path": "OU/project.md", "text": "exact task text"}
+    """
+    body = request.get_json(silent=True) or {}
+    rel_path = (body.get("rel_path") or "").strip()
+    text = (body.get("text") or "").strip()
+    if not rel_path or not text:
+        return jsonify({"error": "rel_path and text are required"}), 400
+
+    db = _db()
+    ok = task_scan.promote_task(config.USER_DATA_ROOT, rel_path, text, db)
     if not ok:
         return jsonify({"error": "Task line not found — it may have changed, try refreshing"}), 404
     return jsonify({"ok": True})

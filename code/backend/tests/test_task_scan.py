@@ -267,3 +267,97 @@ def test_add_task_rejects_path_traversal(tmp_path, conn, monkeypatch):
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
     ok = task_scan.add_task(str(tmp_path), "../outside.md", "Some task", None, None, conn)
     assert ok is False
+
+
+# ---------------------------------------------------------------------------
+# promote_task
+# ---------------------------------------------------------------------------
+
+def test_promote_task_copies_into_todays_daily_file(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(
+        str(tmp_path), "SMTW", "proj.md",
+        "---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n- [ ] Define hardware procurement list\n",
+    )
+
+    ok = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Define hardware procurement list", conn)
+    assert ok is True
+
+    from datetime import date
+    daily_path = tmp_path / "SMTW" / "Daily" / f"{date.today().strftime('%Y-%m-%d')}.md"
+    content = daily_path.read_text(encoding="utf-8")
+    assert "- [ ] Define hardware procurement list SMTW/proj.md" in content
+
+    # Source project's own line is untouched
+    proj_content = (tmp_path / "SMTW" / "proj.md").read_text(encoding="utf-8")
+    assert "- [ ] Define hardware procurement list\n" in proj_content
+
+
+def test_promote_task_preserves_priority_and_due(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(
+        str(tmp_path), "SMTW", "proj.md",
+        "---\nstatus: active\n---\n\n- [ ] Submit form priority:high due:2026-07-13\n",
+    )
+
+    ok = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Submit form priority:high due:2026-07-13", conn)
+    assert ok is True
+
+    from datetime import date
+    daily_path = tmp_path / "SMTW" / "Daily" / f"{date.today().strftime('%Y-%m-%d')}.md"
+    content = daily_path.read_text(encoding="utf-8")
+    assert "- [ ] Submit form priority:high due:2026-07-13 SMTW/proj.md" in content
+
+
+def test_promote_task_no_match_returns_false(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(str(tmp_path), "SMTW", "proj.md", "---\nstatus: active\n---\n\n- [ ] Real task\n")
+    ok = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Nonexistent task", conn)
+    assert ok is False
+
+
+def test_promote_task_missing_file_returns_false(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    ok = task_scan.promote_task(str(tmp_path), "SMTW/missing.md", "Anything", conn)
+    assert ok is False
+
+
+def test_promote_task_is_idempotent_on_double_click(tmp_path, conn, monkeypatch):
+    """Clicking Promote twice must not create two copies in today's list."""
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(
+        str(tmp_path), "SMTW", "proj.md",
+        "---\nstatus: active\n---\n\n- [ ] Define hardware procurement list\n",
+    )
+
+    assert task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Define hardware procurement list", conn) is True
+    assert task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Define hardware procurement list", conn) is True
+
+    from datetime import date
+    daily_path = tmp_path / "SMTW" / "Daily" / f"{date.today().strftime('%Y-%m-%d')}.md"
+    content = daily_path.read_text(encoding="utf-8")
+    assert content.count("Define hardware procurement list") == 1
+
+
+def test_promote_task_shows_up_in_todays_scan(tmp_path, conn, monkeypatch):
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(
+        str(tmp_path), "SMTW", "proj.md",
+        "---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n- [ ] Backlog item\n",
+    )
+    assert task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Backlog item", conn) is True
+
+    todays = task_scan.scan_todays_tasks(str(tmp_path))
+    assert len(todays) == 1
+    assert todays[0]["description"] == "Backlog item"
+    assert todays[0]["project"] == "SMTW/proj.md"
+
+    # And the source project's own backlog scan still shows it too (untouched)
+    backlog = task_scan.scan_open_tasks(str(tmp_path))
+    assert any(t["text"] == "Backlog item" for t in backlog)

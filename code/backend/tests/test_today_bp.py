@@ -312,6 +312,54 @@ def test_cancel_task_not_found(client, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# POST /api/today/tasks/promote
+# ---------------------------------------------------------------------------
+
+def test_promote_task_missing_fields(client):
+    resp = client.post("/api/today/tasks/promote", json={})
+    assert resp.status_code == 400
+
+
+def test_promote_task_success(client, monkeypatch, tmp_path):
+    import config
+
+    data_root = str(tmp_path / "corpus_promote")
+    proj_dir = os.path.join(data_root, "SMTW")
+    os.makedirs(proj_dir)
+    proj_file = os.path.join(proj_dir, "proj.md")
+    with open(proj_file, "w", encoding="utf-8") as f:
+        f.write("---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n- [ ] Deploy server\n")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    resp = client.post("/api/today/tasks/promote", json={"rel_path": "SMTW/proj.md", "text": "Deploy server"})
+    assert resp.status_code == 200
+    assert resp.get_json()["ok"] is True
+
+    # Source project's own line is untouched — promote copies, doesn't move
+    with open(proj_file, encoding="utf-8") as f:
+        assert "- [ ] Deploy server" in f.read()
+
+    from datetime import date
+    daily_path = os.path.join(data_root, "SMTW", "Daily", f"{date.today().strftime('%Y-%m-%d')}.md")
+    with open(daily_path, encoding="utf-8") as f:
+        assert "- [ ] Deploy server SMTW/proj.md" in f.read()
+
+
+def test_promote_task_not_found(client, monkeypatch, tmp_path):
+    import config
+
+    data_root = str(tmp_path / "corpus_promote2")
+    proj_dir = os.path.join(data_root, "SMTW")
+    os.makedirs(proj_dir)
+    with open(os.path.join(proj_dir, "proj.md"), "w", encoding="utf-8") as f:
+        f.write("---\nkey: proj\nstatus: active\n---\n\n- [ ] Deploy server\n")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    resp = client.post("/api/today/tasks/promote", json={"rel_path": "SMTW/proj.md", "text": "Nonexistent task"})
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # POST /api/today/tasks/add
 # ---------------------------------------------------------------------------
 

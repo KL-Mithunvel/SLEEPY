@@ -6,6 +6,7 @@ Public API:
     scan_open_tasks(data_root) -> list[dict]     all open tasks across active projects
     scan_todays_tasks(data_root) -> list[dict]   curated: today's materialised Daily files only
     toggle_task(data_root, rel_path, text, conn) -> bool
+    promote_task(data_root, rel_path, text, conn) -> bool   backlog task -> today's list
 """
 
 import logging
@@ -325,3 +326,45 @@ def add_task(
         logger.exception("task_scan: add_task failed for %s", rel_path)
         return False
     return True
+
+
+def promote_task(data_root: str, rel_path: str, text: str, conn) -> bool:
+    """
+    Copy one open task from a project's own '## Tasks' backlog (scan_open_tasks
+    territory — otherwise invisible to the Today view) into today's curated
+    <OU>/Daily/<today>.md list, via the same add_task() path the Today view's
+    own "add ad-hoc task" button uses. The project's own line is left
+    untouched — completing it later is still a separate action on that file;
+    this only adds a same-day working copy, tagged with the source project's
+    rel_path so scan_todays_tasks can still show where it came from.
+
+    Re-verifies the exact source line is still present before promoting (same
+    staleness guard as toggle_task/cancel_task — the list the button was
+    clicked from may be stale). A no-op (returns True without writing) if an
+    identical description is already in today's list for that OU, so a double
+    click can't create a duplicate. Returns False if the source line isn't
+    found or the write fails.
+    """
+    abs_path = Path(data_root) / rel_path
+    if not abs_path.is_file():
+        return False
+    content = abs_path.read_text(encoding="utf-8", errors="replace")
+    target = f"- [ ] {text}"
+    if not any(line.strip() == target for line in content.splitlines()):
+        return False
+
+    description, priority, _ = _clean_description(text)
+    due = _extract_due(text)
+    due_str = due.isoformat() if due else None
+
+    ou = rel_path.split("/", 1)[0]
+    today_str = date.today().strftime("%Y-%m-%d")
+    daily_abs = Path(data_root) / ou / "Daily" / f"{today_str}.md"
+    if daily_abs.is_file():
+        daily_content = daily_abs.read_text(encoding="utf-8", errors="replace")
+        for line in _extract_section(daily_content, "Tasks").splitlines():
+            m = _TASK_LINE_RE.match(line)
+            if m and _clean_description(m.group(3).strip())[0] == description:
+                return True  # already promoted today
+
+    return add_task(data_root, rel_path, description, priority, due_str, conn)
