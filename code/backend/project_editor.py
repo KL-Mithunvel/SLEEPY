@@ -316,7 +316,13 @@ def set_status(data_root: str, rel_path: str, new_status: str, conn) -> str | No
         return None
     new_content = content[:fm_match.start()] + f"status: {new_status}" + content[fm_match.end():]
 
-    parts = rel_path.split("/")
+    parts = rel_path.replace("\\", "/").strip("/").split("/")
+    if len(parts) < 2:
+        # A root-level file (inbox.md, ABOUT.md, ...) has no OU to archive
+        # under — treating its own name as the OU would try to mkdir over a
+        # file and blow up. Status changes only make sense for <OU>/<slug>.md.
+        logger.warning("project_editor: set_status refused for root-level file %s", rel_path)
+        return None
     ou, filename = parts[0], parts[-1]
     currently_archived = len(parts) >= 3 and parts[1] == "Archive"
 
@@ -333,19 +339,36 @@ def set_status(data_root: str, rel_path: str, new_status: str, conn) -> str | No
 
     # Cross-directory move — md_editor only supports same-path overwrites, so
     # this uses git directly, same pattern as housekeeping.py's archive_old_daily.
+    # Both paths are still validated through md_editor's policy (inside the
+    # data root, .md, not db/) and the move is serialised under the corpus lock.
     import git
-    new_abs_path = os.path.join(data_root, new_rel_path)
-    os.makedirs(os.path.dirname(new_abs_path), exist_ok=True)
-    with open(new_abs_path, "w", encoding="utf-8") as f:
-        f.write(new_content)
-    os.remove(abs_path)
-
     try:
-        repo = git.Repo(data_root, search_parent_directories=False)
-        repo.git.add(A=True)
-        author = git.Actor("Arivu Baalan", "arivu@smtw.in")
-        repo.index.commit(f"Status changed to {new_status}: {rel_path} -> {new_rel_path}", author=author, committer=author)
-    except git.InvalidGitRepositoryError:
-        logger.warning("project_editor: no git repo at %s, skipped commit for status move", data_root)
+        md_editor.validate_path(rel_path)
+        md_editor.validate_path(new_rel_path)
+    except ValueError:
+        logger.exception("project_editor: set_status path rejected")
+        return None
+
+    new_abs_path = os.path.join(data_root, new_rel_path)
+    if os.path.exists(new_abs_path):
+        # Never silently clobber an existing file (e.g. an older archived copy
+        # with the same slug) — surface it so the user can rename first.
+        logger.warning("project_editor: set_status refused, target exists: %s", new_rel_path)
+        return None
+
+    with md_editor.corpus_git_lock(data_root):
+        os.makedirs(os.path.dirname(new_abs_path), exist_ok=True)
+        with open(new_abs_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+        os.remove(abs_path)
+
+        try:
+            repo = git.Repo(data_root, search_parent_directories=False)
+            md_editor.ensure_corpus_gitignore(data_root)
+            repo.git.add(A=True)
+            author = md_editor.ai_actor()
+            repo.index.commit(f"Status changed to {new_status}: {rel_path} -> {new_rel_path}", author=author, committer=author)
+        except git.InvalidGitRepositoryError:
+            logger.warning("project_editor: no git repo at %s, skipped commit for status move", data_root)
 
     return new_rel_path

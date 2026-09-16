@@ -49,23 +49,18 @@ except Exception as e:
 
 if config.ANTHROPIC_API_KEY:
     ok(f"ANTHROPIC_API_KEY set (prefix: {config.ANTHROPIC_API_KEY[:12]}...)")
-elif config.ANTHROPIC_AUTH_TOKEN:
-    ok(f"Claude Code OAuth token loaded (prefix: {config.ANTHROPIC_AUTH_TOKEN[:20]}...)")
 else:
     fail(
-        "No Anthropic credentials",
-        "Set CLAUDE_API_KEY in secrets_app.py  OR  log in to Claude Code (run: claude)"
+        "No Anthropic API key",
+        "Set ANTHROPIC_API_KEY (or CLAUDE_API_KEY) in secrets_app.py"
     )
 
 if config.DEV_AUTH_BYPASS:
-    ok("DEV_AUTH_BYPASS=1  (dev mode -- no Keycloak needed)")
-elif config.KEYCLOAK_PUBLIC_URL and config.KEYCLOAK_REALM:
-    ok(f"Keycloak: {config.KEYCLOAK_PUBLIC_URL} / {config.KEYCLOAK_REALM}")
+    ok("DEV_AUTH_BYPASS=1  (dev mode -- synthetic admin user, no login)")
+elif config.AUTH_SECRET_KEY:
+    ok(f"In-app auth: AUTH_SECRET_KEY set ({len(config.AUTH_SECRET_KEY)} chars), token TTL {config.AUTH_TOKEN_TTL_DAYS}d")
 else:
-    warn(
-        "Keycloak not configured",
-        "Set KEYCLOAK_PUBLIC_URL + KEYCLOAK_REALM in secrets_app.py for prod auth"
-    )
+    fail("AUTH_SECRET_KEY blank with DEV_AUTH_BYPASS off", "config.py refuses to start like this")
 
 # ---------------------------------------------------------------------------
 print(f"\n2. Data Directory")
@@ -156,30 +151,21 @@ except Exception as e:
 print(f"\n5. LLM (Anthropic API)")
 print(SEP2)
 
-has_creds = config.ANTHROPIC_API_KEY or config.ANTHROPIC_AUTH_TOKEN
-if not has_creds:
-    skip("Anthropic API call", "no credentials -- fix step 1 first")
+if not config.ANTHROPIC_API_KEY:
+    skip("Anthropic API call", "no API key -- fix step 1 first")
 else:
-    mode = config.ANTHROPIC_AUTH_MODE
     try:
         import anthropic
-        if config.ANTHROPIC_API_KEY:
-            client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        else:
-            client = anthropic.Anthropic(auth_token=config.ANTHROPIC_AUTH_TOKEN)
+        client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=16,
             messages=[{"role": "user", "content": "reply with the single word: ok"}],
         )
         reply = msg.content[0].text.strip()
-        ok(f"Anthropic API call succeeded [{mode}] -- reply: '{reply}'")
+        ok(f"Anthropic API call succeeded -- reply: '{reply}'")
     except anthropic.AuthenticationError:
-        if mode == "oauth":
-            fail("Claude Code token expired",
-                 "Run any `claude` command in your terminal to refresh, then retry")
-        else:
-            fail("Anthropic API key invalid", "Check the key at console.anthropic.com")
+        fail("Anthropic API key invalid", "Check the key at console.anthropic.com")
     except anthropic.RateLimitError:
         warn("Rate limit hit", "Credentials are valid but you are rate-limited")
     except Exception as e:

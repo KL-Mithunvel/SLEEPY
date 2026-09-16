@@ -39,50 +39,16 @@ SYSTEM_PROMPT_PATH = PROMPTS_DIR / "SystemPrompt.MD"          # hot-reloaded per
 # ---------------------------------------------------------------------------
 # AI / LLM
 # ---------------------------------------------------------------------------
-import json as _json
-
-def _load_claude_code_token() -> tuple[str, str] | tuple[None, None]:
-    """
-    Read Claude Code's OAuth credentials from ~/.claude/.credentials.json.
-    Returns (token, "oauth") if the file exists and token is present,
-    else (None, None).  Expiry is not enforced here — Claude Code refreshes
-    the file automatically while it is running.
-    """
-    import time as _time
-    try:
-        creds_path = Path.home() / ".claude" / ".credentials.json"
-        if not creds_path.exists():
-            return None, None
-        data = _json.loads(creds_path.read_text(encoding="utf-8"))
-        oauth = data.get("claudeAiOauth", {})
-        token = oauth.get("accessToken", "")
-        expires_at_ms = oauth.get("expiresAt", 0)
-        if not token:
-            return None, None
-        now_ms = _time.time() * 1000
-        if expires_at_ms and now_ms > expires_at_ms:
-            # Expired — warn but still return it; caller handles retry
-            import logging as _log
-            _log.getLogger(__name__).warning(
-                "Claude Code OAuth token appears expired. Run any `claude` command to refresh."
-            )
-        return token, "oauth"
-    except Exception:
-        return None, None
-
-# Accept an explicit API key (sk-ant-api03-...) first; fall back to Claude Code OAuth.
+# One credential for every LLM path (interactive chat via the Anthropic SDK,
+# background jobs via LiteLLM, news watch via the Batches API): a real API key.
+# The old fallback that borrowed the personal Claude Code OAuth token from
+# ~/.claude/.credentials.json is gone — it was outside Claude Code's terms of
+# use, and only the chat path honoured it anyway, so briefings/goal planning/
+# news watch silently failed in dev whenever it was in effect.
 ANTHROPIC_API_KEY: str = _get("ANTHROPIC_API_KEY") or _get("CLAUDE_API_KEY", "")
 CLAUDE_API_KEY: str = ANTHROPIC_API_KEY  # backward-compat alias
 
-# OAuth token from Claude Code credentials file (used when API key is absent)
-_cc_token, _cc_mode = (None, None) if ANTHROPIC_API_KEY else _load_claude_code_token()
-ANTHROPIC_AUTH_TOKEN: str = _cc_token or ""   # non-empty means OAuth mode
-ANTHROPIC_AUTH_MODE: str  = _cc_mode or ("apikey" if ANTHROPIC_API_KEY else "")
-
-# OAuth (Claude Code) mode is restricted to Haiku via direct API; Sonnet requires an API key.
-# Allow explicit override via LLM_DEFAULT_MODEL in env/secrets.
-_model_fallback = "claude-haiku-4-5-20251001" if (_cc_token and not ANTHROPIC_API_KEY) else "claude-sonnet-4-6"
-LLM_DEFAULT_MODEL: str    = _get("LLM_DEFAULT_MODEL", _model_fallback)
+LLM_DEFAULT_MODEL: str    = _get("LLM_DEFAULT_MODEL", "claude-sonnet-4-6")
 LLM_MAX_CONTEXT_CHUNKS: int = int(_get("LLM_MAX_CONTEXT_CHUNKS", 8))
 LLM_MAX_TOKENS: int         = int(_get("LLM_MAX_TOKENS", 4096))
 
@@ -103,11 +69,8 @@ AUTH_TOKEN_TTL_DAYS: int = int(_get("AUTH_TOKEN_TTL_DAYS", 7))
 # that gracefully.
 GEOIP_DB_PATH: str = _get("GEOIP_DB_PATH", str(_REPO_ROOT / "geoip" / "dbip-city-lite.mmdb"))
 
-# Explicit prod flag — deliberately NOT inferred from KEYCLOAK_PUBLIC_URL being set,
-# since secrets_app.py commonly has real Keycloak values filled in well before the
-# app is actually deployed (e.g. while still running locally with DEV_AUTH_BYPASS=1).
-# Must be set to "production" explicitly (docker-compose.yml does this) for the
-# hard-fail guards below to engage.
+# Explicit prod flag. Must be set to "production" explicitly (docker-compose.yml
+# does this) for the prod-only hard-fail guards below to engage.
 APP_ENV: str = str(_get("APP_ENV", "development")).strip().lower()
 IS_PROD: bool = APP_ENV in ("prod", "production")
 
@@ -119,14 +82,24 @@ if IS_PROD and DEV_AUTH_BYPASS:
 
 if IS_PROD and not ANTHROPIC_API_KEY:
     raise RuntimeError(
-        "APP_ENV=production but no ANTHROPIC_API_KEY is set — refusing to start with the "
-        "personal Claude Code OAuth token fallback in prod. Set ANTHROPIC_API_KEY."
+        "APP_ENV=production but no ANTHROPIC_API_KEY is set — refusing to start. "
+        "Set ANTHROPIC_API_KEY in secrets_app.py or the environment."
     )
 
-if IS_PROD and not AUTH_SECRET_KEY:
+# Independent of APP_ENV: whenever real logins are in play (bypass off), a blank
+# signing key must never be accepted. PyJWT refuses an empty HMAC key, so this
+# would otherwise surface as every login 500ing rather than as a clear message
+# — and a forgotten APP_ENV must not be the only thing standing between a
+# misconfigured box and a broken auth layer.
+if not DEV_AUTH_BYPASS and not AUTH_SECRET_KEY:
     raise RuntimeError(
-        "APP_ENV=production but no AUTH_SECRET_KEY is set — refusing to start, since an "
-        "empty HS256 signing key would let anyone forge a valid login token. Generate one "
+        "DEV_AUTH_BYPASS is off but AUTH_SECRET_KEY is blank — refusing to start. Generate one "
+        "via: python -c \"import secrets; print(secrets.token_hex(32))\" and set it in "
+        "secrets_app.py (or set DEV_AUTH_BYPASS=1 for local development)."
+    )
+if AUTH_SECRET_KEY and len(AUTH_SECRET_KEY) < 32:
+    raise RuntimeError(
+        "AUTH_SECRET_KEY is too short (< 32 chars) to be a safe HS256 signing key. Generate one "
         "via: python -c \"import secrets; print(secrets.token_hex(32))\""
     )
 
@@ -180,14 +153,6 @@ O365_SENDER_NAME: str  = _get("O365_SENDER_NAME", "PMA Bot")
 # Destination address for scheduled digests (morning briefing + deadlines) — distinct
 # from O365_MAILBOX, which is the bot's send-from mailbox.
 USER_EMAIL: str = _get("USER_EMAIL", "")
-
-# ---------------------------------------------------------------------------
-# MCP server
-# ---------------------------------------------------------------------------
-MCP_API_KEY: str           = _get("MCP_API_KEY", "")
-MCP_USER: str              = _get("MCP_USER", "admin")
-MCP_OAUTH_CLIENT_ID: str   = _get("MCP_OAUTH_CLIENT_ID", "pma-mcp")
-MCP_OAUTH_CLIENT_SECRET: str = _get("MCP_OAUTH_CLIENT_SECRET", "")
 
 # ---------------------------------------------------------------------------
 # Worker / indexing

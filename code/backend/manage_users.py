@@ -65,14 +65,17 @@ def reset_password(username: str):
 
     conn = local_db.get_db()
     try:
+        # token_version bump = every token issued under the old password is
+        # dead immediately, not in up to AUTH_TOKEN_TTL_DAYS.
         cur = conn.execute(
-            "UPDATE users SET password_hash = ? WHERE username = ?", (password_hash, username)
+            "UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE username = ?",
+            (password_hash, username),
         )
         conn.commit()
         if cur.rowcount == 0:
             print(f"No such user: {username}", file=sys.stderr)
             sys.exit(1)
-        print(f"Password updated for {username}")
+        print(f"Password updated for {username} (all existing sessions signed out)")
     finally:
         local_db.return_db(conn)
 

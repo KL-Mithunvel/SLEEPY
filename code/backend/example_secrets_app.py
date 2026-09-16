@@ -31,14 +31,6 @@ O365_SENDER_NAME   = "PMA Bot"       # Display name in From: field
 USER_EMAIL         = ""              # Where scheduled digests (briefing + deadlines) are sent
 
 # ---------------------------------------------------------------------------
-# MCP server (leave blank to disable)
-# ---------------------------------------------------------------------------
-MCP_API_KEY           = ""           # Static key for X-API-Key header auth
-MCP_USER              = "admin"      # Username mapped to MCP_API_KEY
-MCP_OAUTH_CLIENT_ID   = "pma-mcp"
-MCP_OAUTH_CLIENT_SECRET = ""
-
-# ---------------------------------------------------------------------------
 # Worker / indexing
 # ---------------------------------------------------------------------------
 INDEX_SYNC_INTERVAL_SEC = 300        # How often (s) to sync ChromaDB vs MD files

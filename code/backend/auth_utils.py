@@ -87,11 +87,12 @@ def verify_password(password: str, password_hash: str) -> bool:
 # Self-issued JWT (HS256) — no external identity provider
 # ---------------------------------------------------------------------------
 
-def issue_token(username: str, role: str) -> str:
+def issue_token(username: str, role: str, token_version: int = 0) -> str:
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
         "sub": username,
         "role": role,
+        "ver": int(token_version),
         "jti": uuid.uuid4().hex,
         "iat": now,
         "exp": now + datetime.timedelta(days=config.AUTH_TOKEN_TTL_DAYS),
@@ -99,24 +100,77 @@ def issue_token(username: str, role: str) -> str:
     return jwt.encode(payload, config.AUTH_SECRET_KEY, algorithm="HS256")
 
 
+def revoke_all_tokens(conn, username: str) -> None:
+    """
+    Invalidate every token ever issued to `username` by bumping their
+    token_version — tokens carry the version they were minted with and
+    validate_token rejects any that no longer match. Used by logout and
+    password reset (stateless JWTs can't otherwise be recalled).
+    """
+    conn.execute(
+        "UPDATE users SET token_version = token_version + 1 WHERE username = ?",
+        (username,),
+    )
+    conn.commit()
+
+
+# A real scrypt hash of a throwaway password, verified on the unknown-username
+# path so a miss costs the same time as a wrong password — otherwise response
+# timing reveals which usernames exist.
+_DUMMY_HASH = generate_password_hash("sleepy-dummy-password-for-timing")
+
+
+def verify_login(row, password: str) -> bool:
+    """Constant-effort credential check: always runs exactly one hash verify."""
+    if row is None:
+        check_password_hash(_DUMMY_HASH, password)
+        return False
+    return check_password_hash(row["password_hash"], password)
+
+
 # ---------------------------------------------------------------------------
 # Brute-force lockout — reuses login_events, no separate attempts table
 # ---------------------------------------------------------------------------
 
-LOCKOUT_MAX_ATTEMPTS = 5
+LOCKOUT_MAX_ATTEMPTS = 5          # per (username, client IP) pair
+LOCKOUT_IP_MAX_ATTEMPTS = 20      # per client IP across all usernames
 LOCKOUT_WINDOW_MINUTES = 15
 
 
-def is_locked_out(conn, username: str) -> bool:
-    row = conn.execute(
+def is_locked_out(conn, username: str, ip_address: str | None = None) -> bool:
+    """
+    Locked out when, within the window, either:
+      - this (username, ip) pair has LOCKOUT_MAX_ATTEMPTS failures, or
+      - this ip has LOCKOUT_IP_MAX_ATTEMPTS failures against any usernames.
+
+    Keyed on the pair rather than the bare username so an outsider who knows
+    the username can't lock the real owner out from a different address
+    just by sending five wrong passwords every fifteen minutes.
+    """
+    window = f"-{LOCKOUT_WINDOW_MINUTES} minutes"
+    ip = ip_address or ""
+    pair = conn.execute(
         """
         SELECT COUNT(*) AS n FROM login_events
         WHERE username = ? AND success = 0
+          AND COALESCE(ip_address, '') = ?
           AND created_at >= datetime('now', 'localtime', ?)
         """,
-        (username, f"-{LOCKOUT_WINDOW_MINUTES} minutes"),
+        (username, ip, window),
     ).fetchone()
-    return row["n"] >= LOCKOUT_MAX_ATTEMPTS
+    if pair["n"] >= LOCKOUT_MAX_ATTEMPTS:
+        return True
+    if not ip:
+        return False
+    by_ip = conn.execute(
+        """
+        SELECT COUNT(*) AS n FROM login_events
+        WHERE success = 0 AND ip_address = ?
+          AND created_at >= datetime('now', 'localtime', ?)
+        """,
+        (ip, window),
+    ).fetchone()
+    return by_ip["n"] >= LOCKOUT_IP_MAX_ATTEMPTS
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +209,24 @@ def validate_token():
     role = payload.get("role")
     username = payload.get("sub")
     if role not in config_rbac.ROLES or not username:
+        return jsonify({"error": "Invalid token"}), 401
+
+    # Revocation check — the token's version must still match the user's
+    # current one (logout / password reset bump it), and the account must
+    # still exist. Role is taken from the DB, not the token, so a role change
+    # takes effect without waiting for the old token to expire.
+    import local_db
+    conn = local_db.get_db()
+    try:
+        row = conn.execute(
+            "SELECT role, token_version FROM users WHERE username = ?", (username,)
+        ).fetchone()
+    finally:
+        local_db.return_db(conn)
+    if row is None or int(payload.get("ver", -1)) != int(row["token_version"]):
+        return jsonify({"error": "Token revoked"}), 401
+    role = row["role"]
+    if role not in config_rbac.ROLES:
         return jsonify({"error": "Invalid token"}), 401
 
     g.user = {

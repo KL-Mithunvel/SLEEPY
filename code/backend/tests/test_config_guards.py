@@ -33,7 +33,8 @@ def test_prod_with_dev_auth_bypass_refuses_to_start():
 def test_prod_without_api_key_refuses_to_start():
     result = _run_import({
         "APP_ENV": "production", "DEV_AUTH_BYPASS": "0",
-        "ANTHROPIC_API_KEY": "", "CLAUDE_API_KEY": "", "SQLITE_DB_PATH": ":memory:",
+        "ANTHROPIC_API_KEY": "", "CLAUDE_API_KEY": "", "AUTH_SECRET_KEY": "f" * 64,
+        "SQLITE_DB_PATH": ":memory:",
     })
     assert result.returncode != 0
     assert "ANTHROPIC_API_KEY" in result.stderr
@@ -42,9 +43,19 @@ def test_prod_without_api_key_refuses_to_start():
 def test_prod_with_bypass_off_and_api_key_starts_cleanly():
     result = _run_import({
         "APP_ENV": "production", "DEV_AUTH_BYPASS": "0",
-        "ANTHROPIC_API_KEY": "sk-ant-fake", "SQLITE_DB_PATH": ":memory:",
+        "ANTHROPIC_API_KEY": "sk-ant-fake", "AUTH_SECRET_KEY": "f" * 64,
+        "SQLITE_DB_PATH": ":memory:",
     })
     assert result.returncode == 0, result.stderr
+
+
+def test_prod_without_auth_secret_refuses_to_start():
+    result = _run_import({
+        "APP_ENV": "production", "DEV_AUTH_BYPASS": "0",
+        "ANTHROPIC_API_KEY": "sk-ant-fake", "AUTH_SECRET_KEY": "", "SQLITE_DB_PATH": ":memory:",
+    })
+    assert result.returncode != 0
+    assert "AUTH_SECRET_KEY" in result.stderr
 
 
 def test_dev_env_with_bypass_and_no_api_key_starts_cleanly():

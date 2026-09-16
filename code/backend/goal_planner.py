@@ -171,19 +171,22 @@ def _commit_goal_planning(data_root: str, count: int) -> None:
         from datetime import datetime, timezone, timedelta as td
         _IST = timezone(td(hours=5, minutes=30))
         ts = datetime.now(_IST).strftime("%Y-%m-%d")
+        import md_editor
         try:
             repo = git.Repo(data_root, search_parent_directories=False)
         except git.InvalidGitRepositoryError:
             return
-        repo.git.add(A=True)
-        if not repo.git.status("--porcelain").strip():
-            return
-        author = git.Actor("Arivu Baalan", "arivu@smtw.in")
-        repo.index.commit(
-            f"goal-planning: updated {count} project plan(s) ({ts})",
-            author=author,
-            committer=author,
-        )
+        with md_editor.corpus_git_lock(data_root):
+            md_editor.ensure_corpus_gitignore(data_root)
+            repo.git.add(A=True)
+            if not repo.git.status("--porcelain").strip():
+                return
+            author = md_editor.ai_actor()
+            repo.index.commit(
+                f"goal-planning: updated {count} project plan(s) ({ts})",
+                author=author,
+                committer=author,
+            )
         logger.info("goal_planner: committed %d update(s)", count)
     except Exception:
         logger.warning("goal_planner: git commit failed (files updated on disk)")

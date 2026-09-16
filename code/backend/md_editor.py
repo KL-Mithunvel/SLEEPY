@@ -10,15 +10,21 @@ Public API:
     validate_edit(rel_path, new_content)           → raises ValueError on policy violation
     compute_diff(original, new_content, rel_path)  → unified diff string
     propose_edit(rel_path, new_content, summary, conn) → dict with event_id + diff
-    apply_edit(event_id, conn)                     → commit sha
+    apply_edit(event_id, conn)                     → commit sha (EditConflict if file changed since proposal)
     reject_edit(event_id, conn)                    → None
+    corpus_git_lock()                              → context manager serialising commits across processes
+    ensure_corpus_gitignore()                      → keeps db/ out of the corpus repo
+    ai_actor()                                     → the git.Actor for every AI/background commit
 """
 
+import contextlib
 import difflib
+import hashlib
 import json
 import logging
 import os
 import sqlite3
+import time
 
 import git
 
@@ -28,6 +34,106 @@ logger = logging.getLogger(__name__)
 
 # Maximum new content size the AI is allowed to write in a single edit.
 _MAX_EDIT_BYTES = 512 * 1024  # 512 KB
+
+# Cross-process git lock — the web process (this module, project_editor) and
+# the worker (task_handlers/goal_planner/housekeeping) all commit to the same
+# corpus repo. Two concurrent commits collide on .git/index.lock and one of
+# them 500s, so every commit site takes this lock first.
+_GIT_LOCK_NAME = ".sleepy-git.lock"
+_GIT_LOCK_TIMEOUT_SEC = 30
+_GIT_LOCK_STALE_SEC = 300
+
+# Derived app state that must never be committed into the corpus history —
+# db/ holds the SQLite DB (password hashes, every ai_events row / chat log),
+# the Chroma index and news-watch dedup state.
+_CORPUS_GITIGNORE_LINES = ("db/", "*.db", "*.db-shm", "*.db-wal", "*.sqlite3")
+
+
+class EditConflict(ValueError):
+    """The file changed on disk after the edit was proposed — applying would
+    silently discard whatever wrote it (a nightly job, a quick-capture, the
+    Projects editor). Callers surface this as 409 so the user can re-propose."""
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _read_current(abs_path: str) -> str | None:
+    """Current file text, or None if the file doesn't exist."""
+    if not os.path.isfile(abs_path):
+        return None
+    with open(abs_path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+@contextlib.contextmanager
+def corpus_git_lock(data_root: str | None = None):
+    """
+    Serialise git operations on the corpus repo across processes. Uses an
+    O_EXCL lock file (works on Windows and Linux, no extra dependency); a lock
+    older than _GIT_LOCK_STALE_SEC is treated as abandoned by a crashed process.
+    """
+    root = data_root or config.USER_DATA_ROOT
+    lock_path = os.path.join(root, _GIT_LOCK_NAME)
+    deadline = time.monotonic() + _GIT_LOCK_TIMEOUT_SEC
+    fd = None
+    while True:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - os.path.getmtime(lock_path)
+            except OSError:
+                age = 0
+            if age > _GIT_LOCK_STALE_SEC:
+                logger.warning("corpus_git_lock: removing stale lock (%.0fs old)", age)
+                with contextlib.suppress(OSError):
+                    os.remove(lock_path)
+                continue
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"Timed out waiting for corpus git lock at {lock_path}")
+            time.sleep(0.2)
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+        with contextlib.suppress(OSError):
+            os.remove(lock_path)
+
+
+def ensure_corpus_gitignore(data_root: str | None = None) -> bool:
+    """
+    Make sure the corpus repo ignores db/ (and this module's lock file) before
+    any `git add -A`. Returns True if the .gitignore was created or extended.
+    Belt-and-braces alongside the checked-in data/klm/.gitignore: a fresh
+    data root on a new machine has no .gitignore at all.
+    """
+    root = data_root or config.USER_DATA_ROOT
+    path = os.path.join(root, ".gitignore")
+    existing = ""
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8", errors="replace") as f:
+            existing = f.read()
+    present = {line.strip() for line in existing.splitlines()}
+    missing = [l for l in (*_CORPUS_GITIGNORE_LINES, _GIT_LOCK_NAME) if l not in present]
+    if not missing:
+        return False
+    with open(path, "a", encoding="utf-8") as f:
+        if existing and not existing.endswith("\n"):
+            f.write("\n")
+        f.write("# Derived app state — never part of the corpus history (added by md_editor)\n")
+        f.write("\n".join(missing) + "\n")
+    logger.info("ensure_corpus_gitignore: added %s to %s", missing, path)
+    return True
+
+
+def ai_actor() -> git.Actor:
+    """The one identity every AI/background commit into the corpus repo uses."""
+    return git.Actor("Arivu Baalan", "arivu@smtw.in")
 
 
 # ---------------------------------------------------------------------------
@@ -154,23 +260,22 @@ def propose_edit(
     norm = rel_path.replace("\\", "/").lstrip("/")
     abs_path = os.path.join(config.USER_DATA_ROOT, norm)
 
-    if os.path.isfile(abs_path):
-        with open(abs_path, encoding="utf-8", errors="replace") as f:
-            original = f.read()
-        is_new = False
-    else:
-        original = ""
-        is_new = True
+    current = _read_current(abs_path)
+    is_new = current is None
+    original = current or ""
 
     diff = compute_diff(original, new_content, norm)
 
     # Store the pending edit payload in the diff column as JSON so apply_edit
     # can retrieve everything needed without touching the filesystem again.
+    # base_hash records what the file looked like at proposal time so apply_edit
+    # can refuse to clobber a file something else wrote in the meantime.
     payload = json.dumps({
         "rel_path": norm,
         "new_content": new_content,
         "summary": summary,
         "diff": diff,
+        "base_hash": None if is_new else _content_hash(original),
     })
 
     cur = conn.execute(
@@ -198,7 +303,8 @@ def apply_edit(event_id: int, conn: sqlite3.Connection) -> str:
     Apply a pending AI edit (accepted=NULL) to the filesystem and commit.
 
     Returns the git commit SHA.
-    Raises ValueError if no pending edit exists for event_id.
+    Raises ValueError if no pending edit exists for event_id, or EditConflict
+    (a ValueError subclass) if the file changed on disk since it was proposed.
     """
     row = conn.execute(
         "SELECT diff FROM ai_events WHERE id = ? AND event_type = 'md_edit' AND accepted IS NULL",
@@ -216,21 +322,36 @@ def apply_edit(event_id: int, conn: sqlite3.Connection) -> str:
     validate_edit(norm, new_content)
 
     abs_path = os.path.join(config.USER_DATA_ROOT, norm)
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-    with open(abs_path, "w", encoding="utf-8") as f:
-        f.write(new_content)
 
-    # Git commit
-    repo = _get_repo()
-    rel_to_repo = os.path.relpath(abs_path, config.USER_DATA_ROOT)
-    repo.index.add([rel_to_repo])
-    author = git.Actor("Arivu Baalan", "arivu@smtw.in")
-    commit = repo.index.commit(
-        f"AI: {summary}",
-        author=author,
-        committer=author,
-    )
-    sha = commit.hexsha
+    with corpus_git_lock():
+        # Stale-proposal guard: the file must still be what the diff was computed
+        # against. Only enforced for proposals that recorded a base_hash (older
+        # pending rows written before this field existed apply as before).
+        if "base_hash" in payload:
+            current = _read_current(abs_path)
+            current_hash = None if current is None else _content_hash(current)
+            if current_hash != payload["base_hash"]:
+                raise EditConflict(
+                    f"{norm} changed on disk after this edit was proposed — "
+                    "discard it and ask again so the diff is computed against the current file"
+                )
+
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+        with open(abs_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+        # Git commit
+        repo = _get_repo()
+        ensure_corpus_gitignore()
+        rel_to_repo = os.path.relpath(abs_path, config.USER_DATA_ROOT)
+        repo.index.add([rel_to_repo])
+        author = ai_actor()
+        commit = repo.index.commit(
+            f"AI: {summary}",
+            author=author,
+            committer=author,
+        )
+        sha = commit.hexsha
 
     conn.execute(
         "UPDATE ai_events SET accepted = 1 WHERE id = ?",

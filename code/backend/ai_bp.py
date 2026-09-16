@@ -353,6 +353,10 @@ def edit_confirm(event_id: int):
     db = _db()
     try:
         sha = md_editor.apply_edit(event_id, db)
+    except md_editor.EditConflict as exc:
+        # File changed since the diff was computed — refuse rather than clobber.
+        # The proposal stays pending; the UI's Discard button rejects it.
+        return jsonify({"error": str(exc)}), 409
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 404
     return jsonify({"committed": True, "sha": sha})

@@ -136,16 +136,6 @@ def _chunk_by_headings(content: str, rel_path: str, file_hash: str) -> list[dict
     return chunks
 
 
-if __name__ == "__main__":
-    import local_db
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    local_db.init_db()
-    conn = local_db.get_db()
-    try:
-        n = index_all(conn)
-        print(f"Indexed {n} chunks.")
-    finally:
-        local_db.return_db(conn)
 def _walk_md_files(data_root: str) -> list[str]:
     """Return absolute paths of all .md files under data_root, excluding the db/ subtree."""
     db_dir = os.path.join(data_root, "db")
@@ -313,3 +303,18 @@ def query(text: str, k: int = 5) -> list[dict]:
             "score": round(1.0 - dist, 4),
         })
     return chunks
+
+
+# The script entry point must sit below every definition it calls — it used to
+# live mid-file above index_all(), so `python md_indexer.py` (run-md-index.bat)
+# died with NameError before indexing anything.
+if __name__ == "__main__":
+    import local_db
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    local_db.init_db()
+    conn = local_db.get_db()
+    try:
+        n = index_all(conn)
+        print(f"Indexed {n} chunks.")
+    finally:
+        local_db.return_db(conn)

@@ -43,6 +43,14 @@ def _drain_once():
                 logger.info("Task id=%d done", task["id"])
             except Exception as exc:
                 logger.exception("Task id=%d failed: %s", task["id"], exc)
+                # Handlers never commit (the worker owns the transaction), so
+                # anything a failed handler wrote is still uncommitted here —
+                # drop it rather than letting mark_failed's commit sweep in a
+                # half-finished DB state.
+                try:
+                    conn.rollback()
+                except Exception:
+                    logger.exception("Task id=%d rollback failed", task["id"])
                 task_queue.mark_failed(conn, task["id"], str(exc))
     finally:
         local_db.return_db(conn)

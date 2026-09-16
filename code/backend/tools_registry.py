@@ -17,6 +17,11 @@ from llm import Tool
 
 _ALLOWED_EMAIL_DOMAIN = "@smtw.in"
 
+# The LLM's regex is untrusted input into Python's backtracking `re` engine
+# (no timeout). A length cap doesn't make catastrophic patterns impossible,
+# but it removes the room needed to build one and keeps honest searches intact.
+_MAX_GREP_PATTERN_LEN = 200
+
 
 def _is_allowed_email_recipient(to: str) -> bool:
     """
@@ -38,6 +43,8 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
     data_root = config.USER_DATA_ROOT
     src_root = str(config.SRC_ROOT)
 
+    db_dir = os.path.normpath(os.path.join(data_root, "db"))
+
     def _safe_path(base: str, rel_path: str) -> str:
         norm = rel_path.replace("\\", "/").lstrip("/")
         abs_path = os.path.normpath(os.path.join(base, norm))
@@ -46,24 +53,47 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
             raise ValueError(f"Path outside boundary: {rel_path!r}")
         return abs_path
 
+    def _safe_corpus_md(rel_path: str) -> str:
+        """
+        Read-side twin of md_editor.validate_path: inside the data root, not
+        under db/ (SQLite with password hashes + chat logs, Chroma index,
+        news-watch state), and a .md file. The chat context contains text
+        pulled from the public web, so every read tool must assume the
+        request may be an injected one.
+        """
+        abs_path = _safe_path(data_root, rel_path)
+        if abs_path.startswith(db_dir + os.sep) or abs_path == db_dir:
+            raise ValueError(f"db/ is internal app state and not readable: {rel_path!r}")
+        if not abs_path.lower().endswith(".md"):
+            raise ValueError(f"Only .md corpus files are readable: {rel_path!r}")
+        return abs_path
+
+    def _is_under_db(path: str) -> bool:
+        p = os.path.normpath(path)
+        return p.startswith(db_dir + os.sep) or p == db_dir
+
     def h_load_skill(inp: dict) -> str:
         return skills.get_skill_content(inp["name"])
 
     def h_grep(inp: dict) -> str:
         pattern = inp["pattern"]
+        if len(pattern) > _MAX_GREP_PATTERN_LEN:
+            return f"[error: pattern longer than {_MAX_GREP_PATTERN_LEN} chars — simplify it]"
         search_dir = data_root
         if inp.get("path"):
             try:
                 search_dir = _safe_path(data_root, inp["path"])
             except ValueError as e:
                 return f"[error: {e}]"
+            if _is_under_db(search_dir):
+                return "[error: db/ is internal app state and not searchable]"
         try:
             regex = re.compile(pattern, re.IGNORECASE)
         except re.error as e:
             return f"[invalid regex: {e}]"
         results = []
         for root, dirs, files in os.walk(search_dir):
-            dirs.sort()
+            dirs[:] = sorted(d for d in dirs if not _is_under_db(os.path.join(root, d)))
             for fname in sorted(files):
                 if not fname.endswith(".md"):
                     continue
@@ -82,7 +112,7 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
 
     def h_read_file(inp: dict) -> str:
         try:
-            abs_path = _safe_path(data_root, inp["path"])
+            abs_path = _safe_corpus_md(inp["path"])
         except ValueError as e:
             return f"[error: {e}]"
         if not os.path.isfile(abs_path):

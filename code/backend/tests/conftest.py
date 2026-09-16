@@ -29,3 +29,30 @@ def client(app):
 def owner_client(client):
     """Test client that presents as the admin role (dev bypass sets this automatically)."""
     return client
+
+
+@pytest.fixture()
+def create_user(app):
+    """
+    Insert (or replace) a row in `users`; returns (username, password, role).
+    validate_token looks the user up on every real-token request (revocation
+    check via token_version), so any test that mints a token with
+    issue_token() for a non-bypass request must create the matching user first.
+    """
+    import auth_utils
+    import local_db
+
+    def _create(username, password="pw-for-tests-only", role="user"):
+        conn = local_db.get_db()
+        try:
+            conn.execute("DELETE FROM users WHERE username = ?", (username,))
+            conn.execute(
+                "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                (username, auth_utils.hash_password(password), role),
+            )
+            conn.commit()
+        finally:
+            local_db.return_db(conn)
+        return username, password, role
+
+    return _create

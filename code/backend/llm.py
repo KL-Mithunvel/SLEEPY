@@ -30,7 +30,7 @@ _client: anthropic.Anthropic | None = None
 
 
 def reset_client() -> None:
-    """Force re-read of credentials on the next LLM call (e.g. after token refresh)."""
+    """Force re-read of credentials on the next LLM call (e.g. after a key change)."""
     global _client
     _client = None
 
@@ -38,17 +38,12 @@ def reset_client() -> None:
 def _get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
-        if config.ANTHROPIC_API_KEY:
-            _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
-        elif config.ANTHROPIC_AUTH_TOKEN:
-            # Claude Code OAuth token (sk-ant-oat01-...) — personal Claude.ai subscription
-            _client = anthropic.Anthropic(auth_token=config.ANTHROPIC_AUTH_TOKEN)
-        else:
+        if not config.ANTHROPIC_API_KEY:
             raise RuntimeError(
-                "No Anthropic credentials found. Either set CLAUDE_API_KEY in "
-                "secrets_app.py or ensure Claude Code is installed and logged in "
-                "(~/.claude/.credentials.json)."
+                "No Anthropic API key configured — set ANTHROPIC_API_KEY (or CLAUDE_API_KEY) "
+                "in secrets_app.py or the environment."
             )
+        _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     return _client
 
 

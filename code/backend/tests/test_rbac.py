@@ -179,10 +179,11 @@ def test_auth_config_accessible_without_token(client, monkeypatch):
     assert "devBypass" in resp.get_json()
 
 
-def test_real_token_accepted(client, monkeypatch):
+def test_real_token_accepted(client, monkeypatch, create_user):
     import config
     monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
     monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret")
+    create_user("klm", role="user")
 
     from auth_utils import issue_token
     token = issue_token("klm", "user")

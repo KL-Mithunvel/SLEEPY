@@ -244,3 +244,39 @@ recommended.
 14. Chat UX: show staged-edit diff cards inline as they stream; "pending edits" badge
     so confirm-gated writes never get lost.
 15. Corpus search page (UI over `/api/ai/query`) — endpoint exists, no surface for it.
+
+---
+
+## 4. Addendum — 2026-09-16 re-audit (post AWS deploy, in-app auth)
+
+Full re-read of the repo after the Keycloak → self-issued-JWT switch and the EC2
+deploy. Status of the July items: S1/S3/S7 became moot (Keycloak removed); S2, S5,
+S6, S8, S9 and the gunicorn item were all found fixed. New findings and what was
+done about them, all in the same pass:
+
+| # | Finding | Fix |
+|---|---|---|
+| A1 | Untracked `tooling/_live_smoke_test.js` held plaintext prod passwords | File deleted; `tooling/_*` gitignored. **Both passwords must be rotated** (`manage_users.py reset-password`) — treat them as burned |
+| A2 | Corpus repo `data/klm` tracked `db/` (SQLite with password hashes + chat logs, Chroma, news state), re-committed hourly by `commit_pending` | `db/` untracked + `.gitignore` committed in the corpus repo; `md_editor.ensure_corpus_gitignore()` now runs before every `git add -A` so it can't regress. **History still contains the DB** — purge with `git filter-repo --path db --invert-paths` before any push |
+| A3 | `docker-compose.yml` mounted secrets at a path the code never imports | Mount corrected; `.dockerignore` keeps secrets out of the image |
+| A4 | Chroma server 0.5.20 vs client 1.5.9 (v1/v2 API mismatch) | Image pinned to 1.5.9 |
+| A5 | No `TZ` in containers — "IST" crons fired on UTC | `TZ=Asia/Kolkata` + tzdata |
+| A6 | 1 sync gunicorn worker blocked by SSE chat | `gthread` worker class |
+| A7 | AI `read_file`/`grep` could read `db/` and non-`.md` files (prompt-injection → hash/chat-log exfil) | Both tools now enforce the same boundary as `md_editor.validate_path`; grep pattern length capped |
+| A8 | Lockout keyed on username alone = trivial owner lock-out | Keyed on (username, IP) plus a per-IP ceiling; nginx `limit_req` on `/api/auth/login` |
+| A9 | No token revocation (logout no-op, 7-day tokens) | `users.token_version` (migration 6) carried in the JWT; logout and password reset bump it; role now read from DB per request |
+| A10 | Timing-based username enumeration | Dummy hash verify on the miss path |
+| A11 | `login_events` unbounded, attacker-fed | Username/UA truncated, 90-day prune in housekeeping |
+| A12 | `apply_edit` overwrote files changed after proposal | `base_hash` recorded at proposal; mismatch → `EditConflict` → HTTP 409 |
+| A13 | Web + worker committed to one git repo without locking | `md_editor.corpus_git_lock()` around every commit site |
+| A14 | Crashed tasks stuck in `running` forever | `claim_next` reclaims rows whose `locked_until` passed |
+| A15 | Failed handlers' partial DB writes were committed | Worker rolls back before `mark_failed` |
+| A16 | `set_status` raw-wrote/removed files, clobbered existing archive targets, crashed on root-level files | Paths validated, existing target refused, root-level refused, under the git lock |
+| A17 | Personal Claude Code OAuth token used as an API credential in dev (ToS) | Removed; one API key for every LLM path |
+| A18 | Blank `AUTH_SECRET_KEY` only guarded when `APP_ENV=production` | Guarded whenever bypass is off; minimum length 32 |
+| A19 | Capture / add-task accepted multi-line text (heading injection) | Collapsed to a single line |
+| A20 | `md_indexer.py` `__main__` above its own definitions; `docker-compose.dev.yml` invalid YAML; admin pagination 500 on bad input; Werkzeug debugger on in dev | All fixed |
+
+Still open / by design:
+- Dev runs Flask and the worker as two processes on one embedded Chroma directory (Chroma says unsupported). Documented in SETUP.md with the containerised alternative.
+- No TOTP second factor. The original requirement was for Keycloak-provided TOTP; with in-app auth it would need its own implementation.

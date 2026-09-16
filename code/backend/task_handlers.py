@@ -93,6 +93,7 @@ def _commit_data_root(message: str) -> None:
     """Stage all changes in USER_DATA_ROOT and commit. No-op if clean."""
     try:
         import git
+        import md_editor
 
         data_root = config.USER_DATA_ROOT
         try:
@@ -101,22 +102,28 @@ def _commit_data_root(message: str) -> None:
             logger.info("commit: no git repo at %s, skipping", data_root)
             return
 
-        status = repo.git.status("--porcelain")
-        if not status.strip():
-            logger.info("commit: repo is clean, nothing to commit")
-            return
+        # Serialised against the web process's own commits (md_editor.apply_edit)
+        # and guaranteed never to sweep db/ (SQLite + Chroma + news state) into
+        # the corpus history — `git add -A` is only safe once db/ is ignored.
+        with md_editor.corpus_git_lock(data_root):
+            md_editor.ensure_corpus_gitignore(data_root)
 
-        repo.git.add(A=True)
+            status = repo.git.status("--porcelain")
+            if not status.strip():
+                logger.info("commit: repo is clean, nothing to commit")
+                return
 
-        from datetime import datetime, timedelta, timezone
-        _IST = timezone(timedelta(hours=5, minutes=30))
-        ts = datetime.now(_IST).strftime("%Y-%m-%dT%H:%M IST")
-        author = git.Actor("Arivu Baalan", "arivu@smtw.in")
-        commit = repo.index.commit(
-            f"{message} — {ts}",
-            author=author,
-            committer=author,
-        )
+            repo.git.add(A=True)
+
+            from datetime import datetime, timedelta, timezone
+            _IST = timezone(timedelta(hours=5, minutes=30))
+            ts = datetime.now(_IST).strftime("%Y-%m-%dT%H:%M IST")
+            author = md_editor.ai_actor()
+            commit = repo.index.commit(
+                f"{message} — {ts}",
+                author=author,
+                committer=author,
+            )
         logger.info("commit: %s (%s)", commit.hexsha[:8], message)
     except Exception:
         logger.exception("commit_data_root failed")
@@ -139,7 +146,16 @@ def _handle_housekeeping(payload: dict, conn: sqlite3.Connection):
           AND completed_at < datetime('now', '-14 days', 'localtime')
         """
     )
-    logger.info("housekeeping: pruned old task_queue rows")
+    # login_events is written by unauthenticated requests (every failed attempt
+    # against any username) — keep 90 days for the admin view, drop the rest so
+    # a junk flood can't grow the DB without bound.
+    conn.execute(
+        """
+        DELETE FROM login_events
+        WHERE created_at < datetime('now', '-90 days', 'localtime')
+        """
+    )
+    logger.info("housekeeping: pruned old task_queue + login_events rows")
 
     # Corpus checkers → findings → inbox.md + archive old daily files
     user_nick = payload.get("user_nick") or config.USER_NICK

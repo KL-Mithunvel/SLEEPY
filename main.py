@@ -99,7 +99,10 @@ if __name__ == "__main__":
     try:
         # use_reloader=False — Werkzeug's reloader re-execs this script,
         # which would spawn duplicate frontend/worker processes.
-        app.run(debug=config.DEBUG, port=5000, use_reloader=False)
+        # use_debugger=False — DEBUG=1 keeps verbose logging/tracebacks, but the
+        # interactive Werkzeug debugger is a remote code-execution console; with
+        # DEV_AUTH_BYPASS=1 also on, nothing should offer that on any port.
+        app.run(debug=config.DEBUG, port=5000, use_reloader=False, use_debugger=False)
     finally:
         _stop_frontend()
         _stop_worker()

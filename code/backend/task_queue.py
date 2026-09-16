@@ -9,6 +9,12 @@ from datetime import datetime, timedelta
 
 BACKOFF_BASE_SEC = 30  # delay = 30 * 2^(attempts-1) on failure
 
+# How long a claimed task may sit in 'running' before another drain loop may
+# reclaim it. Generous because md_reindex over a large corpus and news-watch
+# finalisation can legitimately take a while; the only worker is
+# single-threaded so a live task can't be double-claimed inside one process.
+LOCK_MINUTES = 30
+
 
 def enqueue(conn: sqlite3.Connection, task_type: str, payload: dict, delay_seconds: int = 0) -> int:
     if delay_seconds:
@@ -28,20 +34,28 @@ def enqueue(conn: sqlite3.Connection, task_type: str, payload: dict, delay_secon
 
 
 def claim_next(conn: sqlite3.Connection) -> dict | None:
-    """Claim the next pending task. Returns the task row as a dict or None."""
+    """
+    Claim the next due task. Returns the task row as a dict or None.
+
+    Also reclaims tasks stuck in 'running' whose locked_until has passed — a
+    worker that crashed (or was killed by a container restart) mid-task would
+    otherwise leave the row 'running' forever, never retried and never failed.
+    """
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    locked_until = (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    locked_until = (datetime.now() + timedelta(minutes=LOCK_MINUTES)).strftime("%Y-%m-%d %H:%M:%S")
 
     row = conn.execute(
         """
         SELECT * FROM task_queue
-        WHERE status = 'pending'
-          AND scheduled_for <= ?
+        WHERE (
+                (status = 'pending' AND scheduled_for <= ?)
+             OR (status = 'running' AND locked_until IS NOT NULL AND locked_until <= ?)
+              )
           AND attempts < max_attempts
         ORDER BY scheduled_for
         LIMIT 1
         """,
-        (now,),
+        (now, now),
     ).fetchone()
 
     if row is None:

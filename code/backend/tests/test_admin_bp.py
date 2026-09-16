@@ -16,24 +16,31 @@ def test_login_events_accessible_with_dev_bypass(client):
     assert "total" in data
 
 
-def test_login_events_forbidden_for_user_role(client, monkeypatch):
+def test_login_events_forbidden_for_user_role(client, monkeypatch, create_user):
     import config
     monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
     monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret-32-bytes-minimum-ok!")
+    create_user("regular-joe", role="user")
 
     token = auth_utils.issue_token("regular-joe", "user")
     resp = client.get("/api/admin/login-events", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 403
 
 
-def test_login_events_allowed_for_admin_role(client, monkeypatch):
+def test_login_events_allowed_for_admin_role(client, monkeypatch, create_user):
     import config
     monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
     monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret-32-bytes-minimum-ok!")
+    create_user("real-admin", role="admin")
 
     token = auth_utils.issue_token("real-admin", "admin")
     resp = client.get("/api/admin/login-events", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
+
+
+def test_login_events_bad_pagination_is_400_not_500(client):
+    assert client.get("/api/admin/login-events?limit=abc").status_code == 400
+    assert client.get("/api/admin/login-events?offset=-x").status_code == 400
 
 
 def test_login_events_reflects_inserted_rows_most_recent_first(client):

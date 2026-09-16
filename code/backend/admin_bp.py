@@ -18,8 +18,11 @@ admin_bp = Blueprint("admin_bp", __name__, url_prefix="/api/admin")
 @admin_bp.get("/login-events")
 @auth_utils.require_perm("admin:security")
 def login_events():
-    limit = min(int(request.args.get("limit", 50)), 200)
-    offset = max(int(request.args.get("offset", 0)), 0)
+    try:
+        limit = min(max(int(request.args.get("limit", 50)), 1), 200)
+        offset = max(int(request.args.get("offset", 0)), 0)
+    except ValueError:
+        return jsonify({"error": "limit and offset must be integers"}), 400
 
     conn = local_db.get_db()
     try:

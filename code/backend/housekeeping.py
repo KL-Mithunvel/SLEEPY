@@ -443,6 +443,7 @@ def archive_old_daily(
 def _commit_archive(data_root: str, count: int) -> None:
     try:
         import git
+        import md_editor
         from datetime import datetime, timezone, timedelta as td
         _IST = timezone(td(hours=5, minutes=30))
         ts = datetime.now(_IST).strftime("%Y-%m-%d")
@@ -450,13 +451,15 @@ def _commit_archive(data_root: str, count: int) -> None:
             repo = git.Repo(data_root, search_parent_directories=False)
         except git.InvalidGitRepositoryError:
             return
-        repo.git.add(A=True)
-        author = git.Actor("Arivu Baalan", "arivu@smtw.in")
-        repo.index.commit(
-            f"archive: moved {count} old daily file(s) ({ts})",
-            author=author,
-            committer=author,
-        )
+        with md_editor.corpus_git_lock(data_root):
+            md_editor.ensure_corpus_gitignore(data_root)
+            repo.git.add(A=True)
+            author = md_editor.ai_actor()
+            repo.index.commit(
+                f"archive: moved {count} old daily file(s) ({ts})",
+                author=author,
+                committer=author,
+            )
         logger.info("archive_old_daily: committed %d move(s)", count)
     except Exception:
         logger.warning("archive_old_daily: git commit failed (files moved on disk)")

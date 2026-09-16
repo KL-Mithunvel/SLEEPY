@@ -137,6 +137,10 @@ _MIGRATIONS = [
         """,
         "CREATE INDEX IF NOT EXISTS idx_login_events_username_created ON login_events (username, created_at)",
     ]),
+    (6, "Add users.token_version for JWT revocation (logout / password reset)", [
+        "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS idx_login_events_ip_created ON login_events (ip_address, created_at)",
+    ]),
 ]
 
 

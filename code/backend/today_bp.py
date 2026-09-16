@@ -25,6 +25,17 @@ today_bp = Blueprint("today", __name__)
 
 _VALID_PRIORITIES = ("high", "medium", "low")
 _DUE_FORMAT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MAX_LINE_LEN = 1000
+
+
+def _single_line(text: str) -> str:
+    """
+    Captures and ad-hoc tasks are appended as ONE markdown list line. A pasted
+    multi-line string would otherwise inject arbitrary lines — including new
+    `## ` headings that the materialiser/housekeeping parsers key off — into
+    inbox.md or a Daily file. Collapse all whitespace runs (incl. newlines).
+    """
+    return re.sub(r"\s+", " ", text or "").strip()[:_MAX_LINE_LEN]
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +165,7 @@ def add_task():
     """
     body = request.get_json(silent=True) or {}
     project_rel_path = (body.get("project_rel_path") or "").strip()
-    text = (body.get("text") or "").strip()
+    text = _single_line(body.get("text"))
     priority = (body.get("priority") or "").strip().lower() or None
     due = (body.get("due") or "").strip() or None
 
@@ -187,7 +198,7 @@ def capture():
     Response:     {"ok": true, "line": "- [ ] ...", "sha": "abcd1234"}
     """
     body = request.get_json(silent=True) or {}
-    text = (body.get("text") or "").strip()
+    text = _single_line(body.get("text"))
     if not text:
         return jsonify({"error": "text is required"}), 400
 
