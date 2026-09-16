@@ -197,6 +197,35 @@ def return_db(conn: sqlite3.Connection):
         conn.close()
 
 
+def db_path() -> str:
+    """The resolved absolute path init_db() computed (or ':memory:' in tests)."""
+    if _db_path is None:
+        raise RuntimeError("local_db.init_db() has not been called yet")
+    return _db_path
+
+
+def backup_database(dest_path: str) -> None:
+    """
+    WAL-safe online backup via sqlite3's own backup API (not a filesystem
+    copy, which can capture a torn write mid-transaction) to `dest_path`.
+    No-op for the in-memory test DB. Caller owns retention/pruning.
+    """
+    if _db_path is None:
+        raise RuntimeError("local_db.init_db() has not been called yet")
+    if _db_path == ":memory:":
+        return
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    src = sqlite3.connect(_db_path)
+    try:
+        dst = sqlite3.connect(dest_path)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+
 # ---------------------------------------------------------------------------
 # Internal
 # ---------------------------------------------------------------------------

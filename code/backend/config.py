@@ -179,6 +179,11 @@ NEWS_TOPIC_DORMANT_DAYS: int = int(_get("NEWS_TOPIC_DORMANT_DAYS", 30))
 # being permanently excluded. Clicking excludes it immediately regardless of count.
 NEWS_MAX_RESHOW: int = int(_get("NEWS_MAX_RESHOW", 3))
 
+# Nightly SQLite backup (db_backup task) keeps this many days of history under
+# db/backups/ before pruning older files. db/ is already gitignored in the
+# corpus repo, so backups never risk landing in MD corpus git history.
+DB_BACKUP_RETENTION_DAYS: int = int(_get("DB_BACKUP_RETENTION_DAYS", 14))
+
 # Current user's nick for owner-filtering in recur files (must match owners: values in frontmatter)
 USER_NICK: str = _get("USER_NICK", "ADMIN")
 

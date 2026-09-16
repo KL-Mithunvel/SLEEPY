@@ -102,7 +102,7 @@ SLEEPY/
 │   │   ├── local_db.py        # SQLite migration engine + connection management
 │   │   ├── db_helpers.py      # row_to_dict / rows_to_list serialisation helpers
 │   │   ├── task_queue.py      # DB-backed queue: enqueue/claim/done/fail
-│   │   ├── task_handlers.py   # Dispatch table: task_type → handler fn (9 handlers — see Key Modules)
+│   │   ├── task_handlers.py   # Dispatch table: task_type → handler fn (10 handlers — see Key Modules)
 │   │   ├── worker.py          # Standalone worker: APScheduler + drain loop
 │   │   ├── scheduled_tasks.py # Cron registry (SCHEDULED_TASKS list — 8 jobs)
 │   │   ├── md_editor.py       # Confirm-gated AI edit flow: propose_edit/apply_edit/reject_edit
@@ -229,11 +229,11 @@ CLI for the two fixed accounts (`create-user`/`list-users`/`reset-password`/`del
 - `HANDLERS: dict[str, callable]` — dispatch table mapping `task_type` to `handler(payload, conn)`.
 - `dispatch(task_type, payload, conn)` — looks up and calls handler.
 - **Handlers must NOT commit** — the worker owns the transaction boundary.
-- Current handlers: `md_reindex`, `morning_briefing` (also runs `goal_planner` + emails the digest), `materialise`, `index_sync`, `commit_pending`, `housekeeping`, `news_watch_submit`, `news_watch_finalize`, `email`.
+- Current handlers: `md_reindex`, `db_backup`, `morning_briefing` (also runs `goal_planner` + emails the digest), `materialise`, `index_sync`, `commit_pending`, `housekeeping`, `news_watch_submit`, `news_watch_finalize`, `email`.
 
 ### `code/backend/scheduled_tasks.py`
 - `SCHEDULED_TASKS` — list of `{task_type, trigger, trigger_kwargs, payload, enabled?}` dicts. APScheduler in the worker reads this to register cron/interval jobs that enqueue into `task_queue`.
-- Current schedule (8 jobs): `md_reindex` 02:00 IST, `morning_briefing` 06:30 IST (deadline planning + email digest rides this), `index_sync` every 5 min, `commit_pending` hourly, `housekeeping` 23:00 IST, `materialise` 00:05 IST, `news_watch_submit` 00:00 IST, `news_watch_finalize` every 5 min.
+- Current schedule (9 jobs): `md_reindex` 02:00 IST, `db_backup` 03:15 IST, `morning_briefing` 06:30 IST (deadline planning + email digest rides this), `index_sync` every 5 min, `commit_pending` hourly, `housekeeping` 23:00 IST, `materialise` 00:05 IST, `news_watch_submit` 00:00 IST, `news_watch_finalize` every 5 min.
 
 ### `code/backend/task_scan.py`
 Deterministic (non-LLM, non-RAG) task scanning — the foundation for the Today view's click-to-check list and the morning briefing's task context. `scan_open_tasks(data_root)` — every open task across every active project (general-purpose). `scan_todays_tasks(data_root)` — **what the Today view/briefing actually use**: reads only `<OU>/Daily/<today>.md`'s `## Tasks` section, i.e. the curated list, not every project's backlog. `toggle_task(data_root, rel_path, text, conn)` — flips one `- [ ] <text>` line via `md_editor`, auto-applied (no confirm gate — the click itself is the confirmation).

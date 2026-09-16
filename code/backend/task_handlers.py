@@ -214,6 +214,52 @@ def _handle_email(payload: dict, conn: sqlite3.Connection):
 
 
 # ---------------------------------------------------------------------------
+# Backups
+# ---------------------------------------------------------------------------
+
+def _handle_db_backup(payload: dict, conn: sqlite3.Connection):
+    """
+    Nightly WAL-safe SQLite backup to db/backups/ (under the same db/ folder
+    that's already gitignored in the corpus repo), then prune anything older
+    than config.DB_BACKUP_RETENTION_DAYS. This is the SQLite half of the
+    "Layer 5 — Backup & recovery" plan in docs/SECURITY_REVIEW.md — the MD
+    corpus itself already has full history via its own git repo and doesn't
+    need a separate backup path.
+    """
+    import datetime
+    import os
+
+    import local_db
+
+    db_dir = os.path.dirname(local_db.db_path())          # .../db/sqlite
+    backup_dir = os.path.join(os.path.dirname(db_dir), "backups")  # .../db/backups
+    now = datetime.datetime.now()
+    dest = os.path.join(backup_dir, f"pma-{now.strftime('%Y%m%d-%H%M')}.db")
+
+    local_db.backup_database(dest)
+    logger.info("db_backup: wrote %s", dest)
+
+    cutoff = now - datetime.timedelta(days=config.DB_BACKUP_RETENTION_DAYS)
+    pruned = 0
+    for name in os.listdir(backup_dir):
+        if not (name.startswith("pma-") and name.endswith(".db")):
+            continue
+        path = os.path.join(backup_dir, name)
+        try:
+            mtime = datetime.datetime.fromtimestamp(os.path.getmtime(path))
+        except OSError:
+            continue
+        if mtime < cutoff:
+            try:
+                os.remove(path)
+                pruned += 1
+            except OSError:
+                logger.warning("db_backup: could not prune %s", path)
+    if pruned:
+        logger.info("db_backup: pruned %d backup(s) older than %d days", pruned, config.DB_BACKUP_RETENTION_DAYS)
+
+
+# ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
 
@@ -232,6 +278,8 @@ HANDLERS: dict[str, callable] = {
     "news_watch_finalize":  _handle_news_watch_finalize,
     # Phase 9 — Integrations
     "email":                _handle_email,
+    # Backups
+    "db_backup":            _handle_db_backup,
 }
 
 

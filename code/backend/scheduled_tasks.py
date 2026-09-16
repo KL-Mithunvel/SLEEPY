@@ -25,6 +25,18 @@ SCHEDULED_TASKS = [
     },
 
     # ------------------------------------------------------------------
+    # Nightly WAL-safe SQLite backup at 03:15 IST (db/backups/, pruned at
+    # config.DB_BACKUP_RETENTION_DAYS) — after md_reindex, well before the
+    # morning briefing
+    # ------------------------------------------------------------------
+    {
+        "task_type": "db_backup",
+        "trigger": "cron",
+        "trigger_kwargs": {"hour": 3, "minute": 15},
+        "payload": {},
+    },
+
+    # ------------------------------------------------------------------
     # Morning briefing at 06:30 IST daily
     # ------------------------------------------------------------------
     {
