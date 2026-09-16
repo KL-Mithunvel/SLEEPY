@@ -330,8 +330,8 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 ## Platform Constraints
 
 - **Dev OS:** Windows 11. Use bat wrappers in `tooling/` — never bare `uv run` or `npm` outside of wrappers when running automated commands.
-- **Prod OS:** Proxmox Ubuntu VM. Docker Compose. No Windows-specific code in any library path.
-- **Auth in dev:** Keycloak is not in `docker-compose.dev.yml`. Always run with `DEV_AUTH_BYPASS=1` locally.
+- **Prod OS:** AWS EC2 (`klm.smtw.in`), Docker Compose. Not the originally-planned Proxmox VM — see Project Overview. No Windows-specific code in any library path.
+- **Auth in dev:** Self-issued JWT auth is not exercised locally by default. Always run with `DEV_AUTH_BYPASS=1` locally.
 - **ChromaDB in dev:** `docker compose -f docker-compose.dev.yml up -d` (Phase 3+ only).
 - All backend Python is platform-neutral. `main.py` handles the Windows `vite.cmd` vs Unix `vite` binary difference.
 
@@ -339,22 +339,49 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 
 ## Deployment Notes
 
-| | Dev (Windows) | Prod (Proxmox VM) |
+| | Dev (Windows) | Prod (AWS EC2 — `klm.smtw.in`) |
 |---|---|---|
-| Entry | `python main.py` (root) | `gunicorn code/backend/app:app` |
-| Worker | `uv run python code/backend/worker.py` | Same, as a separate container/process |
-| Auth | `DEV_AUTH_BYPASS=1` | Keycloak `Office.smtw.in` realm, `pma` client |
-| DB | `data/klm/db/sqlite/pma.db` | Same path, Docker bind-mount |
-| Public URL | `localhost:5000` | `pa.mspv.app` via Caddy (auto TLS) |
+| Entry | `python main.py` (root) | `gunicorn code/backend/app:app` (Docker `backend` service) |
+| Worker | `uv run python code/backend/worker.py` | Same command, separate `worker` container |
+| Auth | `DEV_AUTH_BYPASS=1` | Self-issued JWT (`auth_utils.py`) — no external identity provider |
+| DB | `data/klm/db/sqlite/pma.db` | Same path, `pma_data` Docker volume |
+| Public URL | `localhost:5000` | `https://klm.smtw.in` via the host's own nginx + certbot |
+| Git branch | `main` | `prod` — see "Dev/Prod Environment Separation & Deploy Workflow" below |
 
-**Pre-deploy checklist:** All tests green → `main.py` boots clean locally → `uv export` requirements.txt synced → VERSION bumped → `docker compose build` succeeds → `secrets_app.py` mounted on VM.
+**Pre-deploy checklist:** All tests green → `main.py` boots clean locally → `npm run build` succeeds (frontend changes) → `main` merged into `prod` → `docker compose build` succeeds on the box → `/healthz` passes → feature spot-checked live. Full sequence in the workflow section below.
+
+---
+
+## Dev/Prod Environment Separation & Deploy Workflow
+
+*(added 2026-09-16 — hardened after a stretch of prod-only bugs: Chroma version mismatch, missing `TZ`, a DB-init call missing from `app.py` that 500'd every route in prod while dev stayed fine. Environment drift between dev and prod is the recurring failure mode this project actually has — these rules exist to close it.)*
+
+**Two branches, two purposes.**
+- `main` — the working/dev branch. Every code change lands here first.
+- `prod` — what the EC2 box actually deploys from (`git checkout prod` on the box, never `main`). Nothing reaches production except by a fast-forward merge from a `main` commit that has already passed the dev checklist. Never commit directly to `prod`, never `git push --force` it.
+
+**No live staging environment on EC2.** The box runs one Docker Compose stack on a disk-constrained instance (see Known Technical Debt) — there is no parallel "dev" container stack there. This means container/environment-shaped bugs (image pins, `TZ`, volume mounts, secrets mount paths) are only ever caught at the `prod` rebuild step. Treat that rebuild + health check as a real test gate, not a formality — it is, in practice, the only environment that has ever caught these bugs.
+
+**The standard workflow for every change, enforced with no exceptions:**
+1. Plan the change.
+2. Implement on `main`.
+3. Test in dev: `tooling/run-backend-tests.bat` green; `main.py` boots clean; `npm run build` succeeds in `code/frontend/` for any frontend change.
+4. Commit to `main`. **One commit per logical phase of work** — never bundle unrelated phases into a single commit, and never skip a commit because "it's small."
+5. Only after step 3 is fully green: merge `main` → `prod` (fast-forward only) and push `prod`.
+6. Deploy: on the box, on the `prod` branch, `git pull`, `docker compose build`, `docker compose up -d`.
+7. Verify in prod: `docker compose ps` shows every service healthy/running, `curl -sf https://klm.smtw.in/healthz` (or `http://localhost:5000/healthz` on the box) returns OK, and the specific feature that changed is spot-checked live — not just "containers are up."
+8. Only then start the next phase.
+
+**No unauthorized prod access.** Never read from or write to the live box's data (`data/klm/`, the SQLite DB, `secrets_app.py`, container filesystem, anything under `/home/ec2-user/sleepy`) without the user's explicit go-ahead in the *current* conversation — approval from an earlier session or an earlier message does not carry forward automatically. Read-only checks used purely to verify a deploy (`docker compose ps`, `/healthz`, log tails, `git status`) are fine on their own. Anything that mutates state on the box — `git pull`, `docker compose up`/`build`, `docker exec`, `docker image prune`, password resets, direct file edits — needs the user to either run it themselves or explicitly grant it for that session; do not attempt to self-grant that permission.
+
+**Rollback.** Because `prod` only ever fast-forwards from a tested `main` commit, rolling back is: on the box, `git checkout <previous prod commit>`, `docker compose build`, `docker compose up -d`. Never `git reset --hard` on either branch — history on both is shared and append-only in practice.
 
 ---
 
 ## Known Technical Debt
 
 1. `pyproject.toml` still says `name = "backend"` — should be updated to `name = "sleepy"` when renaming matters (non-urgent).
-2. Keycloak live-auth path is untested locally (only `DEV_AUTH_BYPASS=1` has been exercised). Full OIDC flow needs a live Keycloak instance during Phase 6 deploy.
+2. No live staging/parallel dev environment on EC2 — the instance's disk is already tight (10GB volume, regularly >80% used by the single prod stack) and there's no local Docker install on the dev machine to substitute a container-level test. A second EC2 instance or a disk resize would be needed to close this gap; that's a cost decision for the user, not something to build unprompted.
 
 ---
 
@@ -370,6 +397,9 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 8. **AI interaction author is always `Arivu Baalan <arivu@smtw.in>`.** GitPython must set this explicitly on every AI-initiated commit.
 9. **Thin blueprints.** Route dispatch only. Non-trivial validation/mutation in `<module>_recording.py`; state projection in `<module>_state.py`.
 10. **Test before every commit.** `tooling/run-backend-tests.bat` must pass. For frontend changes, `npm run build` in `code/frontend/` must succeed.
+11. **`main` is dev, `prod` is live — never push straight to `prod`.** Every change reaches production by a fast-forward merge from an already-tested `main` commit, deployed on the box from the `prod` branch. Full sequence in "Dev/Prod Environment Separation & Deploy Workflow" above.
+12. **No prod access without asking, every time.** A previous session's or previous message's permission to touch the live box does not carry forward. Read-only verification is always fine; anything that mutates prod state needs to be run by the user or explicitly granted in the current conversation.
+13. **Multi-phase work gets one commit per phase**, each one tested in dev and deployed/verified before the next phase starts — don't batch several phases into one commit or one deploy.
 
 ---
 
