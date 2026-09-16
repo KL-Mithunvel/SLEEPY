@@ -138,6 +138,13 @@ export const useProjectsStore = defineStore('projects', {
       this.fetchProjects()
     },
 
+    // Copies this project's task into today's curated Active Tasks list —
+    // the task's own line here is left untouched (see task_scan.promote_task).
+    async promoteTask(task) {
+      const text = task.line.replace(/^\s*-\s*\[.\]\s*/, '')
+      await apiPost('/api/today/tasks/promote', { rel_path: this.selectedPath, text })
+    },
+
     async addListItem(section, text) {
       await apiPost('/api/projects/list-item', { path: this.selectedPath, section, action: 'add', text })
       await this.fetchStructured()

@@ -144,6 +144,13 @@ async function submitNewTask() {
 const editingTask = ref(null)   // task.line of the row currently being edited
 const taskEditBuffer = reactive({ description: '', priority: '', due: '' })
 
+const promotedTasks = reactive({})   // task.line -> true, briefly, after a successful promote
+async function promoteTask(task) {
+  await store.promoteTask(task)
+  promotedTasks[task.line] = true
+  setTimeout(() => { delete promotedTasks[task.line] }, 2000)
+}
+
 function startEditTask(task) {
   editingTask.value = task.line
   taskEditBuffer.description = task.description
@@ -439,6 +446,15 @@ onMounted(() => store.fetchProjects())
                   <span class="flex-grow-1" :style="task.done ? 'text-decoration: line-through; opacity: 0.6;' : ''">{{ task.description }}</span>
                   <span v-if="task.priority" class="badge" :style="`background: ${PRIORITY_STYLES[task.priority]?.bg}; color: ${PRIORITY_STYLES[task.priority]?.color}; font-size: 0.65rem;`">{{ task.priority }}</span>
                   <span v-if="task.due" style="font-size: 0.72rem; color: var(--text-muted-custom);">{{ task.due }}</span>
+                  <button
+                    v-if="!task.done"
+                    class="btn btn-sm py-0 px-2"
+                    :class="promotedTasks[task.line] ? 'btn-outline-success' : 'btn-outline-primary'"
+                    style="font-size: 0.7rem;"
+                    :disabled="promotedTasks[task.line]"
+                    :title="promotedTasks[task.line] ? 'Added to today' : 'Copy to today\'s Active Tasks'"
+                    @click="promoteTask(task)"
+                  ><i class="bi" :class="promotedTasks[task.line] ? 'bi-check-lg' : 'bi-arrow-up-circle'"></i></button>
                   <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size: 0.7rem;" @click="startEditTask(task)"><i class="bi bi-pencil"></i></button>
                   <button class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size: 0.7rem;" @click="store.removeTask(task)"><i class="bi bi-trash"></i></button>
                 </template>
