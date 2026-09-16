@@ -51,27 +51,27 @@ def get_today():
       briefing_at   — formatted IST timestamp (DD-MM-YYYY HH:MM) or null
       tasks         — list of {rel_path, text, ou, due} — today's curated tasks
                       (from <OU>/Daily/<today>.md, not every project's backlog)
+
+    Time-based freshness: the 06:30 IST cron (morning_briefing task) is the
+    normal source of a same-day briefing, but if nobody's visited since
+    before it last ran (server was down, first deploy, etc.) the stored
+    briefing could be from a previous day. Rather than show stale content,
+    the first page load of a new day regenerates it right here — once per
+    day, not once per request, gated on the stored briefing's calendar date.
     """
     db = _db()
 
-    # Last non-voided morning briefing that has generated text
-    row = db.execute(
-        """
-        SELECT result, created_at FROM ai_events
-        WHERE event_type = 'morning_briefing' AND result IS NOT NULL AND voided = 0
-        ORDER BY created_at DESC LIMIT 1
-        """
-    ).fetchone()
+    row = _last_briefing_row(db)
 
-    briefing = None
-    briefing_at = None
-    if row:
-        briefing = row["result"]
+    if row is None or row["created_at"][:10] != datetime.now().strftime("%Y-%m-%d"):
         try:
-            dt = datetime.strptime(row["created_at"][:16], "%Y-%m-%d %H:%M")
-            briefing_at = dt.strftime("%d-%m-%Y %H:%M")
-        except (ValueError, TypeError):
-            briefing_at = row["created_at"]
+            briefing = ai_client.generate_morning_briefing(db)
+            briefing_at = datetime.now().strftime("%d-%m-%Y %H:%M")
+        except Exception:
+            logger.exception("On-demand briefing refresh failed — falling back to last stored briefing")
+            briefing, briefing_at = _format_briefing_row(row)
+    else:
+        briefing, briefing_at = _format_briefing_row(row)
 
     try:
         tasks = task_scan.scan_todays_tasks(config.USER_DATA_ROOT)
@@ -235,3 +235,26 @@ def capture():
 def _db():
     from app import get_db
     return get_db()
+
+
+def _last_briefing_row(db):
+    """Last non-voided morning briefing that has generated text, or None."""
+    return db.execute(
+        """
+        SELECT result, created_at FROM ai_events
+        WHERE event_type = 'morning_briefing' AND result IS NOT NULL AND voided = 0
+        ORDER BY created_at DESC LIMIT 1
+        """
+    ).fetchone()
+
+
+def _format_briefing_row(row):
+    """(briefing_text, formatted_DD-MM-YYYY_HH:MM) from an ai_events row, or (None, None)."""
+    if row is None:
+        return None, None
+    try:
+        dt = datetime.strptime(row["created_at"][:16], "%Y-%m-%d %H:%M")
+        briefing_at = dt.strftime("%d-%m-%Y %H:%M")
+    except (ValueError, TypeError):
+        briefing_at = row["created_at"]
+    return row["result"], briefing_at

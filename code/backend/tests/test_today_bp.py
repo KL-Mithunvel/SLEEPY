@@ -27,8 +27,25 @@ def client(app):
 # GET /api/today
 # ---------------------------------------------------------------------------
 
+def _patch_briefing_generation(monkeypatch, text="Fresh briefing text.", raise_error=False):
+    """
+    GET /api/today regenerates on-demand whenever the stored briefing isn't
+    from today (see test_today_freshness.py for that behavior in depth) — so
+    any test not specifically exercising that path must stub the LLM call
+    out, same as this file's own docstring requires for every external call.
+    """
+    import ai_client
+    if raise_error:
+        def _boom(conn):
+            raise RuntimeError("llm down")
+        monkeypatch.setattr(ai_client, "generate_morning_briefing", _boom)
+    else:
+        monkeypatch.setattr(ai_client, "generate_morning_briefing", lambda conn: text)
+
+
 def test_get_today_empty_tasks(client, monkeypatch):
     import task_scan
+    _patch_briefing_generation(monkeypatch)
     monkeypatch.setattr(task_scan, "scan_todays_tasks", lambda data_root: [])
     resp = client.get("/api/today")
     assert resp.status_code == 200
@@ -40,6 +57,7 @@ def test_get_today_empty_tasks(client, monkeypatch):
 
 def test_get_today_returns_tasks(client, monkeypatch):
     import task_scan
+    _patch_briefing_generation(monkeypatch)
     fake_tasks = [
         {"rel_path": "SMTW/Daily/2026-07-04.md", "text": "Deploy server", "ou": "SMTW", "due": "2026-07-05"},
         {"rel_path": "SMTW/Daily/2026-07-04.md", "text": "Review PR", "ou": "SMTW", "due": None},
@@ -54,10 +72,29 @@ def test_get_today_returns_tasks(client, monkeypatch):
 
 def test_get_today_task_scan_failure_returns_empty(client, monkeypatch):
     import task_scan
+    _patch_briefing_generation(monkeypatch)
     monkeypatch.setattr(task_scan, "scan_todays_tasks", lambda data_root: (_ for _ in ()).throw(RuntimeError("scan failed")))
     resp = client.get("/api/today")
     assert resp.status_code == 200
     assert resp.get_json()["tasks"] == []
+
+
+def test_get_today_regenerates_when_no_stored_briefing(client, monkeypatch):
+    import task_scan
+    monkeypatch.setattr(task_scan, "scan_todays_tasks", lambda data_root: [])
+    _patch_briefing_generation(monkeypatch, text="Freshly generated on page load.")
+    resp = client.get("/api/today")
+    assert resp.status_code == 200
+    assert resp.get_json()["briefing"] == "Freshly generated on page load."
+
+
+def test_get_today_falls_back_to_none_when_regeneration_fails_and_nothing_stored(client, monkeypatch):
+    import task_scan
+    monkeypatch.setattr(task_scan, "scan_todays_tasks", lambda data_root: [])
+    _patch_briefing_generation(monkeypatch, raise_error=True)
+    resp = client.get("/api/today")
+    assert resp.status_code == 200  # never 500s just because the on-demand refresh failed
+    assert resp.get_json()["briefing"] is None
 
 
 # ---------------------------------------------------------------------------

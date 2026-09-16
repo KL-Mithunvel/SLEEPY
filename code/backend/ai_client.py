@@ -224,14 +224,29 @@ def _load_inbox(data_root: str) -> str:
     return "\n".join(line for line in raw.splitlines() if not _CHECKED_LINE_RE.match(line))
 
 
+def _briefing_header(now=None) -> str:
+    """
+    A date/day header the LLM never has a chance to get wrong or omit —
+    computed in Python and prepended unconditionally, mandatory on every
+    briefing regardless of what the model produces. This is the "when was
+    this actually last updated" guarantee, independent of the separate
+    briefing_at metadata GET /api/today also returns.
+    """
+    from datetime import datetime as _dt
+    now = now or _dt.now()
+    return f"# Morning Briefing — {now.strftime('%A, %d-%m-%Y')} (generated {now.strftime('%H:%M')} IST)"
+
+
 def generate_morning_briefing(conn: sqlite3.Connection) -> str:
     """
     Generate today's morning briefing from a deterministic scan of all active
     projects' open tasks plus the raw inbox (for meeting/schedule visibility) —
     not fuzzy semantic search, so it can't silently miss things due to embedding
-    relevance. Logs the result to ai_events.result. Returns the briefing text.
+    relevance. Logs the result to ai_events.result. Returns the briefing text,
+    always prefixed with a deterministic date/day header (see _briefing_header).
     """
-    from datetime import date
+    from datetime import date, datetime
+    now = datetime.now()
     today = date.today().isoformat()
 
     task_summary = _build_project_task_summary(config.USER_DATA_ROOT)
@@ -251,7 +266,7 @@ def generate_morning_briefing(conn: sqlite3.Connection) -> str:
     ]
 
     resp = chat(messages, event_type="morning_briefing", conn=None)
-    result_text = resp["content"]
+    result_text = f"{_briefing_header(now)}\n\n{resp['content']}"
 
     log_ai_event(
         conn,
