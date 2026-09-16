@@ -179,6 +179,25 @@ body {
     width: 100%;
   }
 
+  /* The template hardcodes Bootstrap's `.nav.flex-column` utility class on
+     the <ul> inside <nav class="sidebar-nav"> — without this override that
+     inner list stays column-flex regardless of the row layout set on its
+     .sidebar-nav parent above, so the "bottom nav" renders as a tall
+     vertical list (each item stretched by flex:1 in a column container)
+     instead of a compact horizontal bar. Found via an actual phone-width
+     screenshot pass, not just reading the CSS — see AppSidebar.vue. */
+  .sidebar-nav > ul.nav {
+    /* Bootstrap's own .flex-column utility ships with !important, so a
+       plain override here is silently lost — matching !important is the
+       only thing that actually beats it. */
+    display: flex !important;
+    flex-direction: row !important;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
   .nav-item {
     flex: 1;
   }
@@ -196,6 +215,12 @@ body {
     font-size: 1.2rem;
   }
 
+  /* Full identity block doesn't belong in a bottom tab bar — every other
+     view already shows the signed-in user in the topbar. */
+  .sidebar-footer {
+    display: none;
+  }
+
   .app-main {
     order: 1;
     flex: 1;
@@ -203,5 +228,18 @@ body {
 
   .app-content {
     padding: 1rem 0.75rem;
+  }
+}
+
+/* ── Tablet: same layout as laptop (fixed sidebar), but with tighter
+   spacing — a 220px sidebar plus content is still comfortable at portrait
+   iPad widths (768px+), it just doesn't need laptop-width padding. ── */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .app-content {
+    padding: 1.25rem;
+  }
+
+  :root {
+    --sidebar-width: 190px;
   }
 }

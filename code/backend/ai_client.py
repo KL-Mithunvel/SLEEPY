@@ -170,6 +170,9 @@ scan of today's curated tasks (grouped by OU — these are the tasks actually qu
 today, not every open item across every project) and the raw content of their inbox \
 (quick captures, which is where meeting mentions and other free-text notes land; already- \
 resolved captures are filtered out before you see them, so everything here is still open). \
+Do not start with a title, greeting, or date/day heading of your own — a "# Morning \
+Briefing — <day>, <date>" header is already added in front of your output before it's \
+shown to anyone, so start directly with the first section heading below.
 Generate a concise morning briefing with these sections, in order:
 - ## Today's Schedule — any meetings, calls, or time-bound items you can find in the
   inbox content or task due-dates. If genuinely nothing time-bound is found, say so
@@ -266,7 +269,16 @@ def generate_morning_briefing(conn: sqlite3.Connection) -> str:
     ]
 
     resp = chat(messages, event_type="morning_briefing", conn=None)
-    result_text = f"{_briefing_header(now)}\n\n{resp['content']}"
+    llm_text = resp["content"].strip()
+    # Defense in depth: the system prompt tells the model not to add its own
+    # title/date heading, but LLM output isn't guaranteed — strip a leading
+    # one if it slips through anyway, so the mandatory header below is never
+    # duplicated (seen in practice: a real page-load screenshot caught this).
+    llm_text = re.sub(
+        r"^#{1,2}\s*(morning briefing|good morning)[^\n]*\n+",
+        "", llm_text, count=1, flags=re.IGNORECASE,
+    )
+    result_text = f"{_briefing_header(now)}\n\n{llm_text}"
 
     log_ai_event(
         conn,

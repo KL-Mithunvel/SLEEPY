@@ -74,6 +74,25 @@ def test_generate_morning_briefing_prepends_header(monkeypatch, db):
     assert "## Focus Plan" in result
 
 
+def test_generate_morning_briefing_strips_llm_own_duplicate_heading(monkeypatch, db):
+    """Seen in practice on a real page load: the model sometimes adds its own
+    '# Morning Briefing — ...' line despite the system prompt telling it not
+    to. Must not end up duplicated in the final text."""
+    import ai_client
+    monkeypatch.setattr(ai_client, "_build_project_task_summary", lambda root: "")
+    monkeypatch.setattr(ai_client, "_load_inbox", lambda root: "")
+    monkeypatch.setattr(
+        ai_client, "chat",
+        lambda messages, **kw: {
+            "content": "# Morning Briefing — Wednesday, 16 September 2026\n\n## Focus Plan\n- Ship the thing",
+            "model": "test-model", "latency_ms": 1, "input_tokens": 1, "output_tokens": 1,
+        },
+    )
+    result = ai_client.generate_morning_briefing(db)
+    assert result.count("Morning Briefing") == 1
+    assert "## Focus Plan" in result
+
+
 # ---------------------------------------------------------------------------
 # GET /api/today — regenerate-when-stale gate
 # ---------------------------------------------------------------------------
