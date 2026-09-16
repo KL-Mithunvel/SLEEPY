@@ -198,3 +198,78 @@ def test_apply_already_applied_raises(data_root, db):
 
     with pytest.raises(ValueError, match="No pending"):
         md_editor.apply_edit(result["event_id"], db)
+
+
+# ---------------------------------------------------------------------------
+# Secret scanning — corpus governance ("no secrets in MD files")
+# ---------------------------------------------------------------------------
+
+def test_scan_diff_for_secrets_detects_aws_key():
+    diff = "--- a/x.md\n+++ b/x.md\n@@ -0,0 +1 @@\n+key = AKIAABCDEFGHIJKLMNOP\n"
+    hits = md_editor.scan_diff_for_secrets(diff)
+    assert "AWS access key" in hits
+
+
+def test_scan_diff_for_secrets_detects_anthropic_key():
+    diff = "+++ b/x.md\n+ANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnopqrstuvwxyz\n"
+    hits = md_editor.scan_diff_for_secrets(diff)
+    assert "Anthropic API key" in hits
+
+
+def test_scan_diff_for_secrets_detects_private_key_block():
+    diff = "+++ b/x.md\n+-----BEGIN RSA PRIVATE KEY-----\n+MIIEpAIBAAKCAQEA...\n"
+    hits = md_editor.scan_diff_for_secrets(diff)
+    assert "private key block" in hits
+
+
+def test_scan_diff_for_secrets_ignores_removed_lines():
+    """A secret being *removed* from a file must not block the edit."""
+    diff = "--- a/x.md\n+++ b/x.md\n@@ -1 +1 @@\n-key = AKIAABCDEFGHIJKLMNOP\n+key = REDACTED\n"
+    hits = md_editor.scan_diff_for_secrets(diff)
+    assert hits == []
+
+
+def test_scan_diff_for_secrets_ignores_file_header_lines():
+    """The '+++ b/...' file-header line itself must never be scanned as an
+    added line, even if a path happened to look secret-shaped."""
+    diff = "--- a/x.md\n+++ b/AKIAABCDEFGHIJKLMNOP.md\n@@ -0,0 +1 @@\n+hello\n"
+    hits = md_editor.scan_diff_for_secrets(diff)
+    assert hits == []
+
+
+def test_scan_diff_for_secrets_clean_diff_is_empty():
+    diff = "--- a/x.md\n+++ b/x.md\n@@ -0,0 +1 @@\n+Just a normal note about the project.\n"
+    assert md_editor.scan_diff_for_secrets(diff) == []
+
+
+def test_propose_edit_blocked_by_secret_in_new_content(data_root, db):
+    with pytest.raises(ValueError, match="Blocked.*secret"):
+        md_editor.propose_edit("OU/leak.md", "# Notes\nkey = AKIAABCDEFGHIJKLMNOP\n", "add key", db)
+    # No pending ai_events row should have been written
+    row = db.execute("SELECT COUNT(*) AS n FROM ai_events").fetchone()
+    assert row["n"] == 0
+    assert not os.path.exists(os.path.join(data_root, "OU", "leak.md"))
+
+
+def test_propose_edit_allows_unrelated_edit_when_secret_already_present(data_root, db):
+    """A pre-existing false positive elsewhere in the file must not block an
+    unrelated edit to that same file — only newly *added* lines are scanned."""
+    import git
+    repo = git.Repo.init(data_root)
+    repo.config_writer().set_value("user", "name", "T").release()
+    repo.config_writer().set_value("user", "email", "t@t.com").release()
+
+    path = os.path.join(data_root, "OU", "existing.md")
+    os.makedirs(os.path.dirname(path))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("# Notes\nAKIAABCDEFGHIJKLMNOP appears here already, unrelated.\n")
+
+    result = md_editor.propose_edit(
+        "OU/existing.md",
+        "# Notes\nAKIAABCDEFGHIJKLMNOP appears here already, unrelated.\n- [ ] a new task\n",
+        "add a task",
+        db,
+    )
+    md_editor.apply_edit(result["event_id"], db)
+    with open(path, encoding="utf-8") as f:
+        assert "a new task" in f.read()

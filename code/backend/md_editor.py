@@ -9,6 +9,7 @@ Every AI-proposed file change goes through:
 Public API:
     validate_edit(rel_path, new_content)           → raises ValueError on policy violation
     compute_diff(original, new_content, rel_path)  → unified diff string
+    scan_diff_for_secrets(diff)                    → list of matched pattern names (added lines only)
     propose_edit(rel_path, new_content, summary, conn) → dict with event_id + diff
     apply_edit(event_id, conn)                     → commit sha (EditConflict if file changed since proposal)
     reject_edit(event_id, conn)                    → None
@@ -23,6 +24,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 
@@ -47,6 +49,46 @@ _GIT_LOCK_STALE_SEC = 300
 # db/ holds the SQLite DB (password hashes, every ai_events row / chat log),
 # the Chroma index and news-watch dedup state.
 _CORPUS_GITIGNORE_LINES = ("db/", "*.db", "*.db-shm", "*.db-wal", "*.sqlite3")
+
+# ---------------------------------------------------------------------------
+# Secret scanning — corpus governance rule "no secrets in MD files" (charter
+# §7). Deliberately conservative, high-confidence patterns only: false
+# positives block a legitimate edit outright, so vague heuristics (bare
+# base64/hex blobs, generic "password:" lines) are left out on purpose. Only
+# *added* lines of a diff are scanned (see scan_diff_for_secrets) so a
+# pre-existing false positive elsewhere in a file can't block unrelated edits
+# to that same file forever.
+# ---------------------------------------------------------------------------
+
+_SECRET_PATTERNS = (
+    ("AWS access key",       re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("Anthropic API key",    re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
+    ("OpenAI-style API key", re.compile(r"\bsk-[A-Za-z0-9]{20,}\b")),
+    ("GitHub token",         re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
+    ("Slack token",          re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    ("Google API key",       re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
+    ("Stripe secret key",    re.compile(r"\bsk_live_[0-9a-zA-Z]{24,}\b")),
+    ("private key block",    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----")),
+)
+
+
+def scan_diff_for_secrets(diff: str) -> list[str]:
+    """
+    Scan only the *added* lines of a unified diff (lines starting with a
+    single '+', not the '+++ b/...' file header) for high-confidence secret
+    patterns. Returns matched pattern names (never the matched text itself —
+    callers must not echo secret material back into an error message, log
+    line, or ai_events row).
+    """
+    if not diff:
+        return []
+    added_text = "\n".join(
+        line[1:] for line in diff.splitlines()
+        if line.startswith("+") and not line.startswith("+++")
+    )
+    if not added_text:
+        return []
+    return [name for name, pattern in _SECRET_PATTERNS if pattern.search(added_text)]
 
 
 class EditConflict(ValueError):
@@ -266,6 +308,14 @@ def propose_edit(
 
     diff = compute_diff(original, new_content, norm)
 
+    secret_hits = scan_diff_for_secrets(diff)
+    if secret_hits:
+        logger.warning("propose_edit blocked for %s: possible secret(s): %s", norm, ", ".join(secret_hits))
+        raise ValueError(
+            f"Blocked: this edit adds what looks like a secret ({', '.join(secret_hits)}). "
+            "Remove it and propose again — no secrets in the MD corpus."
+        )
+
     # Store the pending edit payload in the diff column as JSON so apply_edit
     # can retrieve everything needed without touching the filesystem again.
     # base_hash records what the file looked like at proposal time so apply_edit
@@ -320,6 +370,17 @@ def apply_edit(event_id: int, conn: sqlite3.Connection) -> str:
 
     # Re-validate before touching the filesystem
     validate_edit(norm, new_content)
+
+    # Defense in depth: propose_edit already blocks this, but re-check here
+    # too in case a pending row predates this check or was written some
+    # other way — nothing lands in a git commit with a secret in it either way.
+    secret_hits = scan_diff_for_secrets(payload.get("diff", ""))
+    if secret_hits:
+        logger.warning("apply_edit blocked for %s: possible secret(s): %s", norm, ", ".join(secret_hits))
+        raise ValueError(
+            f"Blocked: this edit adds what looks like a secret ({', '.join(secret_hits)}). "
+            "Reject it and propose again — no secrets in the MD corpus."
+        )
 
     abs_path = os.path.join(config.USER_DATA_ROOT, norm)
 
