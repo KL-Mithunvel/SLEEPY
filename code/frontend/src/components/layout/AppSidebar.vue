@@ -10,7 +10,7 @@ const navItems = [
   { to: '/logs',     label: 'Logs',      icon: 'bi-journal-text',   perm: 'logs:read'    },
   { to: '/ai',             label: 'Assistant',    icon: 'bi-stars',            perm: 'ai:suggest'        },
   { to: '/integrations',   label: 'Integrations', icon: 'bi-plug-fill',        perm: 'integrations:send' },
-  { to: '/admin',          label: 'Security',     icon: 'bi-shield-lock',      perm: 'admin:security'    },
+  { to: '/admin',          label: 'Admin',        icon: 'bi-shield-lock',      perm: 'admin:security'    },
 ]
 
 function canSee(perm) {

@@ -8,7 +8,7 @@ const routes = [
   { path: '/logs',     component: () => import('../views/LogsView.vue'),                  meta: { title: 'Logs',      perm: 'logs:read'    } },
   { path: '/ai',             component: () => import('../views/AiView.vue'),             meta: { title: 'Assistant',    perm: 'ai:suggest'        } },
   { path: '/integrations',   component: () => import('../views/IntegrationsView.vue'),   meta: { title: 'Integrations', perm: 'integrations:send'  } },
-  { path: '/admin',          component: () => import('../views/AdminView.vue'),          meta: { title: 'Security',     perm: 'admin:security'     } },
+  { path: '/admin',          component: () => import('../views/AdminView.vue'),          meta: { title: 'Admin',        perm: 'admin:security'     } },
 ]
 
 const router = createRouter({
