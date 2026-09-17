@@ -118,7 +118,11 @@ def test_edit_conflict_surfaces_as_409(client, data_root, monkeypatch):
     def _conflict(event_id, conn):
         raise md_editor.EditConflict("changed on disk")
 
-    monkeypatch.setattr(md_editor, "apply_edit", _conflict)
+    # The confirm route dispatches through apply_pending (which does its own
+    # ai_events lookup before delegating to apply_edit/apply_move/apply_delete
+    # by event_type) — mock the dispatcher itself so this test doesn't depend
+    # on a real pending row existing for event_id=1.
+    monkeypatch.setattr(md_editor, "apply_pending", _conflict)
     resp = client.post("/api/ai/edit/1/confirm")
     assert resp.status_code == 409
 

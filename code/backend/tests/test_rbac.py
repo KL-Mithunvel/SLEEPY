@@ -161,6 +161,7 @@ def test_auth_me_with_bypass(client):
     assert data["role"] == "admin"
     assert "projects:read" in data["permissions"]
     assert "admin:security" in data["permissions"]
+    assert "admin:ai_usage" in data["permissions"]
 
 
 def test_missing_token_rejected_without_bypass(client, monkeypatch):

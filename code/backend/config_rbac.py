@@ -35,8 +35,9 @@ PERMISSIONS = {
     # Admin
     "admin:reindex":   ("user",),
 
-    # Security monitoring — granted to "user" by nobody; admins get it via
-    # the code-level bypass (compute_permissions expands to every key here
-    # for role="admin"), not via this tuple.
+    # Security monitoring / AI usage — granted to "user" by nobody; admins
+    # get it via the code-level bypass (compute_permissions expands to every
+    # key here for role="admin"), not via this tuple.
     "admin:security":  (),
+    "admin:ai_usage":  (),
 }
