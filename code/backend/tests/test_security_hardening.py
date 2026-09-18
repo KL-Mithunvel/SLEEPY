@@ -625,3 +625,43 @@ def test_no_claude_code_oauth_fallback_remains():
     assert "Path.home()" not in src
     llm_src = _code_only(os.path.join(_BACKEND_DIR, "llm.py"))
     assert "auth_token=" not in llm_src
+
+
+# ---------------------------------------------------------------------------
+# Symlink escape — every path guard resolves symlinks, not just `..`
+# ---------------------------------------------------------------------------
+
+def test_symlink_inside_corpus_cannot_escape(conn, data_root, tmp_path, client):
+    """
+    A symlink planted inside the corpus (a corpus-repo checkout that ever
+    tracked one, or a hand-made `ln -s` on the box) must not let any reader
+    or writer reach outside the data root — normpath+prefix alone follows it.
+    """
+    import md_editor
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.md").write_text("# outside-marker\n", encoding="utf-8")
+    link = os.path.join(data_root, "Linked")
+    try:
+        os.symlink(str(outside), link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        # Windows needs a privilege for symlinks; a directory junction needs
+        # none and os.path.realpath resolves it the same way.
+        if sys.platform != "win32":
+            pytest.skip("symlink creation not permitted on this machine")
+        subprocess.run(["cmd", "/c", "mklink", "/J", link, str(outside)],
+                       check=True, capture_output=True)
+
+    with pytest.raises(ValueError, match="traversal"):
+        md_editor.validate_path("Linked/secret.md")
+
+    out = _tool(conn, "read_file").handler({"path": "Linked/secret.md"})
+    assert out.startswith("[error:")
+    assert "outside-marker" not in out
+    assert _tool(conn, "list_files").handler({"path": "Linked"}).startswith("[error:")
+
+    resp = client.get("/api/projects/content?path=Linked/secret.md")
+    assert resp.status_code == 400
+
+    resp = client.get("/api/logs/content?path=Linked/Daily/2026-01-01.md")
+    assert resp.status_code in (400, 404)

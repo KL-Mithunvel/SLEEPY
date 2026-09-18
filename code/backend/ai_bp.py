@@ -465,11 +465,11 @@ def chat_endpoint():
 
         except anthropic.AuthenticationError:
             llm.reset_client()
-            logger.warning("Anthropic auth error — Claude Code token may need refresh")
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Auth token expired. Run any claude command in your terminal to refresh, then retry.'})}\n\n"
+            logger.warning("Anthropic auth error — API key rejected (check ANTHROPIC_API_KEY)")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'The AI provider rejected the API key. Check ANTHROPIC_API_KEY in secrets_app.py and restart the backend.'})}\n\n"
         except anthropic.RateLimitError:
             logger.warning("Anthropic rate limit hit (429)")
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Rate limit hit — wait a few seconds and try again. (Claude.ai Pro has limited API call bursts.)'})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Rate limit hit — wait a few seconds and try again.'})}\n\n"
         except Exception:
             logger.exception("Chat stream error")
             yield f"data: {json.dumps({'type': 'error', 'message': 'Internal error — check server logs'})}\n\n"

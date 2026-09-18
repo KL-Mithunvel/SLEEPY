@@ -121,6 +121,20 @@ def _read_current(abs_path: str) -> str | None:
         return f.read()
 
 
+def is_within_root(base: str, path: str) -> bool:
+    """
+    True if `path` is `base` itself or lies inside it AFTER resolving symlinks
+    on both sides. The normpath+prefix checks in every path guard stop `..`
+    traversal, but they follow a symlink planted inside the corpus (a checkout
+    of a corpus repo that ever tracked one, or a hand-made `ln -s` on the box)
+    straight out of the data root; realpath closes that. A non-existent tail
+    is fine — realpath resolves the existing prefix and appends the rest.
+    """
+    real_base = os.path.realpath(base)
+    real_path = os.path.realpath(path)
+    return real_path == real_base or real_path.startswith(real_base + os.sep)
+
+
 @contextlib.contextmanager
 def corpus_git_lock(data_root: str | None = None):
     """
@@ -215,6 +229,8 @@ def validate_path(rel_path: str) -> str:
 
     if not abs_path.startswith(data_root + os.sep) and abs_path != data_root:
         raise ValueError(f"Path traversal detected: {rel_path!r}")
+    if not is_within_root(data_root, abs_path):
+        raise ValueError(f"Path traversal detected (symlink leaves the data root): {rel_path!r}")
 
     db_dir = os.path.normpath(os.path.join(data_root, "db"))
     if abs_path.startswith(db_dir + os.sep) or abs_path == db_dir:

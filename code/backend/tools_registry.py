@@ -51,6 +51,8 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
         base_norm = os.path.normpath(base)
         if not (abs_path.startswith(base_norm + os.sep) or abs_path == base_norm):
             raise ValueError(f"Path outside boundary: {rel_path!r}")
+        if not md_editor.is_within_root(base_norm, abs_path):
+            raise ValueError(f"Path outside boundary (symlink leaves it): {rel_path!r}")
         return abs_path
 
     def _safe_corpus_md(rel_path: str) -> str:

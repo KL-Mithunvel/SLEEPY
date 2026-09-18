@@ -20,6 +20,7 @@ import re
 from flask import Blueprint, jsonify, request
 
 import config
+import md_editor
 import project_editor
 from auth_utils import require_perm
 from md_indexer import _parse_frontmatter
@@ -107,7 +108,8 @@ def _safe_project_abs(rel_path: str) -> str | None:
         os.path.join(config.USER_DATA_ROOT, rel_path.replace("\\", "/").lstrip("/"))
     )
     root = os.path.normpath(config.USER_DATA_ROOT)
-    if norm.startswith(root + os.sep) and norm.endswith(".md"):
+    if (norm.startswith(root + os.sep) and norm.endswith(".md")
+            and md_editor.is_within_root(root, norm)):
         return norm
     return None
 
@@ -158,7 +160,6 @@ def save_project_content():
     if not rel:
         return jsonify({"error": "path is required"}), 400
 
-    import md_editor
     from app import get_db
 
     db = get_db()

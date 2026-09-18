@@ -124,6 +124,9 @@ def _safe_daily_abs(rel_path: str) -> str | None:
     root = os.path.normpath(config.USER_DATA_ROOT)
     if not norm.startswith(root + os.sep):
         return None
+    import md_editor
+    if not md_editor.is_within_root(root, norm):
+        return None
 
     parts = rel_path.replace("\\", "/").strip("/").split("/")
     is_daily = len(parts) == 3 and parts[1] == "Daily" and _DAILY_FILENAME_RE.match(parts[2])
