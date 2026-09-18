@@ -162,8 +162,11 @@ INDEX_SYNC_INTERVAL_SEC: int = int(_get("INDEX_SYNC_INTERVAL_SEC", 300))
 # When "1", skip registering the midnight news-watch cron (manual triggers still work)
 NEWS_WATCH_CRON_DISABLED: bool = str(_get("PMA_NEWS_WATCH_CRON_DISABLED", "0")).strip() in ("1", "true", "yes")
 
-# When "1", news watch runs all active projects every day (ignores day-of-week rotation)
-NEWS_RUN_ALL: bool = str(_get("PMA_NEWS_RUN_ALL", "0")).strip() in ("1", "true", "yes")
+# When "1" (default), news watch runs all active projects every day instead of the
+# day-of-week rotation — the rotation left the feed silent for weeks when a night's
+# single scheduled project had nothing new. Set to "0" to bring the rotation back
+# (e.g. to cut Batches API volume) once the corpus has many more active projects.
+NEWS_RUN_ALL: bool = str(_get("PMA_NEWS_RUN_ALL", "1")).strip() in ("1", "true", "yes")
 
 # Projects edited within this many days count as "recently active" (→ 5 items/topic)
 RECENCY_DAYS: int = int(_get("RECENCY_DAYS", 14))

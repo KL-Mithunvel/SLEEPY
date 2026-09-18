@@ -38,4 +38,4 @@ INDEX_SYNC_INTERVAL_SEC = 300        # How often (s) to sync ChromaDB vs MD file
 # ---------------------------------------------------------------------------
 # News Watch
 # ---------------------------------------------------------------------------
-PMA_NEWS_RUN_ALL = "0"               # "1" = run every day regardless of rotation (few-projects mode)
+PMA_NEWS_RUN_ALL = "1"               # "0" = rotate 1/7 of projects/topics per night instead of all

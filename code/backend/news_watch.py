@@ -487,11 +487,16 @@ def _write_news_to_inbox(data_root: str, bullets: list[str]) -> None:
 # Stage 1: Submit
 # ---------------------------------------------------------------------------
 
-def news_watch_submit_for_user(data_root: str) -> dict:
+def news_watch_submit_for_user(data_root: str, force_all: bool = False) -> dict:
     """
     Build and submit an Anthropic Message Batch for all due projects.
     Returns {"status": "submitted", "batch_id": ..., "request_count": ...}
     or {"status": "no_projects"} if nothing to do.
+
+    force_all=True bypasses the day-of-week rotation and scans every active
+    project/topic regardless of today's slot — used by the manual "run now"
+    trigger so it doesn't just repeat whatever the midnight cron already
+    covered today.
     """
     import anthropic as anthropic_module
 
@@ -512,7 +517,7 @@ def news_watch_submit_for_user(data_root: str) -> dict:
     today = date.today()
 
     all_keys = [p["key"] for p in projects] + [f"newswatch:{t['topic']}" for t in topics]
-    todays_keys = _todays_project_keys(all_keys)
+    todays_keys = set(all_keys) if force_all else _todays_project_keys(all_keys)
 
     today_projects = [p for p in projects if p["key"] in todays_keys]
     today_topics = [t for t in topics if f"newswatch:{t['topic']}" in todays_keys]

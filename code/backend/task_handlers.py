@@ -184,7 +184,8 @@ def _handle_housekeeping(payload: dict, conn: sqlite3.Connection):
 def _handle_news_watch_submit(payload: dict, conn: sqlite3.Connection):
     """Submit nightly news batch to Anthropic Message Batches API."""
     import news_watch
-    result = news_watch.news_watch_submit_for_user(config.USER_DATA_ROOT)
+    force_all = bool((payload or {}).get("force_all"))
+    result = news_watch.news_watch_submit_for_user(config.USER_DATA_ROOT, force_all=force_all)
     logger.info("news_watch_submit: %s", result)
 
 

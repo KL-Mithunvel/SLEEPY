@@ -96,10 +96,13 @@ def housekeeping_results():
 @corpus_bp.post("/api/corpus/news-watch")
 @require_perm("corpus:news_watch")
 def news_watch_trigger():
-    """Manually trigger a news watch submit for the current day."""
-    body = request.get_json(silent=True) or {}
+    """
+    Manually trigger an immediate news watch — scans every active project/topic
+    (bypasses the day-of-week rotation the nightly cron uses), so a manual run
+    doesn't just repeat whatever slice midnight already covered today.
+    """
     db = _db()
-    task_id = task_queue.enqueue(db, "news_watch_submit", {"ou": body.get("ou", "")})
+    task_id = task_queue.enqueue(db, "news_watch_submit", {"force_all": True})
     return jsonify({"task_id": task_id, "message": "News watch queued"}), 202
 
 

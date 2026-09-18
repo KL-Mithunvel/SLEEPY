@@ -156,6 +156,28 @@ def test_submit_builds_active_and_dormant_requests(tmp_path, monkeypatch, captur
     assert "up to 1" in old_ask
 
 
+def test_force_all_bypasses_day_of_week_rotation(tmp_path, monkeypatch, captured_requests):
+    """A manual 'run now' trigger must not repeat whatever slice midnight already covered today."""
+    import config
+    monkeypatch.setattr(config, "NEWS_RUN_ALL", False)
+    monkeypatch.setattr(config, "ANTHROPIC_API_KEY", "sk-test")
+    # Simulate rotation excluding everything scheduled for "today".
+    monkeypatch.setattr(news_watch, "_todays_project_keys", lambda all_keys: set())
+
+    (tmp_path / "NewsWatch.md").write_text(
+        "# News Watch\n\n## Topic A\n- added: 2026-01-01\n", encoding="utf-8",
+    )
+
+    rotated = news_watch.news_watch_submit_for_user(str(tmp_path))
+    assert rotated["status"] == "no_projects"
+    assert len(captured_requests) == 0
+
+    forced = news_watch.news_watch_submit_for_user(str(tmp_path), force_all=True)
+    assert forced["status"] == "submitted"
+    assert forced["request_count"] == 1
+    assert len(captured_requests) == 1
+
+
 # ---------------------------------------------------------------------------
 # mark_clicked
 # ---------------------------------------------------------------------------
