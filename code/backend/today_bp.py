@@ -162,9 +162,10 @@ def cancel_task():
 @require_perm("ai:edit_md")
 def promote_task():
     """
-    Copy one open task from a project's own backlog into today's curated
-    Active Tasks list (auto-applied, no confirm step). The project's own
-    line is left untouched — this adds a same-day copy alongside it.
+    Toggle one project-backlog task's staging into today's curated Active
+    Tasks list (auto-applied, no confirm step). First call stages it and
+    links both copies with a shared id so a later rename stays a single
+    entry; calling again on an already-staged task un-stages it.
     Request body: {"rel_path": "OU/project.md", "text": "exact task text"}
     """
     body = request.get_json(silent=True) or {}
@@ -174,10 +175,10 @@ def promote_task():
         return jsonify({"error": "rel_path and text are required"}), 400
 
     db = _db()
-    ok = task_scan.promote_task(config.USER_DATA_ROOT, rel_path, text, db)
-    if not ok:
+    action = task_scan.promote_task(config.USER_DATA_ROOT, rel_path, text, db)
+    if not action:
         return jsonify({"error": "Task line not found — it may have changed, try refreshing"}), 404
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "action": action})
 
 
 # ---------------------------------------------------------------------------

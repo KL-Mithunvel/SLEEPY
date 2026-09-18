@@ -335,6 +335,44 @@ def test_edit_task_toggles_done_and_fields(client, monkeypatch, tmp_path):
     assert "- [x] First task priority:medium" in content
 
 
+def test_edit_task_syncs_promoted_daily_copy(client, monkeypatch, tmp_path):
+    """Renaming a task that's staged into today's Active Tasks list (carries a
+    ^p:<id> tag) must update the linked Daily copy too — otherwise the two
+    drift into a stale duplicate the next time the task is promoted again."""
+    import config
+    from datetime import date
+
+    root = tmp_path / "t6"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(
+        "---\nkey: alpha\nstatus: active\n---\n\n## Tasks\n\n- [ ] First task ^p:abc12345\n",
+        encoding="utf-8",
+    )
+    daily_dir = root / "SMTW" / "Daily"
+    daily_dir.mkdir(parents=True)
+    today_str = date.today().strftime("%Y-%m-%d")
+    (daily_dir / f"{today_str}.md").write_text(
+        f"---\ndate: {today_str}\n---\n\n## Tasks\n\n- [ ] First task SMTW/alpha.md ^p:abc12345\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    _fake_md_editor_writing(monkeypatch, str(root))
+
+    resp = client.post("/api/projects/tasks", json={
+        "path": "SMTW/alpha.md", "action": "edit",
+        "old_line": "- [ ] First task ^p:abc12345", "text": "Renamed task", "done": False,
+    })
+    assert resp.status_code == 200
+
+    proj_content = (root / "SMTW" / "alpha.md").read_text(encoding="utf-8")
+    assert "Renamed task ^p:abc12345" in proj_content
+
+    daily_content = (daily_dir / f"{today_str}.md").read_text(encoding="utf-8")
+    assert "Renamed task" in daily_content
+    assert "First task" not in daily_content
+    assert "^p:abc12345" in daily_content
+
+
 def test_remove_task(client, monkeypatch, tmp_path):
     import config
 

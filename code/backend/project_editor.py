@@ -31,6 +31,7 @@ _VALID_STATUSES = ("active", "on_hold", "completed", "archived")
 _TASK_LINE_RE = re.compile(r"^(\s*)- \[( |x|X|>)\] (.+)$")
 _PRIORITY_RE = re.compile(r"\bpriority:(high|medium|low)\b", re.IGNORECASE)
 _DUE_RE = re.compile(r"\bdue:(\d{4}-\d{2}-\d{2})\b")
+_PROMOTED_RE = re.compile(r"\^p:([0-9a-f]{8})\b")
 _SECTION_HEADING_RE = re.compile(r"(?m)^## (.+?)\s*$")
 
 
@@ -91,8 +92,9 @@ def _parse_task_line(line: str) -> dict | None:
     _, mark, rest = m.groups()
     priority_m = _PRIORITY_RE.search(rest)
     due_m = _DUE_RE.search(rest)
+    promoted_m = _PROMOTED_RE.search(rest)
     description = rest
-    for tag_m in (priority_m, due_m):
+    for tag_m in (priority_m, due_m, promoted_m):
         if tag_m:
             description = description.replace(tag_m.group(0), "")
     return {
@@ -101,16 +103,25 @@ def _parse_task_line(line: str) -> dict | None:
         "description": description.strip(),
         "priority": priority_m.group(1).lower() if priority_m else None,
         "due": due_m.group(1) if due_m else None,
+        # Set when this task is staged into today's Active Tasks list (see
+        # task_scan.promote_task) — lets the GUI show a persistent tick
+        # instead of a client-only "just clicked" flash.
+        "promoted_id": promoted_m.group(1) if promoted_m else None,
     }
 
 
-def _build_task_line(description: str, done: bool = False, priority: str | None = None, due: str | None = None) -> str:
+def _build_task_line(
+    description: str, done: bool = False, priority: str | None = None,
+    due: str | None = None, promoted_id: str | None = None,
+) -> str:
     mark = "x" if done else " "
     parts = [description.strip()]
     if priority:
         parts.append(f"priority:{priority.lower()}")
     if due:
         parts.append(f"due:{due}")
+    if promoted_id:
+        parts.append(f"^p:{promoted_id}")
     return f"- [{mark}] {' '.join(parts)}"
 
 
@@ -220,10 +231,19 @@ def edit_task(
     for i, line in enumerate(lines):
         if line.rstrip("\r\n").strip() != target:
             continue
+        old_parsed = _parse_task_line(target)
+        promoted_id = old_parsed["promoted_id"] if old_parsed else None
         ending = line[len(line.rstrip("\r\n")):]
-        lines[i] = _build_task_line(description, done=done, priority=priority, due=due) + ending
+        lines[i] = _build_task_line(description, done=done, priority=priority, due=due, promoted_id=promoted_id) + ending
         new_content = "".join(lines)
-        return _apply_full_content(data_root, rel_path, new_content, f"Edited task: {description[:60]}", conn)
+        ok = _apply_full_content(data_root, rel_path, new_content, f"Edited task: {description[:60]}", conn)
+        # A promoted task's description staying in sync with its Daily copy is
+        # what keeps the two a single logical entry instead of drifting into a
+        # stale duplicate the next time it's promoted (see task_scan.promote_task).
+        if ok and promoted_id and old_parsed["description"] != description.strip():
+            import task_scan
+            task_scan.sync_promoted_task(data_root, rel_path, promoted_id, description, priority, due, conn)
+        return ok
     return False
 
 

@@ -144,13 +144,6 @@ async function submitNewTask() {
 const editingTask = ref(null)   // task.line of the row currently being edited
 const taskEditBuffer = reactive({ description: '', priority: '', due: '' })
 
-const promotedTasks = reactive({})   // task.line -> true, briefly, after a successful promote
-async function promoteTask(task) {
-  await store.promoteTask(task)
-  promotedTasks[task.line] = true
-  setTimeout(() => { delete promotedTasks[task.line] }, 2000)
-}
-
 function startEditTask(task) {
   editingTask.value = task.line
   taskEditBuffer.description = task.description
@@ -449,12 +442,11 @@ onMounted(() => store.fetchProjects())
                   <button
                     v-if="!task.done"
                     class="btn btn-sm py-0 px-2"
-                    :class="promotedTasks[task.line] ? 'btn-outline-success' : 'btn-outline-primary'"
+                    :class="task.promoted_id ? 'btn-outline-success' : 'btn-outline-primary'"
                     style="font-size: 0.7rem;"
-                    :disabled="promotedTasks[task.line]"
-                    :title="promotedTasks[task.line] ? 'Added to today' : 'Copy to today\'s Active Tasks'"
-                    @click="promoteTask(task)"
-                  ><i class="bi" :class="promotedTasks[task.line] ? 'bi-check-lg' : 'bi-arrow-up-circle'"></i></button>
+                    :title="task.promoted_id ? 'Staged for today — click to remove' : 'Stage into today\'s Active Tasks'"
+                    @click="store.promoteTask(task)"
+                  ><i class="bi" :class="task.promoted_id ? 'bi-check-lg' : 'bi-arrow-up-circle'"></i></button>
                   <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size: 0.7rem;" @click="startEditTask(task)"><i class="bi bi-pencil"></i></button>
                   <button class="btn btn-sm btn-outline-danger py-0 px-2" style="font-size: 0.7rem;" @click="store.removeTask(task)"><i class="bi bi-trash"></i></button>
                 </template>

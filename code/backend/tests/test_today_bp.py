@@ -333,16 +333,58 @@ def test_promote_task_success(client, monkeypatch, tmp_path):
 
     resp = client.post("/api/today/tasks/promote", json={"rel_path": "SMTW/proj.md", "text": "Deploy server"})
     assert resp.status_code == 200
-    assert resp.get_json()["ok"] is True
+    body = resp.get_json()
+    assert body["ok"] is True
+    assert body["action"] == "added"
 
-    # Source project's own line is untouched — promote copies, doesn't move
+    # Source project's own line stays put (promote copies, doesn't move) but
+    # is now tagged with a ^p:<id> link back to the Daily copy — this is what
+    # lets the GUI show a persistent tick and makes a second click un-stage
+    # instead of duplicating (see test_promote_task_second_click_unstages).
     with open(proj_file, encoding="utf-8") as f:
-        assert "- [ ] Deploy server" in f.read()
+        proj_content = f.read()
+    assert "- [ ] Deploy server ^p:" in proj_content
 
     from datetime import date
     daily_path = os.path.join(data_root, "SMTW", "Daily", f"{date.today().strftime('%Y-%m-%d')}.md")
     with open(daily_path, encoding="utf-8") as f:
-        assert "- [ ] Deploy server SMTW/proj.md" in f.read()
+        daily_content = f.read()
+    assert "- [ ] Deploy server SMTW/proj.md ^p:" in daily_content
+
+
+def test_promote_task_second_click_unstages(client, monkeypatch, tmp_path):
+    import config
+
+    data_root = str(tmp_path / "corpus_promote_toggle")
+    proj_dir = os.path.join(data_root, "SMTW")
+    os.makedirs(proj_dir)
+    proj_file = os.path.join(proj_dir, "proj.md")
+    with open(proj_file, "w", encoding="utf-8") as f:
+        f.write("---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n- [ ] Deploy server\n")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", data_root)
+
+    resp1 = client.post("/api/today/tasks/promote", json={"rel_path": "SMTW/proj.md", "text": "Deploy server"})
+    assert resp1.get_json()["action"] == "added"
+
+    with open(proj_file, encoding="utf-8") as f:
+        tagged_line = next(
+            line.strip()[len("- [ ] "):] for line in f.read().splitlines()
+            if line.strip().startswith("- [ ] Deploy server")
+        )
+
+    resp2 = client.post("/api/today/tasks/promote", json={"rel_path": "SMTW/proj.md", "text": tagged_line})
+    assert resp2.status_code == 200
+    assert resp2.get_json()["action"] == "removed"
+
+    with open(proj_file, encoding="utf-8") as f:
+        proj_content = f.read()
+    assert "- [ ] Deploy server\n" in proj_content
+    assert "^p:" not in proj_content
+
+    from datetime import date
+    daily_path = os.path.join(data_root, "SMTW", "Daily", f"{date.today().strftime('%Y-%m-%d')}.md")
+    with open(daily_path, encoding="utf-8") as f:
+        assert "Deploy server" not in f.read()
 
 
 def test_promote_task_not_found(client, monkeypatch, tmp_path):

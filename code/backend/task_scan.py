@@ -6,12 +6,19 @@ Public API:
     scan_open_tasks(data_root) -> list[dict]     all open tasks across active projects
     scan_todays_tasks(data_root) -> list[dict]   curated: today's materialised Daily files only
     toggle_task(data_root, rel_path, text, conn) -> bool
-    promote_task(data_root, rel_path, text, conn) -> bool   backlog task -> today's list
+    promote_task(data_root, rel_path, text, conn) -> str | None   toggle backlog task <-> today's list
+    sync_promoted_task(data_root, rel_path, promoted_id, description, priority, due, conn) -> bool
+
+A promoted task is linked between its source project line and its Daily copy
+by a shared "^p:<id>" tag (see _PROMOTED_RE) rather than by matching text —
+matching by text breaks the moment either copy is renamed, silently turning
+a second click into a duplicate instead of a toggle.
 """
 
 import logging
 import os
 import re
+import uuid
 from datetime import date
 from pathlib import Path
 
@@ -26,6 +33,7 @@ _TASK_LINE_RE = re.compile(r"^(\s*)- \[( |x|X|>)\] (.+)$")
 _DUE_RE = re.compile(r"\bdue:(\d{4}-\d{2}-\d{2})\b")
 _PRIORITY_RE = re.compile(r"\bpriority:(high|medium|low)\b", re.IGNORECASE)
 _PROJECT_REF_RE = re.compile(r"(?:^|\s)(\S+/\S+\.md)(?=\s|$)")
+_PROMOTED_RE = re.compile(r"\^p:([0-9a-f]{8})\b")
 _MAX_TASKS = 40
 
 
@@ -72,11 +80,12 @@ def _extract_due(text: str) -> date | None:
         return None
 
 
-def _clean_description(text: str) -> tuple[str, str | None, str | None]:
-    """Strip recognised tags (priority:/due:/trailing project-path/carry-forward
-    ↳ marker) out of a raw task-line text for display, returning
-    (clean_description, priority, project_rel_path). The raw `text` itself is
-    left untouched by callers — toggle_task needs it verbatim to find the line."""
+def _clean_description(text: str) -> tuple[str, str | None, str | None, str | None]:
+    """Strip recognised tags (priority:/due:/trailing project-path/^p:<id>/
+    carry-forward ↳ marker) out of a raw task-line text for display, returning
+    (clean_description, priority, project_rel_path, promoted_id). The raw
+    `text` itself is left untouched by callers — toggle_task/promote_task
+    need it verbatim to find the line."""
     working = text
     priority = None
     m = _PRIORITY_RE.search(working)
@@ -86,13 +95,18 @@ def _clean_description(text: str) -> tuple[str, str | None, str | None]:
     m = _DUE_RE.search(working)
     if m:
         working = working[:m.start()] + working[m.end():]
+    promoted_id = None
+    m = _PROMOTED_RE.search(working)
+    if m:
+        promoted_id = m.group(1)
+        working = working[:m.start()] + working[m.end():]
     project = None
     m = _PROJECT_REF_RE.search(working)
     if m:
         project = m.group(1)
         working = working[:m.start()] + working[m.end():]
     working = re.sub(r"^↳\s*", "", working.strip())
-    return re.sub(r"\s+", " ", working).strip(), priority, project
+    return re.sub(r"\s+", " ", working).strip(), priority, project, promoted_id
 
 
 # ---------------------------------------------------------------------------
@@ -173,13 +187,14 @@ def scan_todays_tasks(data_root: str) -> list[dict]:
                     continue
                 text = m.group(3).strip()
                 due = _extract_due(text)
-                description, priority, project = _clean_description(text)
+                description, priority, project, promoted_id = _clean_description(text)
                 tasks.append({
                     "rel_path": rel_path,
                     "text": text,
                     "description": description,
                     "priority": priority,
                     "project": project,
+                    "promoted_id": promoted_id,
                     "ou": ou,
                     "due": due.isoformat() if due else None,
                 })
@@ -251,15 +266,18 @@ def add_task(
     priority: str | None,
     due: str | None,
     conn,
+    extra_tag: str | None = None,
 ) -> bool:
     """
     Append an ad-hoc task straight into today's <OU>/Daily/<today>.md '## Tasks'
     section — tagged with the chosen project's rel_path (same trailing-path
     convention materialiser uses for Recur/Plan-sourced lines) plus optional
-    priority:/due: tags. Creates today's Daily file if materialise_daily hasn't
-    run yet. Auto-applied via md_editor, no confirm gate (explicit user action).
-    Returns False if project_rel_path isn't a real .md file inside data_root, or
-    if the write fails validation.
+    priority:/due: tags. `extra_tag` (e.g. "^p:<id>") is appended last when
+    given — promote_task's link back to the source project line. Creates
+    today's Daily file if materialise_daily hasn't run yet. Auto-applied via
+    md_editor, no confirm gate (explicit user action). Returns False if
+    project_rel_path isn't a real .md file inside data_root, or if the write
+    fails validation.
     """
     root = Path(data_root)
     norm_project = project_rel_path.replace("\\", "/").lstrip("/")
@@ -296,6 +314,8 @@ def add_task(
     if due:
         parts.append(f"due:{due}")
     parts.append(norm_project)
+    if extra_tag:
+        parts.append(extra_tag)
     line = f"- [ ] {' '.join(parts)}"
 
     if abs_path.is_file():
@@ -328,43 +348,155 @@ def add_task(
     return True
 
 
-def promote_task(data_root: str, rel_path: str, text: str, conn) -> bool:
-    """
-    Copy one open task from a project's own '## Tasks' backlog (scan_open_tasks
-    territory — otherwise invisible to the Today view) into today's curated
-    <OU>/Daily/<today>.md list, via the same add_task() path the Today view's
-    own "add ad-hoc task" button uses. The project's own line is left
-    untouched — completing it later is still a separate action on that file;
-    this only adds a same-day working copy, tagged with the source project's
-    rel_path so scan_todays_tasks can still show where it came from.
+def _daily_rel_path(ou: str) -> str:
+    return f"{ou}/Daily/{date.today().strftime('%Y-%m-%d')}.md"
 
-    Re-verifies the exact source line is still present before promoting (same
+
+def _remove_daily_entry_by_id(data_root: str, ou: str, promoted_id: str, conn) -> bool:
+    """Delete the Daily-file line carrying `^p:<promoted_id>`, if any. Used when
+    un-staging a task. Returns False (logged, non-fatal) if no matching line is
+    found — the un-tag on the project's own line has already succeeded either way."""
+    daily_rel = _daily_rel_path(ou)
+    daily_abs = Path(data_root) / daily_rel
+    if not daily_abs.is_file():
+        return False
+    content = daily_abs.read_text(encoding="utf-8", errors="replace")
+    lines = content.splitlines(keepends=True)
+    tag = f"^p:{promoted_id}"
+    for i, line in enumerate(lines):
+        if tag in line:
+            del lines[i]
+            new_content = "".join(lines)
+            try:
+                proposal = md_editor.propose_edit(daily_rel, new_content, f"Un-staged task (id {promoted_id})", conn)
+                md_editor.apply_edit(proposal["event_id"], conn)
+            except ValueError:
+                logger.exception("task_scan: failed to remove promoted entry %s from %s", promoted_id, daily_rel)
+                return False
+            return True
+    logger.warning("task_scan: no Daily entry found for promoted id %s in %s", promoted_id, daily_rel)
+    return False
+
+
+def promote_task(data_root: str, rel_path: str, text: str, conn) -> str | None:
+    """
+    Toggle a project task's promotion into today's curated <OU>/Daily/<today>.md
+    list — the button this powers is a stage/un-stage toggle, not a one-shot copy.
+
+    First click (source line has no ^p:<id> tag yet): adds the task via
+    add_task() (same path the Today view's own "add ad-hoc task" uses) and
+    tags BOTH the new Daily line and the source project line with a freshly
+    generated ^p:<id> — a stable link, not a text match, so a later rename on
+    either side (see project_editor.edit_task -> sync_promoted_task) doesn't
+    break the pairing into a stale duplicate.
+
+    Second click (source line already tagged): removes the linked Daily line
+    and strips the tag from the source — a real un-stage.
+
+    Re-verifies the exact source line is still present before acting (same
     staleness guard as toggle_task/cancel_task — the list the button was
-    clicked from may be stale). A no-op (returns True without writing) if an
-    identical description is already in today's list for that OU, so a double
-    click can't create a duplicate. Returns False if the source line isn't
-    found or the write fails.
+    clicked from may be stale). Returns "added", "removed", or None if the
+    source line isn't found or a write fails.
     """
     abs_path = Path(data_root) / rel_path
     if not abs_path.is_file():
-        return False
+        return None
     content = abs_path.read_text(encoding="utf-8", errors="replace")
-    target = f"- [ ] {text}"
-    if not any(line.strip() == target for line in content.splitlines()):
-        return False
+    lines = content.splitlines(keepends=True)
+    target = text.strip()
 
-    description, priority, _ = _clean_description(text)
-    due = _extract_due(text)
-    due_str = due.isoformat() if due else None
+    for i, line in enumerate(lines):
+        stripped = line.rstrip("\r\n")
+        m = _TASK_LINE_RE.match(stripped)
+        if not m or m.group(3).strip() != target:
+            continue
 
+        leading_ws, mark = m.group(1), m.group(2)
+        ending = line[len(stripped):]
+        ou = rel_path.split("/", 1)[0]
+        existing_id_m = _PROMOTED_RE.search(target)
+
+        if existing_id_m:
+            existing_id = existing_id_m.group(1)
+            new_target = _PROMOTED_RE.sub("", target).strip()
+            lines[i] = f"{leading_ws}- [{mark}] {new_target}{ending}"
+            new_content = "".join(lines)
+            try:
+                proposal = md_editor.propose_edit(rel_path, new_content, f"Un-staged task: {new_target[:60]}", conn)
+                md_editor.apply_edit(proposal["event_id"], conn)
+            except ValueError:
+                logger.exception("task_scan: promote_task un-tag failed for %s", rel_path)
+                return None
+            _remove_daily_entry_by_id(data_root, ou, existing_id, conn)
+            return "removed"
+
+        new_id = uuid.uuid4().hex[:8]
+        tag = f"^p:{new_id}"
+        tagged_target = f"{target} {tag}"
+        lines[i] = f"{leading_ws}- [{mark}] {tagged_target}{ending}"
+        new_content = "".join(lines)
+        try:
+            proposal = md_editor.propose_edit(rel_path, new_content, f"Staged task: {target[:60]}", conn)
+            md_editor.apply_edit(proposal["event_id"], conn)
+        except ValueError:
+            logger.exception("task_scan: promote_task tag failed for %s", rel_path)
+            return None
+
+        description, priority, _, _ = _clean_description(target)
+        due = _extract_due(target)
+        due_str = due.isoformat() if due else None
+        if not add_task(data_root, rel_path, description, priority, due_str, conn, extra_tag=tag):
+            return None
+        return "added"
+
+    return None
+
+
+def sync_promoted_task(
+    data_root: str, rel_path: str, promoted_id: str,
+    description: str, priority: str | None, due: str | None, conn,
+) -> bool:
+    """
+    Propagate a rename/edit of a promoted project task to its linked Daily
+    copy, so the two stay a single logical entry instead of drifting apart —
+    called by project_editor.edit_task when the line it just edited carries a
+    ^p:<id> tag. A no-op (returns True) if the Daily file or the tagged line
+    no longer exists — the project-side edit has already succeeded either way.
+    """
     ou = rel_path.split("/", 1)[0]
-    today_str = date.today().strftime("%Y-%m-%d")
-    daily_abs = Path(data_root) / ou / "Daily" / f"{today_str}.md"
-    if daily_abs.is_file():
-        daily_content = daily_abs.read_text(encoding="utf-8", errors="replace")
-        for line in _extract_section(daily_content, "Tasks").splitlines():
-            m = _TASK_LINE_RE.match(line)
-            if m and _clean_description(m.group(3).strip())[0] == description:
-                return True  # already promoted today
+    daily_rel = _daily_rel_path(ou)
+    daily_abs = Path(data_root) / daily_rel
+    if not daily_abs.is_file():
+        return True
+    content = daily_abs.read_text(encoding="utf-8", errors="replace")
+    lines = content.splitlines(keepends=True)
+    tag = f"^p:{promoted_id}"
 
-    return add_task(data_root, rel_path, description, priority, due_str, conn)
+    for i, line in enumerate(lines):
+        stripped = line.rstrip("\r\n")
+        if tag not in stripped:
+            continue
+        m = _TASK_LINE_RE.match(stripped)
+        if not m:
+            continue
+        leading_ws, mark = m.group(1), m.group(2)
+        ending = line[len(stripped):]
+        parts = [description.strip()]
+        if priority:
+            parts.append(f"priority:{priority.lower()}")
+        if due:
+            parts.append(f"due:{due}")
+        parts.append(rel_path)
+        parts.append(tag)
+        lines[i] = f"{leading_ws}- [{mark}] {' '.join(parts)}{ending}"
+        new_content = "".join(lines)
+        try:
+            proposal = md_editor.propose_edit(daily_rel, new_content, f"Renamed staged task: {description[:60]}", conn)
+            md_editor.apply_edit(proposal["event_id"], conn)
+        except ValueError:
+            logger.exception("task_scan: sync_promoted_task failed for %s", daily_rel)
+            return False
+        return True
+
+    logger.warning("task_scan: sync_promoted_task found no Daily line for id %s in %s", promoted_id, daily_rel)
+    return True

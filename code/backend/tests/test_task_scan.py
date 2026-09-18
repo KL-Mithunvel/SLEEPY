@@ -281,17 +281,18 @@ def test_promote_task_copies_into_todays_daily_file(tmp_path, conn, monkeypatch)
         "---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n- [ ] Define hardware procurement list\n",
     )
 
-    ok = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Define hardware procurement list", conn)
-    assert ok is True
+    action = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Define hardware procurement list", conn)
+    assert action == "added"
 
     from datetime import date
     daily_path = tmp_path / "SMTW" / "Daily" / f"{date.today().strftime('%Y-%m-%d')}.md"
     content = daily_path.read_text(encoding="utf-8")
-    assert "- [ ] Define hardware procurement list SMTW/proj.md" in content
+    assert "- [ ] Define hardware procurement list SMTW/proj.md ^p:" in content
 
-    # Source project's own line is untouched
+    # Source project's own line is now tagged with the same link id — this is
+    # what lets the GUI show a persistent tick instead of a 2-second flash.
     proj_content = (tmp_path / "SMTW" / "proj.md").read_text(encoding="utf-8")
-    assert "- [ ] Define hardware procurement list\n" in proj_content
+    assert "- [ ] Define hardware procurement list ^p:" in proj_content
 
 
 def test_promote_task_preserves_priority_and_due(tmp_path, conn, monkeypatch):
@@ -302,32 +303,34 @@ def test_promote_task_preserves_priority_and_due(tmp_path, conn, monkeypatch):
         "---\nstatus: active\n---\n\n- [ ] Submit form priority:high due:2026-07-13\n",
     )
 
-    ok = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Submit form priority:high due:2026-07-13", conn)
-    assert ok is True
+    action = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Submit form priority:high due:2026-07-13", conn)
+    assert action == "added"
 
     from datetime import date
     daily_path = tmp_path / "SMTW" / "Daily" / f"{date.today().strftime('%Y-%m-%d')}.md"
     content = daily_path.read_text(encoding="utf-8")
-    assert "- [ ] Submit form priority:high due:2026-07-13 SMTW/proj.md" in content
+    assert "- [ ] Submit form priority:high due:2026-07-13 SMTW/proj.md ^p:" in content
 
 
-def test_promote_task_no_match_returns_false(tmp_path, conn, monkeypatch):
+def test_promote_task_no_match_returns_none(tmp_path, conn, monkeypatch):
     import config
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
     _write_project(str(tmp_path), "SMTW", "proj.md", "---\nstatus: active\n---\n\n- [ ] Real task\n")
-    ok = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Nonexistent task", conn)
-    assert ok is False
+    action = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Nonexistent task", conn)
+    assert action is None
 
 
-def test_promote_task_missing_file_returns_false(tmp_path, conn, monkeypatch):
+def test_promote_task_missing_file_returns_none(tmp_path, conn, monkeypatch):
     import config
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
-    ok = task_scan.promote_task(str(tmp_path), "SMTW/missing.md", "Anything", conn)
-    assert ok is False
+    action = task_scan.promote_task(str(tmp_path), "SMTW/missing.md", "Anything", conn)
+    assert action is None
 
 
-def test_promote_task_is_idempotent_on_double_click(tmp_path, conn, monkeypatch):
-    """Clicking Promote twice must not create two copies in today's list."""
+def test_promote_task_second_click_unstages_instead_of_duplicating(tmp_path, conn, monkeypatch):
+    """A second click on an already-staged task must un-stage it, not add a
+    second copy — the old text-match idempotency guard silently broke this
+    the moment the task's name changed (see the rename test below)."""
     import config
     monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
     _write_project(
@@ -335,13 +338,26 @@ def test_promote_task_is_idempotent_on_double_click(tmp_path, conn, monkeypatch)
         "---\nstatus: active\n---\n\n- [ ] Define hardware procurement list\n",
     )
 
-    assert task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Define hardware procurement list", conn) is True
-    assert task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Define hardware procurement list", conn) is True
+    assert task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Define hardware procurement list", conn) == "added"
 
     from datetime import date
     daily_path = tmp_path / "SMTW" / "Daily" / f"{date.today().strftime('%Y-%m-%d')}.md"
-    content = daily_path.read_text(encoding="utf-8")
-    assert content.count("Define hardware procurement list") == 1
+    proj_path = tmp_path / "SMTW" / "proj.md"
+
+    # Re-fetch the now-tagged source line, exactly like the frontend does
+    # (task.line reflects the latest structured parse) before clicking again.
+    tagged_line = next(
+        line.strip()[len("- [ ] "):] for line in proj_path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("- [ ] Define hardware procurement list")
+    )
+    action2 = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", tagged_line, conn)
+    assert action2 == "removed"
+
+    # Daily copy is gone, source line's tag is stripped back off
+    assert "Define hardware procurement list" not in daily_path.read_text(encoding="utf-8")
+    proj_content = proj_path.read_text(encoding="utf-8")
+    assert "- [ ] Define hardware procurement list\n" in proj_content
+    assert "^p:" not in proj_content
 
 
 def test_promote_task_shows_up_in_todays_scan(tmp_path, conn, monkeypatch):
@@ -351,13 +367,39 @@ def test_promote_task_shows_up_in_todays_scan(tmp_path, conn, monkeypatch):
         str(tmp_path), "SMTW", "proj.md",
         "---\nkey: proj\nstatus: active\n---\n\n## Tasks\n\n- [ ] Backlog item\n",
     )
-    assert task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Backlog item", conn) is True
+    assert task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Backlog item", conn) == "added"
 
     todays = task_scan.scan_todays_tasks(str(tmp_path))
     assert len(todays) == 1
     assert todays[0]["description"] == "Backlog item"
     assert todays[0]["project"] == "SMTW/proj.md"
+    assert todays[0]["promoted_id"] is not None
 
-    # And the source project's own backlog scan still shows it too (untouched)
+    # And the source project's own backlog scan still shows the (now tagged) line too
     backlog = task_scan.scan_open_tasks(str(tmp_path))
-    assert any(t["text"] == "Backlog item" for t in backlog)
+    assert any(t["text"].startswith("Backlog item ^p:") for t in backlog)
+
+
+def test_sync_promoted_task_updates_linked_daily_line(tmp_path, conn, monkeypatch):
+    """Renaming a promoted task (see project_editor.edit_task) must update the
+    single linked Daily entry in place, not leave a stale duplicate behind."""
+    import config
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(tmp_path))
+    _write_project(
+        str(tmp_path), "SMTW", "proj.md",
+        "---\nstatus: active\n---\n\n- [ ] Old name\n",
+    )
+    action = task_scan.promote_task(str(tmp_path), "SMTW/proj.md", "Old name", conn)
+    assert action == "added"
+
+    from datetime import date
+    daily_path = tmp_path / "SMTW" / "Daily" / f"{date.today().strftime('%Y-%m-%d')}.md"
+    promoted_id = task_scan._PROMOTED_RE.search(daily_path.read_text(encoding="utf-8")).group(1)
+
+    ok = task_scan.sync_promoted_task(str(tmp_path), "SMTW/proj.md", promoted_id, "New name", None, None, conn)
+    assert ok is True
+
+    content = daily_path.read_text(encoding="utf-8")
+    assert "New name" in content
+    assert "Old name" not in content
+    assert content.count(f"^p:{promoted_id}") == 1

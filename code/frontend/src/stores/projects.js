@@ -138,11 +138,14 @@ export const useProjectsStore = defineStore('projects', {
       this.fetchProjects()
     },
 
-    // Copies this project's task into today's curated Active Tasks list —
-    // the task's own line here is left untouched (see task_scan.promote_task).
+    // Toggles this project task's staging into today's curated Active Tasks
+    // list (see task_scan.promote_task) — re-clicking an already-staged task
+    // un-stages it, and task.promoted_id (parsed from the ^p:<id> tag) is
+    // what drives the persistent tick, not a local "just clicked" flag.
     async promoteTask(task) {
       const text = task.line.replace(/^\s*-\s*\[.\]\s*/, '')
       await apiPost('/api/today/tasks/promote', { rel_path: this.selectedPath, text })
+      await this.fetchStructured()
     },
 
     async addListItem(section, text) {
