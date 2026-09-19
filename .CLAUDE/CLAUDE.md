@@ -117,6 +117,9 @@ SLEEPY/
 │   │   ├── goal_planner.py    # Nightly project deadline planning (target_date → ## Plan + email digest)
 │   │   ├── news_watch.py      # Anthropic Batches API news search (project topics + NewsWatch.md)
 │   │   ├── integrations.py    # O365 Graph API email (send_email) — only integration since 2026-07-01
+│   │   ├── alerts.py          # Operational alerting — failed tasks/self-check findings → email
+│   │   ├── offsite.py         # Nightly offsite replication: corpus git push + gzipped SQLite snapshot
+│   │   ├── selfheal.py        # 15-min self-check: detect stuck states, repair the safe ones
 │   │   ├── app.py             # Flask app factory; calls local_db.init_db(); registers all *_bp.py blueprints below
 │   │   ├── auth_bp.py         # POST /api/auth/login|logout, GET /api/auth/me|config
 │   │   ├── admin_bp.py        # GET /api/admin/login-events — admin:security only
@@ -150,7 +153,8 @@ SLEEPY/
 │   ├── PROJ_STARTER.md        # Engineering standards baseline (also in .CLAUDE/)
 │   ├── SETUP.md               # Zero-to-running setup guide, dev + prod
 │   ├── BUILD_GUIDE.md         # Design + 12-phase build order for a from-scratch rebuild by someone else (added 2026-09-18; exported from a Claude Doc — link at its top)
-│   └── CORPUS_SCHEMA.md       # Ground-truth data storage schema (added 2026-07-04)
+│   ├── CORPUS_SCHEMA.md       # Ground-truth data storage schema (added 2026-07-04)
+│   └── RECOVERY.md            # Failure/recovery runbook: what self-heals, alert meanings, restore steps (added 2026-09-19)
 ├── tooling/
 │   ├── run-backend.bat        # Start Flask + Vite + worker (cd repo root → uv run python main.py)
 │   ├── run-backend-tests.bat  # uv run pytest from code/backend
@@ -230,11 +234,11 @@ CLI for the two fixed accounts (`create-user`/`list-users`/`reset-password`/`del
 - `HANDLERS: dict[str, callable]` — dispatch table mapping `task_type` to `handler(payload, conn)`.
 - `dispatch(task_type, payload, conn)` — looks up and calls handler.
 - **Handlers must NOT commit** — the worker owns the transaction boundary.
-- Current handlers: `md_reindex`, `db_backup`, `morning_briefing` (also runs `goal_planner` + emails the digest), `materialise`, `index_sync`, `commit_pending`, `housekeeping`, `news_watch_submit`, `news_watch_finalize`, `email`.
+- Current handlers (13): `md_reindex`, `db_backup`, `offsite_push`, `morning_briefing` (also runs `goal_planner` + emails the digest), `materialise`, `index_sync`, `commit_pending`, `housekeeping`, `news_watch_submit`, `news_watch_finalize`, `email`, `self_check`.
 
 ### `code/backend/scheduled_tasks.py`
 - `SCHEDULED_TASKS` — list of `{task_type, trigger, trigger_kwargs, payload, enabled?}` dicts. APScheduler in the worker reads this to register cron/interval jobs that enqueue into `task_queue`.
-- Current schedule (9 jobs): `md_reindex` 02:00 IST, `db_backup` 03:15 IST, `morning_briefing` 06:30 IST (deadline planning + email digest rides this), `index_sync` every 5 min, `commit_pending` hourly, `housekeeping` 23:00 IST, `materialise` 00:05 IST, `news_watch_submit` 00:00 IST, `news_watch_finalize` every 5 min.
+- Current schedule (11 jobs): `md_reindex` 02:00 IST, `db_backup` 03:15 IST, `offsite_push` 03:30 IST, `morning_briefing` 06:30 IST (deadline planning + email digest rides this), `index_sync` every 5 min, `commit_pending` hourly, `housekeeping` 23:00 IST, `materialise` 00:05 IST, `news_watch_submit` 00:00 IST, `news_watch_finalize` every 5 min, `self_check` every 15 min.
 
 ### `code/backend/task_scan.py`
 Deterministic (non-LLM, non-RAG) task scanning — the foundation for the Today view's click-to-check list and the morning briefing's task context. `scan_open_tasks(data_root)` — every open task across every active project (general-purpose). `scan_todays_tasks(data_root)` — **what the Today view/briefing actually use**: reads only `<OU>/Daily/<today>.md`'s `## Tasks` section, i.e. the curated list, not every project's backlog. `toggle_task(data_root, rel_path, text, conn)` — flips one `- [ ] <text>` line via `md_editor`, auto-applied (no confirm gate — the click itself is the confirmation).
@@ -260,8 +264,17 @@ The confirm-gated AI edit flow: `validate_edit`/`propose_edit` (writes a pending
 ### `code/backend/ai_client.py`
 `chat()` — LiteLLM wrapper used by background jobs (goal_planner, news_watch dedup). `generate_morning_briefing(conn)` — builds a deterministic context (today's curated tasks via `task_scan.scan_todays_tasks` + raw `inbox.md`, not fuzzy RAG) and asks the LLM for a `## Today's Schedule`/`## Due-Overdue`/`## Blocked`/`## Focus Plan` briefing. Every briefing is prefixed with a Python-computed `# Morning Briefing — <Weekday>, DD-MM-YYYY (generated HH:MM IST)` header (`_briefing_header()`, added 2026-09-16) — mandatory and never LLM-generated, so it's never missing or wrong. `today_bp.get_today()` regenerates on-demand (once per calendar day, not per request) whenever the stored briefing's date isn't today, so the 06:30 IST cron has a same-day fallback if the box was down or nobody visited before it ran.
 
+### `code/backend/alerts.py`
+`notify(conn, alert_key, subject, body)` records every alert in `system_alerts` (migration 8) and enqueues an `email` task unless throttled — alerts are queued, never sent inline, so the drain loop never blocks on a Graph API call and delivery inherits the queue's retry/backoff. Throttling is per `alert_key` over `ALERT_COOLDOWN_HOURS` (6); suppressed alerts are still recorded, so "failing every 15 min since Tuesday" stays visible. `task_failed()` never alerts on a failed `email` task — the one feedback loop that must not close. `notify()` never commits (handlers must not); the worker commits in its own failure path.
+
+### `code/backend/offsite.py`
+Nightly `offsite_push` (03:30 IST, after `db_backup`). Two independent targets: `push_corpus()` git-pushes `data/klm`'s own repo, and `push_snapshot()` gzips the newest SQLite backup into `OFFSITE_SNAPSHOT_DIR`. Default mode `"auto"` pushes if the configured remote exists and skips quietly if not; `OFFSITE_PUSH_ENABLED=1` makes a missing remote a hard failure that alerts. **Needs a remote to be created once before it protects anything — see `docs/RECOVERY.md` §3.** The SQLite snapshot deliberately stays out of the git push (permanent history + binary blobs on a tight disk).
+
+### `code/backend/selfheal.py`
+`self_check` every 15 min. Seven checks, each `ok`/`fixed`/`alert`: stale git locks (fixed), permanently-failed idempotent tasks (requeued once, stamped `task_queue.recovered_at`), missing Daily file (enqueues `materialise`), empty vector index (enqueues `md_reindex`), disk space, `PRAGMA quick_check`, and backend health probed from the worker. Repairs are limited to idempotent, reversible actions; anything that could duplicate a side effect (`email`, `morning_briefing`, `news_watch_*`) or destroy data (corrupt DB) is only reported. Backend health is reported rather than acted on deliberately — restarting a container from inside would need the Docker socket mounted into a web process. Each check is isolated so one broken probe can't take the safety net down.
+
 ### `code/backend/worker.py`
-Separate process (`uv run python code/backend/worker.py`). Calls `local_db.init_db()`, starts APScheduler from `SCHEDULED_TASKS`, then loops every 5s calling `_drain_once()` which claims and dispatches all pending tasks. Handles `KeyboardInterrupt`/`SystemExit` gracefully.
+Separate process (`uv run python code/backend/worker.py`). Calls `local_db.init_db()`, sweeps abandoned git locks, starts APScheduler from `SCHEDULED_TASKS`, then loops calling `_drain_once()` which claims and dispatches all pending tasks. Shutdown is graceful: SIGTERM/SIGINT handlers raise `SystemExit` (Python's default SIGTERM disposition kills the process outright, so no teardown ran and the in-flight task was abandoned for the full 30-min lock), a stop is checked between tasks, and any in-flight task is handed back via `task_queue.release()` with its attempt refunded. Also watches `config.STOP_SENTINEL_PATH`, since Windows has no usable SIGTERM for a child process. Alerts on any task that reaches terminal failure.
 
 ### `code/frontend/src/stores/auth.js`
 In-app auth store (Pinia) — `login(username, password)`/`logout()` against `/api/auth/*`, token kept in `localStorage` (survives a reload) and attached as a Bearer header by `api.js`. `handleUnauthorized()` is called by `api.js` on any 401, clearing the stored token so `App.vue` drops back to `LoginView.vue`. In dev bypass mode, the backend synthesises the `/api/auth/me` response and `getToken()` returns `null`.
@@ -286,6 +299,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | `md_chunks_meta` | LlamaIndex chunk tracking for MD corpus | Rebuild on reindex |
 | `users` | Login accounts — `username, password_hash, role` | Read/write, via `manage_users.py` only |
 | `login_events` | Every login attempt — `username, success, ip_address, user_agent, geo_city, geo_country` | Append-only |
+| `system_alerts` | Every alert raised — `alert_key, subject, body, suppressed, emailed` | Append-only |
 
 ### `ai_events` columns
 `id, event_type, prompt_hash, model, diff, accepted (1/0/NULL), voided, latency_ms, input_tokens, output_tokens, created_at`
