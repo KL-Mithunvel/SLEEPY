@@ -37,6 +37,17 @@ SCHEDULED_TASKS = [
     },
 
     # ------------------------------------------------------------------
+    # Offsite replication at 03:30 IST — 15 min after db_backup, so the
+    # snapshot it copies is the one written the same night
+    # ------------------------------------------------------------------
+    {
+        "task_type": "offsite_push",
+        "trigger": "cron",
+        "trigger_kwargs": {"hour": 3, "minute": 30},
+        "payload": {},
+    },
+
+    # ------------------------------------------------------------------
     # Morning briefing at 06:30 IST daily
     # ------------------------------------------------------------------
     {

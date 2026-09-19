@@ -198,6 +198,21 @@ NEWS_MAX_RESHOW: int = int(_get("NEWS_MAX_RESHOW", 3))
 # corpus repo, so backups never risk landing in MD corpus git history.
 DB_BACKUP_RETENTION_DAYS: int = int(_get("DB_BACKUP_RETENTION_DAYS", 14))
 
+# ---------------------------------------------------------------------------
+# Offsite replication (offsite.py)
+# ---------------------------------------------------------------------------
+# "auto" (default) = push the corpus only if the configured remote exists, and
+# stay quiet otherwise, so adding the remote on the box is the only step
+# needed to switch this on. "1" = a missing remote is a hard failure that
+# alerts. "0" = off entirely.
+OFFSITE_PUSH_ENABLED: str  = str(_get("OFFSITE_PUSH_ENABLED", "auto"))
+CORPUS_GIT_REMOTE: str     = _get("CORPUS_GIT_REMOTE", "origin")
+CORPUS_GIT_BRANCH: str     = _get("CORPUS_GIT_BRANCH", "")   # blank = repo's current branch
+OFFSITE_SSH_KEY_PATH: str  = _get("OFFSITE_SSH_KEY_PATH", "")
+# Destination for gzipped SQLite snapshots. Only genuinely offsite if it is a
+# mounted remote (rclone/S3/NFS); blank disables the snapshot half entirely.
+OFFSITE_SNAPSHOT_DIR: str  = _get("OFFSITE_SNAPSHOT_DIR", "")
+
 # Current user's nick for owner-filtering in recur files (must match owners: values in frontmatter)
 USER_NICK: str = _get("USER_NICK", "ADMIN")
 

@@ -38,6 +38,15 @@ ALERT_EMAIL          = ""            # Defaults to USER_EMAIL when left blank
 ALERT_COOLDOWN_HOURS = 6             # Per-alert-key throttle; stops a broken job mail-flooding
 
 # ---------------------------------------------------------------------------
+# Offsite replication (offsite.py) — the only protection against losing the box
+# ---------------------------------------------------------------------------
+OFFSITE_PUSH_ENABLED = "auto"        # "auto" = push if a remote exists | "1" = required | "0" = off
+CORPUS_GIT_REMOTE    = "origin"      # Remote name inside data/<user>/ (NOT this code repo)
+CORPUS_GIT_BRANCH    = ""            # Blank = whatever branch the corpus repo is on
+OFFSITE_SSH_KEY_PATH = ""            # Deploy key for that remote, e.g. /run/secrets/corpus_deploy_key
+OFFSITE_SNAPSHOT_DIR = ""            # Mounted remote dir for gzipped SQLite snapshots; blank = off
+
+# ---------------------------------------------------------------------------
 # Worker / indexing
 # ---------------------------------------------------------------------------
 INDEX_SYNC_INTERVAL_SEC = 300        # How often (s) to sync ChromaDB vs MD files

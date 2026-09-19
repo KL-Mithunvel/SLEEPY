@@ -260,6 +260,20 @@ def _handle_db_backup(payload: dict, conn: sqlite3.Connection):
         logger.info("db_backup: pruned %d backup(s) older than %d days", pruned, config.DB_BACKUP_RETENTION_DAYS)
 
 
+def _handle_offsite_push(payload: dict, conn: sqlite3.Connection):
+    """
+    Nightly offsite replication: corpus git push + gzipped SQLite snapshot.
+
+    Commits anything still pending first so the push ships today's work rather
+    than whatever the hourly commit_pending job last happened to catch.
+    """
+    import offsite
+    logger.info("offsite_push started")
+    _commit_data_root("batch: pre-offsite-push")
+    result = offsite.run_offsite_push(config.USER_DATA_ROOT)
+    logger.info("offsite_push done: %s", result)
+
+
 # ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
@@ -281,6 +295,7 @@ HANDLERS: dict[str, callable] = {
     "email":                _handle_email,
     # Backups
     "db_backup":            _handle_db_backup,
+    "offsite_push":         _handle_offsite_push,
 }
 
 
