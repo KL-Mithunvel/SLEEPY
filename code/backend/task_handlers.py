@@ -274,6 +274,16 @@ def _handle_offsite_push(payload: dict, conn: sqlite3.Connection):
     logger.info("offsite_push done: %s", result)
 
 
+def _handle_self_check(payload: dict, conn: sqlite3.Connection):
+    """
+    Periodic self-check: detect known stuck states, repair the safe ones,
+    alert on the rest. See selfheal.py for why the line sits where it does.
+    """
+    import selfheal
+    findings = selfheal.run_checks(conn, config.USER_DATA_ROOT)
+    logger.info("self_check done: %s", [f.as_dict() for f in findings])
+
+
 # ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
@@ -296,6 +306,8 @@ HANDLERS: dict[str, callable] = {
     # Backups
     "db_backup":            _handle_db_backup,
     "offsite_push":         _handle_offsite_push,
+    # Self-healing
+    "self_check":           _handle_self_check,
 }
 
 

@@ -98,6 +98,18 @@ SCHEDULED_TASKS = [
     },
 
     # ------------------------------------------------------------------
+    # Self-check / self-heal every SELF_CHECK_INTERVAL_SEC (default 15 min):
+    # stale locks, stuck failed tasks, missing Daily file, empty vector
+    # index, disk space, DB integrity, backend health
+    # ------------------------------------------------------------------
+    {
+        "task_type": "self_check",
+        "trigger": "interval",
+        "trigger_kwargs": {"seconds": config.SELF_CHECK_INTERVAL_SEC},
+        "payload": {},
+    },
+
+    # ------------------------------------------------------------------
     # News Watch — nightly batch submission at midnight IST
     # Disabled when PMA_NEWS_WATCH_CRON_DISABLED=1 (manual trigger still works)
     # ------------------------------------------------------------------

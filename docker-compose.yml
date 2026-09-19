@@ -80,6 +80,10 @@ services:
       - CHROMA_PORT=8000
       - CORS_ORIGINS=https://klm.smtw.in
       - TZ=Asia/Kolkata
+      # The self_check job (selfheal.py) probes the web process from here.
+      # The default is localhost, which in this container is the worker
+      # itself — it has to be the backend service by name.
+      - HEALTH_CHECK_URL=http://backend:5000/healthz
     volumes:
       - ./code/backend/secrets_app.py:/app/code/backend/secrets_app.py:ro
       - pma_data:/data

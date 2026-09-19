@@ -47,6 +47,13 @@ OFFSITE_SSH_KEY_PATH = ""            # Deploy key for that remote, e.g. /run/sec
 OFFSITE_SNAPSHOT_DIR = ""            # Mounted remote dir for gzipped SQLite snapshots; blank = off
 
 # ---------------------------------------------------------------------------
+# Self-check / self-heal (selfheal.py)
+# ---------------------------------------------------------------------------
+SELF_CHECK_INTERVAL_SEC = 900        # How often (s) to run the self-check job
+DISK_ALERT_PERCENT      = 85         # Alert once the data volume is this full
+HEALTH_CHECK_URL        = "http://localhost:5000/healthz"   # Docker: http://backend:5000/healthz
+
+# ---------------------------------------------------------------------------
 # Worker / indexing
 # ---------------------------------------------------------------------------
 INDEX_SYNC_INTERVAL_SEC = 300        # How often (s) to sync ChromaDB vs MD files

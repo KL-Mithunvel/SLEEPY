@@ -176,6 +176,15 @@ INDEX_SYNC_INTERVAL_SEC: int = int(_get("INDEX_SYNC_INTERVAL_SEC", 300))
 # and shut down cleanly. On Linux/Docker the SIGTERM handler does the same job.
 STOP_SENTINEL_PATH: str = str(_get("STOP_SENTINEL_PATH", str(_REPO_ROOT / ".sleepy-stop")))
 
+# ---------------------------------------------------------------------------
+# Self-check / self-heal (selfheal.py)
+# ---------------------------------------------------------------------------
+SELF_CHECK_INTERVAL_SEC: int = int(_get("SELF_CHECK_INTERVAL_SEC", 900))   # 15 min
+DISK_ALERT_PERCENT: int      = int(_get("DISK_ALERT_PERCENT", 85))
+# The worker probes the web process here. In Docker that is the backend
+# service by name; in dev both run on localhost.
+HEALTH_CHECK_URL: str        = _get("HEALTH_CHECK_URL", "http://localhost:5000/healthz")
+
 # When "1", skip registering the midnight news-watch cron (manual triggers still work)
 NEWS_WATCH_CRON_DISABLED: bool = str(_get("PMA_NEWS_WATCH_CRON_DISABLED", "0")).strip() in ("1", "true", "yes")
 
