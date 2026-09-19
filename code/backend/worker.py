@@ -9,6 +9,7 @@ import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+import alerts
 import local_db
 import task_handlers
 import task_queue
@@ -27,6 +28,22 @@ def _enqueue_scheduled(task_type: str, payload: dict):
         logger.info("Scheduled task enqueued: %s id=%d", task_type, tid)
     finally:
         local_db.return_db(conn)
+
+
+def _alert_if_permanently_failed(conn, task_id: int):
+    """
+    mark_failed() only sets status='failed' once attempts >= max_attempts;
+    anything below that is a retry still in flight and not worth an email.
+    Re-read the row rather than inferring, so the alert condition is exactly
+    the queue's own terminal state.
+    """
+    try:
+        row = task_queue.get(conn, task_id)
+        if row and row.get("status") == "failed":
+            alerts.task_failed(conn, row)
+            conn.commit()   # outside a handler here — the worker owns this one
+    except Exception:
+        logger.exception("Failure alert for task id=%s could not be raised", task_id)
 
 
 def _drain_once():
@@ -52,6 +69,7 @@ def _drain_once():
                 except Exception:
                     logger.exception("Task id=%d rollback failed", task["id"])
                 task_queue.mark_failed(conn, task["id"], str(exc))
+                _alert_if_permanently_failed(conn, task["id"])
     finally:
         local_db.return_db(conn)
 

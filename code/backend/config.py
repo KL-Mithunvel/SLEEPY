@@ -155,6 +155,17 @@ O365_SENDER_NAME: str  = _get("O365_SENDER_NAME", "PMA Bot")
 USER_EMAIL: str = _get("USER_EMAIL", "")
 
 # ---------------------------------------------------------------------------
+# System alerting (alerts.py)
+# ---------------------------------------------------------------------------
+# Internal failures used to die silently in SQLite: a task that burned through
+# max_attempts just sat there as status='failed' with nobody told. These route
+# such events to an email the owner actually reads, throttled per alert key so
+# a persistently broken job can't turn into an hourly mail flood.
+ALERTS_ENABLED: bool      = str(_get("ALERTS_ENABLED", "1")).strip() in ("1", "true", "yes")
+ALERT_EMAIL: str          = _get("ALERT_EMAIL", "") or USER_EMAIL
+ALERT_COOLDOWN_HOURS: int = int(_get("ALERT_COOLDOWN_HOURS", 6))
+
+# ---------------------------------------------------------------------------
 # Worker / indexing
 # ---------------------------------------------------------------------------
 INDEX_SYNC_INTERVAL_SEC: int = int(_get("INDEX_SYNC_INTERVAL_SEC", 300))

@@ -31,6 +31,13 @@ O365_SENDER_NAME   = "PMA Bot"       # Display name in From: field
 USER_EMAIL         = ""              # Where scheduled digests (briefing + deadlines) are sent
 
 # ---------------------------------------------------------------------------
+# Operational alerting (alerts.py)
+# ---------------------------------------------------------------------------
+ALERTS_ENABLED       = "1"           # "0" = record alerts in SQLite but never email
+ALERT_EMAIL          = ""            # Defaults to USER_EMAIL when left blank
+ALERT_COOLDOWN_HOURS = 6             # Per-alert-key throttle; stops a broken job mail-flooding
+
+# ---------------------------------------------------------------------------
 # Worker / indexing
 # ---------------------------------------------------------------------------
 INDEX_SYNC_INTERVAL_SEC = 300        # How often (s) to sync ChromaDB vs MD files

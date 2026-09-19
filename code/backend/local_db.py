@@ -147,6 +147,28 @@ _MIGRATIONS = [
         # login history.
         "ALTER TABLE login_events ADD COLUMN voided INTEGER NOT NULL DEFAULT 0",
     ]),
+    (8, "Add system_alerts table for operational alerting (alerts.py)", [
+        # Every alert ever raised is recorded here, whether or not it was
+        # actually emailed — `suppressed=1` means it fell inside the cooldown
+        # window for its alert_key. Keeping the suppressed ones is what makes
+        # "this has been failing every 15 minutes since Tuesday" visible
+        # afterwards instead of looking like one isolated incident.
+        """
+        CREATE TABLE IF NOT EXISTS system_alerts (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            alert_key   TEXT NOT NULL,
+            subject     TEXT NOT NULL,
+            body        TEXT,
+            suppressed  INTEGER NOT NULL DEFAULT 0,
+            emailed     INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_system_alerts_key_created ON system_alerts (alert_key, created_at)",
+    ]),
+    (9, "Add task_queue.recovered_at so self-heal requeues a failed task at most once", [
+        "ALTER TABLE task_queue ADD COLUMN recovered_at TEXT",
+    ]),
 ]
 
 

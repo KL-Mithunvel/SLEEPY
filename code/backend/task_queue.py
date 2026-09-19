@@ -16,7 +16,16 @@ BACKOFF_BASE_SEC = 30  # delay = 30 * 2^(attempts-1) on failure
 LOCK_MINUTES = 30
 
 
-def enqueue(conn: sqlite3.Connection, task_type: str, payload: dict, delay_seconds: int = 0) -> int:
+def enqueue(conn: sqlite3.Connection, task_type: str, payload: dict, delay_seconds: int = 0,
+            *, commit: bool = True) -> int:
+    """
+    Insert a pending task and return its id.
+
+    `commit=False` is for callers running *inside* a task handler, where the
+    worker owns the transaction boundary and an early commit would flush a
+    half-finished handler's writes (see CLAUDE.md "Task handlers never
+    commit"). Every other caller wants the default.
+    """
     if delay_seconds:
         scheduled_for = (datetime.now() + timedelta(seconds=delay_seconds)).strftime("%Y-%m-%d %H:%M:%S")
     else:
@@ -29,8 +38,15 @@ def enqueue(conn: sqlite3.Connection, task_type: str, payload: dict, delay_secon
         """,
         (task_type, json.dumps(payload), scheduled_for),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return cur.lastrowid
+
+
+def get(conn: sqlite3.Connection, task_id: int) -> dict | None:
+    """Fetch one task row as a dict (payload left as raw JSON text)."""
+    row = conn.execute("SELECT * FROM task_queue WHERE id = ?", (task_id,)).fetchone()
+    return dict(row) if row is not None else None
 
 
 def claim_next(conn: sqlite3.Connection) -> dict | None:
