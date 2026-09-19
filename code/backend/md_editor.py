@@ -173,6 +173,47 @@ def corpus_git_lock(data_root: str | None = None):
             os.remove(lock_path)
 
 
+def clear_stale_git_locks(data_root: str | None = None) -> list[str]:
+    """
+    Remove abandoned lock files from the corpus repo. Returns what was removed.
+
+    Two different locks can be left behind by a process that died mid-commit:
+
+    * `.sleepy-git.lock` — this module's own cross-process lock. It already
+      self-heals inside corpus_git_lock(), so clearing it here just saves the
+      next writer a wait.
+    * `.git/index.lock` — git's own. Nothing self-heals this one: until it is
+      removed by hand, every subsequent commit fails with "Unable to create
+      index.lock: File exists" and the whole corpus is effectively read-only.
+      That is the concrete way a hard kill (an old stop-sleepy.ps1
+      Stop-Process -Force, an OOM kill, a yanked power cord) used to wedge the
+      system until someone noticed.
+
+    Both are removed only once older than _GIT_LOCK_STALE_SEC, so a genuinely
+    in-progress git operation is never unlocked out from under itself. Never
+    raises — this runs on startup paths where failing would be worse than the
+    lock it is trying to clear.
+    """
+    root = data_root or config.USER_DATA_ROOT
+    removed: list[str] = []
+    for path in (os.path.join(root, _GIT_LOCK_NAME),
+                 os.path.join(root, ".git", "index.lock")):
+        try:
+            age = time.time() - os.path.getmtime(path)
+        except OSError:
+            continue    # not there — the normal case
+        if age <= _GIT_LOCK_STALE_SEC:
+            logger.info("clear_stale_git_locks: %s is only %.0fs old, leaving it", path, age)
+            continue
+        try:
+            os.remove(path)
+            removed.append(path)
+            logger.warning("clear_stale_git_locks: removed abandoned lock %s (%.0fs old)", path, age)
+        except OSError:
+            logger.exception("clear_stale_git_locks: could not remove %s", path)
+    return removed
+
+
 def ensure_corpus_gitignore(data_root: str | None = None) -> bool:
     """
     Make sure the corpus repo ignores db/ (and this module's lock file) before

@@ -103,6 +103,29 @@ def mark_done(conn: sqlite3.Connection, task_id: int):
     conn.commit()
 
 
+def release(conn: sqlite3.Connection, task_id: int) -> None:
+    """
+    Hand a claimed task back to the queue on a clean shutdown.
+
+    Without this, a worker stopped mid-task leaves the row 'running' and
+    nothing touches it again until LOCK_MINUTES (30) has elapsed — so a
+    routine `docker compose restart` could silently delay a job by half an
+    hour. The attempt is given back too: being asked to stop is not a failed
+    attempt, and it must not count towards max_attempts.
+    """
+    conn.execute(
+        """
+        UPDATE task_queue
+        SET status = 'pending',
+            locked_until = NULL,
+            attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END
+        WHERE id = ? AND status = 'running'
+        """,
+        (task_id,),
+    )
+    conn.commit()
+
+
 def mark_failed(conn: sqlite3.Connection, task_id: int, error: str, retry_delay_seconds: int | None = None):
     """
     Mark a task as failed and schedule its retry with exponential backoff.

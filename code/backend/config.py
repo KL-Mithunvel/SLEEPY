@@ -170,6 +170,12 @@ ALERT_COOLDOWN_HOURS: int = int(_get("ALERT_COOLDOWN_HOURS", 6))
 # ---------------------------------------------------------------------------
 INDEX_SYNC_INTERVAL_SEC: int = int(_get("INDEX_SYNC_INTERVAL_SEC", 300))
 
+# Cooperative stop signal. Windows has no usable SIGTERM for a child process
+# (Popen.terminate() is a hard TerminateProcess, so no handler ever runs), so
+# the dev stop script drops this file and both main.py and worker.py notice it
+# and shut down cleanly. On Linux/Docker the SIGTERM handler does the same job.
+STOP_SENTINEL_PATH: str = str(_get("STOP_SENTINEL_PATH", str(_REPO_ROOT / ".sleepy-stop")))
+
 # When "1", skip registering the midnight news-watch cron (manual triggers still work)
 NEWS_WATCH_CRON_DISABLED: bool = str(_get("PMA_NEWS_WATCH_CRON_DISABLED", "0")).strip() in ("1", "true", "yes")
 

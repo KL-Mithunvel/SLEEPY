@@ -5,11 +5,14 @@ Never run inside the web process.
 """
 
 import logging
+import os
+import signal
 import time
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
 import alerts
+import config
 import local_db
 import task_handlers
 import task_queue
@@ -19,6 +22,45 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger("worker")
 
 DRAIN_INTERVAL = 5  # seconds between drain loops
+
+# Set by the SIGTERM/SIGINT handler and by the stop-sentinel check. The drain
+# loop reads it between tasks so a stop lands on a task boundary rather than
+# in the middle of one.
+_stopping = False
+
+# id of the task currently being dispatched, so a stop that lands mid-task can
+# hand it straight back to the queue instead of leaving it 'running' for the
+# full 30-minute lock window.
+_current_task_id: int | None = None
+
+
+def _request_stop(signum=None, frame=None):
+    """
+    SIGTERM/SIGINT handler. Docker sends SIGTERM on `compose stop|restart`, and
+    Python's default handler for it terminates the process outright — no
+    exception, so neither the `finally` blocks nor scheduler.shutdown() ever
+    ran, and any in-flight task was abandoned. Raising SystemExit puts the
+    shutdown through the same path as Ctrl-C.
+    """
+    global _stopping
+    _stopping = True
+    logger.info("Shutdown requested (signal=%s)", signum)
+    raise SystemExit(0)
+
+
+def _stop_requested() -> bool:
+    """
+    True once a stop has been signalled, or the cooperative stop sentinel
+    exists. The sentinel is what makes a clean stop possible on Windows at
+    all: Popen.terminate() there is a hard TerminateProcess, so no signal
+    handler in this process would ever run.
+    """
+    if _stopping:
+        return True
+    try:
+        return os.path.exists(config.STOP_SENTINEL_PATH)
+    except Exception:
+        return False
 
 
 def _enqueue_scheduled(task_type: str, payload: dict):
@@ -47,6 +89,7 @@ def _alert_if_permanently_failed(conn, task_id: int):
 
 
 def _drain_once():
+    global _current_task_id
     conn = local_db.get_db()
     try:
         while True:
@@ -54,6 +97,7 @@ def _drain_once():
             if task is None:
                 break
             logger.info("Running task id=%d type=%s", task["id"], task["task_type"])
+            _current_task_id = task["id"]
             try:
                 task_handlers.dispatch(task["task_type"], task["payload"], conn)
                 task_queue.mark_done(conn, task["id"])
@@ -70,6 +114,34 @@ def _drain_once():
                     logger.exception("Task id=%d rollback failed", task["id"])
                 task_queue.mark_failed(conn, task["id"], str(exc))
                 _alert_if_permanently_failed(conn, task["id"])
+
+            # Deliberately NOT a `finally`: SystemExit from the SIGTERM handler
+            # can land anywhere inside dispatch(), and it must leave
+            # _current_task_id set so the shutdown path can hand that task back
+            # to the queue. Clearing it here means only a task that actually
+            # reached a conclusion is forgotten.
+            _current_task_id = None
+
+            if _stop_requested():
+                logger.info("Stop requested — finishing drain at a task boundary")
+                break
+    finally:
+        local_db.return_db(conn)
+
+
+def _release_in_flight_task():
+    """
+    Give a half-run task back to the queue on shutdown, so a restart picks it
+    up immediately instead of waiting out task_queue.LOCK_MINUTES.
+    """
+    if _current_task_id is None:
+        return
+    conn = local_db.get_db()
+    try:
+        task_queue.release(conn, _current_task_id)
+        logger.info("Released in-flight task id=%s back to pending", _current_task_id)
+    except Exception:
+        logger.exception("Could not release in-flight task id=%s", _current_task_id)
     finally:
         local_db.return_db(conn)
 
@@ -101,6 +173,18 @@ def main():
     local_db.init_db()
     logger.info("Worker started")
 
+    signal.signal(signal.SIGTERM, _request_stop)
+    signal.signal(signal.SIGINT, _request_stop)
+
+    # A previous run killed mid-commit can leave .git/index.lock behind, and
+    # nothing else ever clears it — every corpus write would fail until it was
+    # deleted by hand. Startup is the safe moment to sweep it.
+    try:
+        import md_editor
+        md_editor.clear_stale_git_locks(config.USER_DATA_ROOT)
+    except Exception:
+        logger.exception("Startup lock sweep failed (continuing)")
+
     scheduler = BackgroundScheduler()
     count = _register_jobs(scheduler)
     scheduler.start()
@@ -114,11 +198,22 @@ def main():
     _enqueue_scheduled("materialise", {})
 
     try:
-        while True:
+        while not _stop_requested():
             _drain_once()
-            time.sleep(DRAIN_INTERVAL)
+            # Sleep in one-second slices so a stop is noticed within ~1s
+            # rather than up to a full drain interval later.
+            for _ in range(DRAIN_INTERVAL):
+                if _stop_requested():
+                    break
+                time.sleep(1)
     except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown()
+        pass
+    finally:
+        _release_in_flight_task()
+        try:
+            scheduler.shutdown(wait=False)
+        except Exception:
+            logger.exception("Scheduler shutdown failed")
         logger.info("Worker stopped")
 
 

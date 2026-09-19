@@ -13,6 +13,8 @@ import atexit
 import os
 import subprocess
 import sys
+import threading
+import time
 
 # Default to dev auth bypass for this local-only runner. Respect an
 # explicitly-set env var (e.g. DEV_AUTH_BYPASS=0 to test the Keycloak path).
@@ -29,6 +31,11 @@ from app import app
 FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "code", "frontend"))
 BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "code", "backend"))
 WORKER_SCRIPT = os.path.join(BACKEND_DIR, "worker.py")
+
+# How long the worker gets to finish its current task and exit on its own
+# before it is terminated. Long enough for a normal task, short enough that
+# stopping the dev stack still feels instant.
+WORKER_GRACE_SEC = 15
 
 _frontend_proc: subprocess.Popen | None = None
 _worker_proc: subprocess.Popen | None = None
@@ -57,13 +64,26 @@ def _start_frontend() -> subprocess.Popen | None:
 
 
 def _stop_frontend():
-    if _frontend_proc and _frontend_proc.poll() is None:
-        print("[main] Stopping frontend...")
+    if not (_frontend_proc and _frontend_proc.poll() is None):
+        return
+
+    print("[main] Stopping frontend...")
+    if os.name == "nt":
+        # vite.cmd spawns node.exe as a child, and terminate() kills only the
+        # .cmd shim — the orphaned node keeps holding port 5173 and makes the
+        # stop script wait out its entire grace period before forcing it. The
+        # dev server holds no state worth unwinding, so take the whole tree.
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(_frontend_proc.pid)],
+            capture_output=True,
+        )
+    else:
         _frontend_proc.terminate()
-        try:
-            _frontend_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _frontend_proc.kill()
+
+    try:
+        _frontend_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _frontend_proc.kill()
 
 
 def _start_worker() -> subprocess.Popen:
@@ -74,23 +94,101 @@ def _start_worker() -> subprocess.Popen:
 
 
 def _stop_worker():
-    if _worker_proc and _worker_proc.poll() is None:
-        print("[main] Stopping worker...")
-        _worker_proc.terminate()
-        try:
-            _worker_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            _worker_proc.kill()
+    """
+    Stop the worker, giving it a chance to finish cleanly first.
+
+    Popen.terminate() on Windows is a hard TerminateProcess — no signal
+    handler runs, so a task in flight was abandoned and its queue row sat
+    'running' for the full 30-minute lock window. The worker now also watches
+    the stop sentinel, so the sentinel is tried first and terminate() is only
+    the fallback for a worker that has stopped responding.
+    """
+    if not (_worker_proc and _worker_proc.poll() is None):
+        return
+
+    print("[main] Stopping worker...")
+    created_sentinel = _write_stop_sentinel()
+    try:
+        _worker_proc.wait(timeout=WORKER_GRACE_SEC)
+        print("[main] Worker stopped cleanly.")
+        return
+    except subprocess.TimeoutExpired:
+        print(f"[main] Worker did not stop within {WORKER_GRACE_SEC}s — terminating.")
+    finally:
+        if created_sentinel:
+            _clear_stop_sentinel()
+
+    _worker_proc.terminate()
+    try:
+        _worker_proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _worker_proc.kill()
+
+
+def _write_stop_sentinel() -> bool:
+    """Create the stop sentinel. Returns False if it was already there (the
+    stop script made it), so we don't delete someone else's signal."""
+    try:
+        if os.path.exists(config.STOP_SENTINEL_PATH):
+            return False
+        with open(config.STOP_SENTINEL_PATH, "w") as f:
+            f.write(str(os.getpid()))
+        return True
+    except OSError as exc:
+        print(f"[main] WARNING: could not write stop sentinel: {exc}")
+        return False
+
+
+def _clear_stop_sentinel():
+    try:
+        os.remove(config.STOP_SENTINEL_PATH)
+    except OSError:
+        pass
+
+
+def _watch_for_stop():
+    """
+    Poll for the stop sentinel dropped by tooling/stop-sleepy.ps1.
+
+    Windows offers no way for that script to ask this console process to shut
+    down politely — taskkill /F is a hard kill, which is exactly what used to
+    leave .git/index.lock behind and wedge every later corpus write. Watching
+    for a file gives the stop script a way to say "please stop" that runs the
+    same teardown as Ctrl-C.
+    """
+    while True:
+        time.sleep(1)
+        if not os.path.exists(config.STOP_SENTINEL_PATH):
+            continue
+        print("[main] Stop sentinel seen — shutting down.")
+        _clear_stop_sentinel()
+        _stop_frontend()
+        _stop_worker()
+        # Children are down and nothing else holds state worth unwinding; the
+        # dev server has no clean programmatic shutdown, so exit outright.
+        os._exit(0)
 
 
 if __name__ == "__main__":
     local_db.init_db()
+
+    # Clear anything a previous hard kill left behind before either process
+    # tries to touch the corpus repo (see md_editor.clear_stale_git_locks).
+    _clear_stop_sentinel()
+    try:
+        import md_editor
+        for path in md_editor.clear_stale_git_locks(config.USER_DATA_ROOT):
+            print(f"[main] Cleared abandoned lock: {path}")
+    except Exception as exc:
+        print(f"[main] WARNING: startup lock sweep failed: {exc}")
 
     _frontend_proc = _start_frontend()
     atexit.register(_stop_frontend)
 
     _worker_proc = _start_worker()
     atexit.register(_stop_worker)
+
+    threading.Thread(target=_watch_for_stop, daemon=True).start()
 
     print("[main] Backend:  http://localhost:5000")
     print("[main] Frontend: http://localhost:5173")
