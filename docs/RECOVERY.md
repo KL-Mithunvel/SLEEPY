@@ -66,13 +66,25 @@ night: nothing is offsite.
 
 1. Create an **empty private** repo for the corpus (GitHub, Gitea, anywhere
    reachable over SSH). It holds your notes — private, always.
-2. Create a deploy key with **write** access, put the private key on the box,
-   and point `OFFSITE_SSH_KEY_PATH` at it in `secrets_app.py`.
+2. Create a deploy key with **write** access. The keypair already exists on
+   the box at `~/sleepy/secrets/offsite_ed25519` (generated 2026-09-20,
+   `chmod 600`, gitignored via `/secrets/`) — register the **`.pub` half** as
+   the repo's deploy key, with "Allow write access" ticked. Regenerate with:
+   ```bash
+   ssh-keygen -t ed25519 -N '' -C 'sleepy-offsite-corpus' -f ~/sleepy/secrets/offsite_ed25519
+   ```
+   `docker-compose.yml` already mounts it read-only into the worker at
+   `/app/secrets/offsite_ed25519` and sets `OFFSITE_SSH_KEY_PATH` to that
+   path, so there is nothing to change in `secrets_app.py`. The file must
+   exist on the host *before* `docker compose up`, or Docker creates a
+   directory at that path instead. The worker image ships `openssh-client`
+   for this — git shells out to the `ssh` binary to push.
 3. Add the remote to the corpus repo on the box (not this code repo):
    ```bash
    git -C /home/ec2-user/sleepy/data/klm remote add origin <url>
    ```
-4. Set `OFFSITE_PUSH_ENABLED = "1"` in `secrets_app.py`. With `"1"` a missing
+4. Set `OFFSITE_PUSH_ENABLED=1` in the worker's `environment:` block in
+   `docker-compose.yml` (env wins over `secrets_app.py`). With `"1"` a missing
    or broken remote becomes a hard failure that emails you, instead of a
    silent skip — which is what you want once you are relying on it.
 5. Optionally set `OFFSITE_SNAPSHOT_DIR` to a **mounted remote** (rclone, S3,

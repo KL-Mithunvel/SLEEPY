@@ -55,3 +55,6 @@ tooling/_*
 
 # Cooperative stop signal dropped by tooling/stop-sleepy.ps1 (see main.py)
 .sleepy-stop
+
+# Offsite deploy key (generated on the box, never committed) — see docs/RECOVERY.md section 3
+/secrets/

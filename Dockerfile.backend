@@ -23,8 +23,11 @@ ENV PYTHONUNBUFFERED=1
 # curl is used by docker-compose's healthcheck; git is required by GitPython
 # (md_editor.py's commit flow); tzdata makes the TZ=Asia/Kolkata env var
 # (set in docker-compose.yml, for the IST-wall-clock cron schedule) actually
-# resolve — python:3.12-slim ships none of the three.
-RUN apt-get update && apt-get install -y --no-install-recommends curl git tzdata \
+# resolve — python:3.12-slim ships none of the three. openssh-client is for
+# offsite.py: it pushes the corpus over SSH with a deploy key, and git shells
+# out to the `ssh` binary to do it — without this the nightly offsite_push
+# dies with "ssh: command not found" the moment a remote exists.
+RUN apt-get update && apt-get install -y --no-install-recommends curl git openssh-client tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # GeoIP database for admin login monitoring (geoip_lookup.py) — DB-IP City

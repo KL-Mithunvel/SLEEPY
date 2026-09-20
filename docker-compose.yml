@@ -84,8 +84,16 @@ services:
       # The default is localhost, which in this container is the worker
       # itself — it has to be the backend service by name.
       - HEALTH_CHECK_URL=http://backend:5000/healthz
+      # Offsite corpus replication (offsite.py, 03:30 IST). The deploy key is
+      # mounted read-only below; git shells out to ssh -i <this path>. Left in
+      # "auto" mode until the corpus repo actually has a remote — see
+      # docs/RECOVERY.md section 3.
+      - OFFSITE_SSH_KEY_PATH=/app/secrets/offsite_ed25519
     volumes:
       - ./code/backend/secrets_app.py:/app/code/backend/secrets_app.py:ro
+      # Deploy key for the offsite corpus push. Must exist on the host before
+      # 'compose up', or Docker helpfully creates a DIRECTORY here instead.
+      - ./secrets/offsite_ed25519:/app/secrets/offsite_ed25519:ro
       - pma_data:/data
     security_opt:
       - no-new-privileges:true
