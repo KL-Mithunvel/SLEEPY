@@ -60,9 +60,18 @@ ORDER BY id DESC LIMIT 20;
 
 ## 3. Offsite replication — one-time setup
 
-**This is the only part that needs you before it protects anything.** Until a
-remote exists, `offsite_push` runs in "auto" mode and skips quietly every
-night: nothing is offsite.
+**Status: armed 2026-09-20.** The corpus pushes nightly to the private repo
+`git@github.com:KL-Mithunvel/sleepy-corpus.git` (branch `master`), using the
+deploy key described in step 2, with `OFFSITE_PUSH_ENABLED=1` set in the
+worker's compose environment. First real push verified the same day: remote
+`HEAD` matched local `master` exactly. The SQLite-snapshot half is still off
+(`OFFSITE_SNAPSHOT_DIR` unset) — see step 5.
+
+The steps below are the original one-time setup, kept for rebuilding from
+scratch or repointing at a different remote. Before any remote exists,
+`offsite_push` runs in "auto" mode and skips quietly every night: nothing is
+offsite. Note that once a remote *does* exist, "auto" attempts the push for
+real — a broken remote then fails loudly rather than skipping.
 
 1. Create an **empty private** repo for the corpus (GitHub, Gitea, anywhere
    reachable over SSH). It holds your notes — private, always.
@@ -92,7 +101,7 @@ night: nothing is offsite.
    against a bad write, not a lost volume.
 6. Verify, without waiting for 03:30:
    ```bash
-   docker compose exec worker python -c \
+   docker compose exec worker uv run python -c \
      "import sys; sys.path.insert(0,'code/backend'); import offsite; print(offsite.run_offsite_push())"
    ```
    Then confirm the commits actually landed in the remote.

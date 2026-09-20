@@ -86,9 +86,12 @@ services:
       - HEALTH_CHECK_URL=http://backend:5000/healthz
       # Offsite corpus replication (offsite.py, 03:30 IST). The deploy key is
       # mounted read-only below; git shells out to ssh -i <this path>. Left in
-      # "auto" mode until the corpus repo actually has a remote — see
-      # docs/RECOVERY.md section 3.
+      # docs/RECOVERY.md section 3. Armed 2026-09-20: the corpus repo now
+      # pushes to a private GitHub repo, so this is "1" rather than "auto" —
+      # a missing or broken remote is now a hard failure that alerts, instead
+      # of a silent skip that would leave us thinking we had a backup.
       - OFFSITE_SSH_KEY_PATH=/app/secrets/offsite_ed25519
+      - OFFSITE_PUSH_ENABLED=1
     volumes:
       - ./code/backend/secrets_app.py:/app/code/backend/secrets_app.py:ro
       # Deploy key for the offsite corpus push. Must exist on the host before
