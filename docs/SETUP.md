@@ -74,7 +74,7 @@ echo # About > data\klm\ABOUT.md
 ```
 
 `data/klm/` is the MD corpus and its own git repo (the AI commits into it as
-`Arivu Baalan <arivu@smtw.in>`). `db/` inside it is derived app state (SQLite,
+`sleepy <sleepy@smtw.in>`). `db/` inside it is derived app state (SQLite,
 Chroma, news-watch state) and must **never** be committed — `md_editor.py` writes a
 `.gitignore` there automatically on the first commit, but if you ever create the
 repo by hand on a new machine, check it exists:

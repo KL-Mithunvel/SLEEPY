@@ -122,7 +122,7 @@ backup is a single `rsync`; per-user ChromaDB keeps RAG relevance sharp and avoi
 |Job queue|DB-backed `task\_queue` in SQLite|DB-backed in PG|✅ same pattern|Schema nearly identical; swap `SERIAL` → `INTEGER PRIMARY KEY AUTOINCREMENT`. No Redis.|
 |Scheduling|APScheduler → task\_queue|Same|✅ same|—|
 |AI Layer|**LiteLLM + LlamaIndex + ChromaDB**|n/a|➕ new|Multi-model (Claude primary, Grok fallback). Index MD for RAG.|
-|Git ops|**GitPython**|n/a|➕ new|Apply AI diffs, commit as `Arivu Baalan <arivu@smtw.in>`, push to Gitea.|
+|Git ops|**GitPython**|n/a|➕ new|Apply AI diffs, commit as `sleepy <sleepy@smtw.in>`, push to Gitea.|
 |HTTPS|Caddy|(implicit reverse proxy)|✅ compatible|Auto Let's Encrypt for the public domain.|
 |Notifications|Telegram primary, Email, (WhatsApp later)|Telegram|✅ same + extension|Use `telegram\_notifier.py` pattern; enqueue via task\_queue.|
 |Dep manager|uv|uv|✅ same|Already configured in `code/pyproject.toml`.|
@@ -168,7 +168,7 @@ Every AI-proposed diff, accepted or rejected, is a row.
 N-line changes without confirmation.
 4. Backend applies diff to a working copy; runs MD sanity check (frontmatter intact, no broken headings).
 5. **User confirmation gate** for any non-trivial edit (configurable threshold).
-6. Commit via GitPython with message `AI: <summary>`; author `Arivu Baalan <arivu@smtw.in>`; push to Gitea.
+6. Commit via GitPython with message `AI: <summary>`; author `sleepy <sleepy@smtw.in>`; push to Gitea.
 7. Log event in `ai\_events` table: prompt hash, model, diff, accepted/rejected, latency, token count.
 
 ### 6.2 Jira sync

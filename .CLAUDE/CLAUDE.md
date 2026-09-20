@@ -316,7 +316,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | `DEV_AUTH_BYPASS` | `1` = skip login, synthesise `admin` user. Set by `main.py` by default. **Never `1` in prod** — `config.py` refuses to boot if `APP_ENV=production` and this is on. |
 | `SQLITE_DB_PATH` | Default: `"../../data/klm/db/sqlite/pma.db"` (relative to `code/backend/`). Override with env var. Tests force `:memory:`. |
 | `USER_DATA_ROOT` | Default: `data/klm/` (resolved relative to `code/backend/__file__`). Override with env var. |
-| AI commit author | `Arivu Baalan <arivu@smtw.in>` — every GitPython commit from the AI uses this author, never the dev's identity |
+| AI commit author | `sleepy <sleepy@smtw.in>` — every GitPython commit from the AI uses this author, never the dev's identity |
 | Dates in SQLite | ISO-8601 strings, IST (naive). No TIMESTAMPTZ. `datetime('now', 'localtime')` in SQL. |
 | Task handler commits | Handlers **must not commit** — the worker owns the transaction |
 | `_MIGRATIONS` | Append-only forever. Never edit or delete an applied entry — it will desync other instances |
@@ -404,12 +404,12 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 
 1. **Windows first.** Write and test everything on dev machine before touching the Proxmox VM. Tests must pass locally before any deploy step.
 2. **DEV_AUTH_BYPASS=1 is dev-only.** Guard it in config — it must never be `1` in prod. If adding a new auth-touching feature, test both with and without bypass.
-3. **MD corpus is read-only except via the AI edit flow.** Flask routes must never write directly to `data/<USER>/` files. All AI edits go through: LLM diff → validate (path stays inside `data/<USER>/`, no binary, no large change without confirm) → apply → user confirmation gate → GitPython commit with author `Arivu Baalan <arivu@smtw.in>` → log in `ai_events`.
+3. **MD corpus is read-only except via the AI edit flow.** Flask routes must never write directly to `data/<USER>/` files. All AI edits go through: LLM diff → validate (path stays inside `data/<USER>/`, no binary, no large change without confirm) → apply → user confirmation gate → GitPython commit with author `sleepy <sleepy@smtw.in>` → log in `ai_events`.
 4. **Task handlers never commit.** The worker owns the transaction boundary. Handlers receive a connection and do their work; `mark_done` / `mark_failed` in the worker commits.
 5. **`_MIGRATIONS` is append-only.** Never edit or delete an applied migration entry. Use `ADD COLUMN IF NOT EXISTS` and `CREATE TABLE IF NOT EXISTS` for safety.
 6. **`ai_events` is an immutable log.** Set `voided=1` to logically cancel. Never UPDATE/DELETE rows.
 7. **Secrets never leave `secrets_app.py`.** All modules import from `config.py`, not from `secrets_app` directly. `config.py` is the single audit point.
-8. **AI interaction author is always `Arivu Baalan <arivu@smtw.in>`.** GitPython must set this explicitly on every AI-initiated commit.
+8. **AI interaction author is always `sleepy <sleepy@smtw.in>`.** GitPython must set this explicitly on every AI-initiated commit.
 9. **Thin blueprints.** Route dispatch only. Non-trivial validation/mutation in `<module>_recording.py`; state projection in `<module>_state.py`.
 10. **Test before every commit.** `tooling/run-backend-tests.bat` must pass. For frontend changes, `npm run build` in `code/frontend/` must succeed.
 11. **`main` is dev, `prod` is live — never push straight to `prod`.** Every change reaches production by a fast-forward merge from an already-tested `main` commit, deployed on the box from the `prod` branch. Full sequence in "Dev/Prod Environment Separation & Deploy Workflow" above.
@@ -461,7 +461,7 @@ See `CLAUDE-COMMON.md` (Standard User Rules — workflow, deployment model, virt
 
 ### Project-Specific Overrides
 
-- **Commit author for AI-generated commits:** `Arivu Baalan <arivu@smtw.in>`. Regular dev commits use the configured git identity (`kl mithunvel`).
+- **Commit author for AI-generated commits:** `sleepy <sleepy@smtw.in>`. Regular dev commits use the configured git identity (`kl mithunvel`).
 - **Always use `tooling/run-backend-tests.bat`** to run tests — not `pytest` directly — so the correct working directory (`code/backend`) is set for uv.
 - **Never run `uv run` from `code/backend/` for the app** (use root `uv run python main.py` or the bat wrapper). Tests still run from `code/backend/` via the bat wrapper.
 - **UI design tone:** Dark mode, personal tool aesthetic, clean Bootstrap 5. Timestamps as `DD-MM-YYYY HH:MM`.

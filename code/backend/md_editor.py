@@ -242,7 +242,7 @@ def ensure_corpus_gitignore(data_root: str | None = None) -> bool:
 
 def ai_actor() -> git.Actor:
     """The one identity every AI/background commit into the corpus repo uses."""
-    return git.Actor("Arivu Baalan", "arivu@smtw.in")
+    return git.Actor("sleepy", "sleepy@smtw.in")
 
 
 # ---------------------------------------------------------------------------
