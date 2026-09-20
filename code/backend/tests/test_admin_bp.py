@@ -173,3 +173,106 @@ def test_ai_usage_recent_reflects_inserted_rows_most_recent_first(client):
     recent = resp.get_json()["recent"]
     assert recent[0]["event_type"] == "goal_planning"
     assert recent[1]["event_type"] == "ai_suggest"
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/alerts
+# ---------------------------------------------------------------------------
+
+def _insert_alert(conn, key, *, suppressed=0, emailed=0, subject="subj", body="body"):
+    conn.execute(
+        "INSERT INTO system_alerts (alert_key, subject, body, suppressed, emailed) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (key, subject, body, suppressed, emailed),
+    )
+
+
+def test_alerts_accessible_with_dev_bypass(client):
+    resp = client.get("/api/admin/alerts")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert "summary" in data and "by_key" in data and "recent" in data
+
+
+def test_alerts_forbidden_for_user_role(client, monkeypatch, create_user):
+    import config
+    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret-32-bytes-minimum-ok!")
+    create_user("alerts-joe", role="user")
+
+    token = auth_utils.issue_token("alerts-joe", "user")
+    resp = client.get("/api/admin/alerts", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 403
+
+
+def test_alerts_allowed_for_admin_role(client, monkeypatch, create_user):
+    import config
+    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "test-secret-32-bytes-minimum-ok!")
+    create_user("alerts-admin", role="admin")
+
+    token = auth_utils.issue_token("alerts-admin", "admin")
+    resp = client.get("/api/admin/alerts", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+
+def test_alerts_bad_pagination_is_400_not_500(client):
+    assert client.get("/api/admin/alerts?limit=abc").status_code == 400
+    assert client.get("/api/admin/alerts?offset=-x").status_code == 400
+
+
+def test_alerts_counts_undelivered_separately_from_suppressed(client):
+    """
+    The whole point of this view: an alert that was raised but had nowhere to
+    go (suppressed=0, emailed=0) must not be lumped in with one that was
+    deliberately throttled (suppressed=1).
+    """
+    conn = local_db.get_db()
+    try:
+        _insert_alert(conn, "disk_space:low", suppressed=0, emailed=0)   # undeliverable
+        _insert_alert(conn, "disk_space:low", suppressed=1, emailed=0)   # throttled
+        _insert_alert(conn, "task_failed:md_reindex", suppressed=0, emailed=1)  # queued
+        conn.commit()
+    finally:
+        local_db.return_db(conn)
+
+    data = client.get("/api/admin/alerts").get_json()
+    s = data["summary"]
+    assert s["total"] == 3
+    assert s["undelivered"] == 1
+    assert s["suppressed"] == 1
+    assert s["emailed"] == 1
+    assert s["distinct_keys"] == 2
+
+
+def test_alerts_by_key_groups_and_reports_undelivered(client):
+    conn = local_db.get_db()
+    try:
+        _insert_alert(conn, "grouped:key", suppressed=0, emailed=0)
+        _insert_alert(conn, "grouped:key", suppressed=0, emailed=0)
+        _insert_alert(conn, "grouped:key", suppressed=0, emailed=1)
+        conn.commit()
+    finally:
+        local_db.return_db(conn)
+
+    data = client.get("/api/admin/alerts").get_json()
+    row = next(r for r in data["by_key"] if r["alert_key"] == "grouped:key")
+    assert row["count"] == 3
+    assert row["undelivered"] == 2
+    assert row["last_at"]
+
+
+def test_alerts_recent_is_most_recent_first_and_carries_body(client):
+    conn = local_db.get_db()
+    try:
+        _insert_alert(conn, "ordering:first", subject="older")
+        _insert_alert(conn, "ordering:second", subject="newer", body="detail text")
+        conn.commit()
+    finally:
+        local_db.return_db(conn)
+
+    recent = client.get("/api/admin/alerts").get_json()["recent"]
+    keys = [r["alert_key"] for r in recent]
+    assert keys.index("ordering:second") < keys.index("ordering:first")
+    newer = next(r for r in recent if r["alert_key"] == "ordering:second")
+    assert newer["body"] == "detail text"

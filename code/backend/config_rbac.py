@@ -40,4 +40,5 @@ PERMISSIONS = {
     # key here for role="admin"), not via this tuple.
     "admin:security":  (),
     "admin:ai_usage":  (),
+    "admin:alerts":    (),
 }

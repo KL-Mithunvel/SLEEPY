@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { apiGet } from '../api.js'
 
 const PAGE_SIZE = 25
@@ -104,8 +104,71 @@ function usagePrevPage() {
   loadUsage()
 }
 
+// -----------------------------------------------------------------------
+// Alerts tab — operational alerts raised by alerts.py
+// -----------------------------------------------------------------------
+
+const alertsData = ref(null)
+const alertsOffset = ref(0)
+const alertsLoading = ref(false)
+const alertsError = ref('')
+const alertsForbidden = ref(false)
+
+// alerts.notify() records three outcomes and the difference matters:
+// emailed=1 means an email task was queued; suppressed=1 means it was inside
+// the cooldown window (or alerting is off) and was deliberately not sent; and
+// neither flag set means it was raised with nowhere to go — no recipient is
+// configured, so nothing was queued and nothing will ever arrive.
+function alertStatus(a) {
+  if (a.emailed) return { label: 'Queued', cls: 'bg-success' }
+  if (a.suppressed) return { label: 'Throttled', cls: 'bg-secondary' }
+  return { label: 'Not delivered', cls: 'bg-warning text-dark' }
+}
+
+async function loadAlerts() {
+  alertsLoading.value = true
+  alertsError.value = ''
+  alertsForbidden.value = false
+  try {
+    alertsData.value = await apiGet(`/api/admin/alerts?limit=${PAGE_SIZE}&offset=${alertsOffset.value}`)
+  } catch (e) {
+    if (e.status === 403) alertsForbidden.value = true
+    else alertsError.value = e.message || 'Failed to load alerts'
+  } finally {
+    alertsLoading.value = false
+  }
+}
+
+function alertsNextPage() {
+  if (!alertsData.value || alertsOffset.value + PAGE_SIZE >= alertsData.value.total) return
+  alertsOffset.value += PAGE_SIZE
+  loadAlerts()
+}
+
+function alertsPrevPage() {
+  alertsOffset.value = Math.max(0, alertsOffset.value - PAGE_SIZE)
+  loadAlerts()
+}
+
+// -----------------------------------------------------------------------
+// Shared tab chrome
+// -----------------------------------------------------------------------
+
+const busy = computed(() => {
+  if (tab.value === 'security') return loading.value
+  if (tab.value === 'ai-usage') return usageLoading.value
+  return alertsLoading.value
+})
+
+function refresh() {
+  if (tab.value === 'security') load()
+  else if (tab.value === 'ai-usage') loadUsage()
+  else loadAlerts()
+}
+
 watch(tab, (t) => {
   if (t === 'ai-usage' && usage.value === null) loadUsage()
+  if (t === 'alerts' && alertsData.value === null) loadAlerts()
 })
 
 onMounted(load)
@@ -118,8 +181,8 @@ onMounted(load)
       <button
         class="btn btn-sm btn-outline-secondary"
         style="font-size: 0.78rem;"
-        :disabled="tab === 'security' ? loading : usageLoading"
-        @click="tab === 'security' ? load() : loadUsage()"
+        :disabled="busy"
+        @click="refresh"
       >
         <i class="bi bi-arrow-clockwise me-1"></i>Refresh
       </button>
@@ -138,6 +201,12 @@ onMounted(load)
         style="font-size: 0.78rem;"
         @click="tab = 'ai-usage'"
       ><i class="bi bi-cpu me-1"></i>AI Usage</button>
+      <button
+        class="btn"
+        :class="tab === 'alerts' ? 'btn-primary' : 'btn-outline-secondary'"
+        style="font-size: 0.78rem;"
+        @click="tab = 'alerts'"
+      ><i class="bi bi-bell me-1"></i>Alerts</button>
     </div>
 
     <!-- ============================= Security ============================= -->
@@ -212,7 +281,7 @@ onMounted(load)
     </template>
 
     <!-- ============================= AI Usage ============================= -->
-    <template v-else>
+    <template v-else-if="tab === 'ai-usage'">
       <p class="mb-3" style="color: var(--text-muted-custom); font-size: 0.85rem;">
         Every LLM call the assistant has made — model, tokens, and latency. Corpus-write
         proposals (move/delete/edit) aren't LLM calls themselves and aren't counted here.
@@ -382,6 +451,141 @@ onMounted(load)
           <div class="d-flex gap-1">
             <button class="btn btn-sm btn-outline-secondary" :disabled="usageOffset === 0 || usageLoading" @click="usagePrevPage">Previous</button>
             <button class="btn btn-sm btn-outline-secondary" :disabled="usageOffset + PAGE_SIZE >= usage.total || usageLoading" @click="usageNextPage">Next</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============================== Alerts ============================== -->
+    <template v-else>
+      <p class="mb-3" style="color: var(--text-muted-custom); font-size: 0.85rem;">
+        Every operational alert the system has raised — failed jobs, low disk, self-check
+        findings. Recorded here whether or not it was ever delivered.
+      </p>
+
+      <div v-if="alertsForbidden" class="card p-4 text-center" style="color: var(--text-muted-custom);">
+        <i class="bi bi-shield-lock d-block mb-2" style="font-size: 2.5rem; opacity: 0.35;"></i>
+        <div style="font-size: 0.85rem;">You don't have access to this page.</div>
+      </div>
+
+      <div v-else-if="alertsError" class="alert alert-danger py-2 mb-3" style="font-size: 0.82rem;">
+        <i class="bi bi-exclamation-triangle me-1"></i>{{ alertsError }}
+      </div>
+
+      <div v-else-if="alertsLoading && !alertsData">
+        <div v-for="i in 3" :key="i" class="card p-3 mb-2 placeholder-glow">
+          <span class="placeholder col-6 d-block mb-1" style="height: 0.85rem; border-radius: 4px;"></span>
+        </div>
+      </div>
+
+      <div v-else-if="alertsData && alertsData.summary.total === 0" class="card p-4 text-center" style="color: var(--text-muted-custom);">
+        <i class="bi bi-bell-slash d-block mb-2" style="font-size: 2.5rem; opacity: 0.35;"></i>
+        <div style="font-size: 0.85rem;">No alerts raised yet — nothing has gone wrong.</div>
+      </div>
+
+      <div v-else-if="alertsData">
+        <!-- The failure mode this view exists for: an alert with nowhere to go -->
+        <div
+          v-if="alertsData.summary.undelivered > 0"
+          class="alert alert-warning py-2 mb-3"
+          style="font-size: 0.82rem;"
+        >
+          <i class="bi bi-exclamation-triangle me-1"></i>
+          <strong>{{ alertsData.summary.undelivered }}</strong>
+          alert(s) were raised but never delivered — no recipient is configured, so nothing
+          was queued and nothing will arrive by email. This page is the only place they appear.
+        </div>
+
+        <!-- Summary tiles -->
+        <div class="row g-2 mb-3">
+          <div class="col-6 col-md-3">
+            <div class="card p-2 text-center" style="background: var(--surface-card); border-color: var(--border-subtle);">
+              <div style="font-size: 1.3rem; font-weight: 600;">{{ formatNum(alertsData.summary.total) }}</div>
+              <div style="font-size: 0.7rem; color: var(--text-muted-custom);">Total</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="card p-2 text-center" style="background: var(--surface-card); border-color: var(--border-subtle);">
+              <div style="font-size: 1.3rem; font-weight: 600;">{{ formatNum(alertsData.summary.last_24h) }}</div>
+              <div style="font-size: 0.7rem; color: var(--text-muted-custom);">Last 24h</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="card p-2 text-center" style="background: var(--surface-card); border-color: var(--border-subtle);">
+              <div
+                style="font-size: 1.3rem; font-weight: 600;"
+                :class="alertsData.summary.undelivered > 0 ? 'text-warning' : ''"
+              >{{ formatNum(alertsData.summary.undelivered) }}</div>
+              <div style="font-size: 0.7rem; color: var(--text-muted-custom);">Not delivered</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="card p-2 text-center" style="background: var(--surface-card); border-color: var(--border-subtle);">
+              <div style="font-size: 1.3rem; font-weight: 600;">{{ formatNum(alertsData.summary.suppressed) }}</div>
+              <div style="font-size: 0.7rem; color: var(--text-muted-custom);">Throttled</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- By alert key -->
+        <div class="card mb-3" style="background: var(--surface-card); border-color: var(--border-subtle);">
+          <div class="card-header py-2" style="font-size: 0.78rem; font-weight: 600; background: transparent; border-color: var(--border-subtle);">By alert</div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0" style="font-size: 0.8rem;">
+              <thead>
+                <tr style="color: var(--text-muted-custom);">
+                  <th class="ps-3">Alert</th>
+                  <th class="text-end">Times</th>
+                  <th class="text-end">Undelivered</th>
+                  <th class="text-end pe-3">Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="k in alertsData.by_key" :key="k.alert_key">
+                  <td class="ps-3"><code style="font-size: 0.78rem;">{{ k.alert_key }}</code></td>
+                  <td class="text-end">{{ formatNum(k.count) }}</td>
+                  <td class="text-end">{{ formatNum(k.undelivered) }}</td>
+                  <td class="text-end pe-3">{{ formatTime(k.last_at) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Recent alerts -->
+        <div class="card" style="background: var(--surface-card); border-color: var(--border-subtle);">
+          <div class="card-header py-2" style="font-size: 0.78rem; font-weight: 600; background: transparent; border-color: var(--border-subtle);">Recent alerts</div>
+          <div class="table-responsive">
+            <table class="table table-sm mb-0" style="font-size: 0.82rem;">
+              <thead>
+                <tr style="color: var(--text-muted-custom);">
+                  <th class="ps-3">Time</th>
+                  <th>Alert</th>
+                  <th>Subject</th>
+                  <th class="pe-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="a in alertsData.recent" :key="a.id">
+                  <td class="ps-3" style="white-space: nowrap;">{{ formatTime(a.created_at) }}</td>
+                  <td><code style="font-size: 0.78rem;">{{ a.alert_key }}</code></td>
+                  <td class="text-truncate" style="max-width: 380px;" :title="a.body || a.subject">
+                    {{ a.subject }}
+                  </td>
+                  <td class="pe-3">
+                    <span class="badge" :class="alertStatus(a).cls">{{ alertStatus(a).label }}</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="d-flex align-items-center justify-content-between mt-2" style="font-size: 0.78rem; color: var(--text-muted-custom);">
+          <span>{{ alertsOffset + 1 }}–{{ Math.min(alertsOffset + PAGE_SIZE, alertsData.total) }} of {{ alertsData.total }}</span>
+          <div class="d-flex gap-1">
+            <button class="btn btn-sm btn-outline-secondary" :disabled="alertsOffset === 0 || alertsLoading" @click="alertsPrevPage">Previous</button>
+            <button class="btn btn-sm btn-outline-secondary" :disabled="alertsOffset + PAGE_SIZE >= alertsData.total || alertsLoading" @click="alertsNextPage">Next</button>
           </div>
         </div>
       </div>
