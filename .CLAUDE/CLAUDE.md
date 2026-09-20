@@ -396,7 +396,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 ## Known Technical Debt
 
 1. `pyproject.toml` still says `name = "backend"` — should be updated to `name = "sleepy"` when renaming matters (non-urgent).
-2. No live staging/parallel dev environment on EC2 — the instance's disk is already tight (10GB volume, regularly >80% used by the single prod stack) and there's no local Docker install on the dev machine to substitute a container-level test. A second EC2 instance or a disk resize would be needed to close this gap; that's a cost decision for the user, not something to build unprompted.
+2. No live staging/parallel dev environment on EC2 — the instance's disk is already tight (10GB volume; it hit 94% on 2026-09-20 after three deploys in one session, and `docker builder prune -f --filter until=24h` was added to `deploy-prod.sh` because the pre-existing `docker image prune -af` left the build cache untouched — 7.2GB of unused cache had accumulated. journald was also uncapped at 558MB; vacuumed to 100MB, but `SystemMaxUse` is still not set and there is no `/etc/docker/daemon.json` log rotation, so both remain uncapped growth paths) and there's no local Docker install on the dev machine to substitute a container-level test. A second EC2 instance or a disk resize would be needed to close this gap; that's a cost decision for the user, not something to build unprompted.
 
 ---
 

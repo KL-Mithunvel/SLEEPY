@@ -51,7 +51,7 @@ ORDER BY id DESC LIMIT 20;
 | `Background task failed: <type>` | A job burned through its retries | Check `last_error` in `task_queue`. Idempotent types get one auto-retry; others need you. |
 | `Self-check: failed_tasks` | Failed jobs that are not safe to auto-retry | Decide per job. For `email`, confirm whether the message actually went out before re-sending. |
 | `Self-check: vector_index` | ChromaDB unreachable | `docker compose ps`; restart the `chromadb` service. Index rebuilds itself afterwards. |
-| `Self-check: disk_space` | Past `DISK_ALERT_PERCENT` (85%) | `docker image prune -af` first; then check `db/backups/`. |
+| `Self-check: disk_space` | Past `DISK_ALERT_PERCENT` (85%) | `docker system df` first, to see *what* grew. The usual culprit is the build cache, not images — `docker image prune -af` does not touch it (section 9). Then check `db/backups/`. |
 | `Self-check: db_integrity` | `PRAGMA quick_check` failed | **Restore from backup — section 4.** Nothing repairs this automatically. |
 | `Self-check: backend_health` | Worker is alive, web process is not answering | `docker compose restart backend`. |
 | `offsite_push` failed | The nightly offsite copy did not happen | Section 3. Until fixed, there is no offsite copy of that day. |
@@ -228,3 +228,50 @@ gate.
 
 **Never** `git reset --hard` on `main` or `prod`, and never force-push either.
 Rollback is `git checkout <previous prod commit>` on the box, then rebuild.
+
+---
+
+## 9. Disk exhaustion
+
+The box is a single 10GB volume with no headroom to spare, so this is the
+failure mode most likely to take prod down. `self_check` raises
+`disk_space:low` past `DISK_ALERT_PERCENT` (85%); read it in **Admin >
+Alerts**, since email is deliberately not configured.
+
+**Diagnose before deleting anything:**
+
+```bash
+df -h /                  # how bad
+docker system df         # images vs containers vs volumes vs BUILD CACHE
+journalctl --disk-usage  # systemd journal
+sudo du -sh /var/cache/dnf
+```
+
+`docker system df` is the one that matters. On 2026-09-20 the disk hit 94%
+and the cause was **7.2GB of build cache** — `docker image prune -af` had
+been running on every deploy and reported success the whole time, because it
+never touches the cache. Read the "RECLAIMABLE" column of the `Build Cache`
+row, not the image list.
+
+**Reclaim, cheapest and safest first:**
+
+```bash
+docker builder prune -f --filter until=24h   # the usual fix; deploy-prod.sh now does this
+sudo dnf clean all                           # ~250MB of package cache, always safe
+sudo journalctl --vacuum-size=100M           # trims the journal in place
+docker image prune -af                       # only helps if images are actually unused
+```
+
+Nothing above touches the corpus, the SQLite DB, or the ChromaDB volume.
+Do **not** `docker volume prune` — the `pma_data` volume is the live
+database.
+
+**Growth paths that are still uncapped** (none has bitten yet, all are
+one-time host config, none is in git because none of it lives in this repo):
+
+- `journalctl` has no `SystemMaxUse` — it reached 558MB before being
+  vacuumed by hand. Cap it in `/etc/systemd/journald.conf.d/`.
+- There is no `/etc/docker/daemon.json`, so container stdout/stderr logs
+  rotate never. Currently only ~320KB total, so this is prevention, not
+  a problem.
+

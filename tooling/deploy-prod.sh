@@ -43,6 +43,18 @@ git pull --ff-only origin prod
 
 echo "--- free disk before rebuild ---"
 docker image prune -af
+# Image prune alone was never enough: it leaves the BUILD CACHE untouched, and
+# that is what actually filled the disk — 7.2GB of it by 2026-09-20, none in
+# use, while the prune above made it look like every deploy cleaned up after
+# itself. Each deploy left a whole cache generation behind permanently.
+#
+# "until=24h" rather than -a on purpose. Deploys cluster in sessions (three in
+# one afternoon is normal here), so keeping the last day's cache means those
+# stay fast, while nothing survives long enough to accumulate across sessions.
+# Pruning it all would force a full rebuild every time, including the ~127MB
+# GeoIP download in Dockerfile.backend.
+docker builder prune -f --filter until=24h
+df -h / | tail -1
 
 echo "--- build ---"
 docker compose build
