@@ -8,12 +8,15 @@ Public API:
                                      a daily trend, and a paginated recent list
     GET /api/admin/alerts        -- every operational alert ever raised, with
                                      whether it was actually delivered
+    GET /api/admin/system        -- live host usage, a disk trend, and a
+                                     plain-English reading of both
 """
 
 from flask import Blueprint, jsonify, request
 
 import auth_utils
 import local_db
+import system_stats
 from db_helpers import row_to_dict, rows_to_list
 
 admin_bp = Blueprint("admin_bp", __name__, url_prefix="/api/admin")
@@ -199,3 +202,42 @@ def alerts():
         })
     finally:
         local_db.return_db(conn)
+
+
+# ---------------------------------------------------------------------------
+# Host usage + space
+# ---------------------------------------------------------------------------
+
+@admin_bp.get("/system")
+@auth_utils.require_perm("admin:system")
+def system():
+    """
+    Deliberately never 500s on a bad reading. This is the page you open when
+    the box is misbehaving, so a partial answer beats an error every time —
+    system_stats degrades each field to None on its own.
+    """
+    try:
+        days = min(max(int(request.args.get("days", 14)), 1), 90)
+    except ValueError:
+        return jsonify({"error": "days must be an integer"}), 400
+
+    conn = local_db.get_db()
+    try:
+        current = system_stats.collect()
+
+        try:
+            trend = system_stats.read_trend(conn, days)
+        except Exception:      # table missing on a half-migrated DB, etc.
+            trend = []
+
+        deploy = system_stats.read_deploy_snapshot()
+
+        return jsonify({
+            "current": current,
+            "trend": trend,
+            "deploy": deploy,
+            "summary": system_stats.summarise(current, trend, deploy),
+        })
+    finally:
+        local_db.return_db(conn)
+

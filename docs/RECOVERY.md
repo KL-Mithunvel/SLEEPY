@@ -240,6 +240,14 @@ Alerts**, since email is deliberately not configured.
 
 **Diagnose before deleting anything:**
 
+Start in **Admin > Server**, which answers most of this without an SSH
+session: current disk against the alert threshold, a 14-day trend (so you can
+see whether this crept or jumped), the size of everything the app owns, and a
+Docker breakdown as of the last deploy. It states its readings in plain
+English at the top of the page.
+
+On the box, for anything the tab cannot see live:
+
 ```bash
 df -h /                  # how bad
 docker system df         # images vs containers vs volumes vs BUILD CACHE

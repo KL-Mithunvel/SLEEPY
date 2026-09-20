@@ -82,6 +82,34 @@ fi
 echo "healthz OK"
 
 echo
+echo "--- capture usage snapshot for Admin > Server ---"
+# The backend runs without a Docker socket on purpose, so from inside its
+# container it can see the disk TOTAL but not what is using it — and on this
+# box the biggest consumer (images, build cache) is exactly the invisible
+# part. Capturing it here, from the host, is what lets the Server tab name a
+# culprit instead of just showing a percentage.
+#
+# Stored as whatever Docker printed ("4.55GB"); system_stats.parse_docker_size
+# normalises it, so the parsing lives somewhere testable rather than in shell.
+# Best-effort by design: this runs AFTER the health gate, and every branch
+# ends in an echo rather than a non-zero status, so a snapshot that cannot be
+# written never turns an otherwise healthy deploy into a failed one.
+snapshot_dir="data/klm/db"
+if [ -d "\$snapshot_dir" ]; then
+    docker_json=\$(docker system df --format '{{json .}}' 2>/dev/null | paste -sd, -) || docker_json=""
+    printf '{"captured_at":"%s","commit":"%s","disk_line":"%s","docker":[%s]}\n' \\
+        "\$(date -Iseconds)" \\
+        "\$(git log -1 --format='%h')" \\
+        "\$(df -h / | tail -1 | tr -s ' ')" \\
+        "\$docker_json" \\
+        > "\$snapshot_dir/deploy-snapshot.json" 2>/dev/null \\
+        && echo "  wrote \$snapshot_dir/deploy-snapshot.json" \\
+        || echo "  could not write snapshot (non-fatal)"
+else
+    echo "  \$snapshot_dir not found, skipping (non-fatal)"
+fi
+
+echo
 echo "--- deployed commit ---"
 git log -1 --format='%h %s (%ci)'
 EOF

@@ -41,4 +41,5 @@ PERMISSIONS = {
     "admin:security":  (),
     "admin:ai_usage":  (),
     "admin:alerts":    (),
+    "admin:system":    (),
 }

@@ -41,6 +41,7 @@ from datetime import date, datetime
 
 import alerts
 import config
+import system_stats
 import task_queue
 
 logger = logging.getLogger(__name__)
@@ -235,8 +236,9 @@ def check_disk_space(conn, data_root: str) -> Finding:
         return Finding(
             "disk_space", ALERT,
             f"disk {detail} — past the {config.DISK_ALERT_PERCENT}% threshold. "
-            "Old docker images (`docker image prune -af`) and db/backups/ are "
-            "the usual culprits.",
+            "Check Admin > Server for the breakdown and trend. The usual culprit "
+            "is the Docker build cache (`docker builder prune -f`), which "
+            "`docker image prune -af` does NOT touch; then db/backups/.",
             alert_key="disk_space:low",
             extra={"used_pct": round(used_pct, 1), "free_gb": round(free_gb, 2)},
         )
@@ -362,6 +364,15 @@ def run_checks(conn, data_root: str | None = None) -> list[Finding]:
                 check.__name__, ALERT, f"check itself failed: {exc}",
                 alert_key=f"selfcheck_broken:{check.__name__}",
             ))
+
+    # Record one usage sample per run, regardless of how the checks went.
+    # Isolated like a check is: a metrics table is a nice-to-have, and it must
+    # never be the reason the safety net stops running. Not committed here —
+    # the worker owns the transaction.
+    try:
+        system_stats.record_sample(conn, root)
+    except Exception:
+        logger.exception("selfheal: could not record system metrics sample")
 
     for finding in findings:
         if finding.status == ALERT:

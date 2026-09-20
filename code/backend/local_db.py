@@ -169,6 +169,29 @@ _MIGRATIONS = [
     (9, "Add task_queue.recovered_at so self-heal requeues a failed task at most once", [
         "ALTER TABLE task_queue ADD COLUMN recovered_at TEXT",
     ]),
+    (10, "Add system_metrics table for host usage sampling (system_stats.py)", [
+        # One row per self_check (every 15 min). A single live reading tells
+        # you the disk is at 76%; only a series tells you it went from 65% to
+        # 76% in one deploy, which is the part that actually predicts trouble.
+        # Deliberately narrow and numeric so it stays cheap to keep forever —
+        # ~96 rows/day, a few hundred KB/year.
+        """
+        CREATE TABLE IF NOT EXISTS system_metrics (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            disk_total_bytes    INTEGER,
+            disk_used_bytes     INTEGER,
+            disk_free_bytes     INTEGER,
+            disk_used_pct       REAL,
+            mem_total_bytes     INTEGER,
+            mem_available_bytes INTEGER,
+            corpus_bytes        INTEGER,
+            db_bytes            INTEGER,
+            backups_bytes       INTEGER,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_system_metrics_created ON system_metrics (created_at)",
+    ]),
 ]
 
 

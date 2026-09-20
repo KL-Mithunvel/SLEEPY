@@ -151,24 +151,115 @@ function alertsPrevPage() {
 }
 
 // -----------------------------------------------------------------------
+// Server tab — host usage and space
+// -----------------------------------------------------------------------
+
+const server = ref(null)
+const serverLoading = ref(false)
+const serverError = ref('')
+const serverForbidden = ref(false)
+
+async function loadServer() {
+  serverLoading.value = true
+  serverError.value = ''
+  serverForbidden.value = false
+  try {
+    server.value = await apiGet('/api/admin/system?days=14')
+  } catch (e) {
+    if (e.status === 403) serverForbidden.value = true
+    else serverError.value = e.message || 'Failed to load server stats'
+  } finally {
+    serverLoading.value = false
+  }
+}
+
+// null means "this process could not measure it" (the Chroma volume belongs
+// to another container in prod, /proc is absent on Windows dev). That is a
+// different thing from zero and is shown as an em dash, never as 0.
+function fmtBytes(n) {
+  if (n === null || n === undefined) return '—'
+  if (n < 1024) return `${n} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let v = n / 1024
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`
+}
+
+function fmtUptime(seconds) {
+  if (!seconds) return '—'
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (d > 0) return `${d}d ${h}h`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
+// Green/amber/red against the same threshold the self-check alerts on, so the
+// bar and the alert can never disagree about what counts as a problem.
+function usageClass(pct, alertAt) {
+  if (pct === null || pct === undefined) return 'bg-secondary'
+  const limit = alertAt || 85
+  if (pct >= limit) return 'bg-danger'
+  if (pct >= limit - 15) return 'bg-warning'
+  return 'bg-success'
+}
+
+const diskPct = computed(() => server.value?.current?.disk?.used_pct ?? null)
+
+// The areas this process CAN see, for the breakdown bar. Docker's share is
+// deliberately not invented here — it comes from the deploy snapshot or not
+// at all.
+const areaRows = computed(() => {
+  const a = server.value?.current?.areas
+  if (!a) return []
+  return [
+    { label: 'Documents (MD corpus)', bytes: a.corpus_bytes },
+    { label: 'Database', bytes: a.db_bytes },
+    { label: 'Backups', bytes: a.backups_bytes },
+    { label: 'Vector index', bytes: a.chroma_bytes },
+  ]
+})
+
+// Scale the sparkline to the range actually present, not 0–100, or a climb
+// from 65% to 76% looks like a flat line.
+const trendBars = computed(() => {
+  const t = server.value?.trend || []
+  if (!t.length) return []
+  const vals = t.map(d => d.max_pct).filter(v => v !== null)
+  if (!vals.length) return []
+  const lo = Math.min(...vals)
+  const hi = Math.max(...vals)
+  const span = Math.max(1, hi - lo)
+  return t.map(d => ({
+    ...d,
+    height: d.max_pct === null ? 0 : 12 + ((d.max_pct - lo) / span) * 88,
+  }))
+})
+
+// -----------------------------------------------------------------------
 // Shared tab chrome
 // -----------------------------------------------------------------------
 
 const busy = computed(() => {
   if (tab.value === 'security') return loading.value
   if (tab.value === 'ai-usage') return usageLoading.value
+  if (tab.value === 'server') return serverLoading.value
   return alertsLoading.value
 })
 
 function refresh() {
   if (tab.value === 'security') load()
   else if (tab.value === 'ai-usage') loadUsage()
+  else if (tab.value === 'server') loadServer()
   else loadAlerts()
 }
 
 watch(tab, (t) => {
   if (t === 'ai-usage' && usage.value === null) loadUsage()
   if (t === 'alerts' && alertsData.value === null) loadAlerts()
+  if (t === 'server' && server.value === null) loadServer()
 })
 
 onMounted(load)
@@ -207,6 +298,12 @@ onMounted(load)
         style="font-size: 0.78rem;"
         @click="tab = 'alerts'"
       ><i class="bi bi-bell me-1"></i>Alerts</button>
+      <button
+        class="btn"
+        :class="tab === 'server' ? 'btn-primary' : 'btn-outline-secondary'"
+        style="font-size: 0.78rem;"
+        @click="tab = 'server'"
+      ><i class="bi bi-hdd-stack me-1"></i>Server</button>
     </div>
 
     <!-- ============================= Security ============================= -->
@@ -457,7 +554,7 @@ onMounted(load)
     </template>
 
     <!-- ============================== Alerts ============================== -->
-    <template v-else>
+    <template v-else-if="tab === 'alerts'">
       <p class="mb-3" style="color: var(--text-muted-custom); font-size: 0.85rem;">
         Every operational alert the system has raised — failed jobs, low disk, self-check
         findings. Recorded here whether or not it was ever delivered.
@@ -586,6 +683,200 @@ onMounted(load)
           <div class="d-flex gap-1">
             <button class="btn btn-sm btn-outline-secondary" :disabled="alertsOffset === 0 || alertsLoading" @click="alertsPrevPage">Previous</button>
             <button class="btn btn-sm btn-outline-secondary" :disabled="alertsOffset + PAGE_SIZE >= alertsData.total || alertsLoading" @click="alertsNextPage">Next</button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============================== Server ============================== -->
+    <template v-else-if="tab === 'server'">
+      <p class="mb-3" style="color: var(--text-muted-custom); font-size: 0.85rem;">
+        How the box is doing and what is using its disk. Sampled every 15 minutes
+        by the self-check.
+      </p>
+
+      <div v-if="serverForbidden" class="alert alert-warning py-2" style="font-size: 0.85rem;">
+        Your account does not have permission to view server stats.
+      </div>
+      <div v-else-if="serverError" class="alert alert-danger py-2" style="font-size: 0.85rem;">
+        {{ serverError }}
+      </div>
+      <div v-else-if="serverLoading && !server" class="text-center py-4">
+        <div class="spinner-border spinner-border-sm" role="status"></div>
+      </div>
+
+      <div v-else-if="server">
+        <!-- Plain-English reading, first thing on the page -->
+        <div class="card mb-3" style="background: var(--card-bg-custom); border-color: var(--border-custom);">
+          <div class="card-body py-3">
+            <p
+              v-for="(line, i) in server.summary"
+              :key="i"
+              class="mb-1"
+              :class="i === 0 ? 'fw-semibold' : ''"
+              style="font-size: 0.88rem; line-height: 1.5;"
+            >{{ line }}</p>
+          </div>
+        </div>
+
+        <!-- Disk -->
+        <div class="card mb-3" style="background: var(--card-bg-custom); border-color: var(--border-custom);">
+          <div class="card-body py-3">
+            <div class="d-flex align-items-baseline justify-content-between mb-2">
+              <span class="fw-semibold" style="font-size: 0.9rem;">Disk</span>
+              <span style="font-size: 0.82rem; color: var(--text-muted-custom);">
+                {{ fmtBytes(server.current.disk.used_bytes) }} used of
+                {{ fmtBytes(server.current.disk.total_bytes) }} —
+                {{ fmtBytes(server.current.disk.free_bytes) }} free
+              </span>
+            </div>
+            <div class="progress" style="height: 1.25rem;">
+              <div
+                class="progress-bar"
+                :class="usageClass(diskPct, server.current.disk.alert_pct)"
+                :style="{ width: (diskPct || 0) + '%' }"
+              >{{ diskPct === null ? '—' : diskPct + '%' }}</div>
+            </div>
+            <div class="mt-1" style="font-size: 0.75rem; color: var(--text-muted-custom);">
+              Alert threshold {{ server.current.disk.alert_pct }}%
+            </div>
+          </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <!-- What this app owns -->
+          <div class="col-12 col-lg-6">
+            <div class="card h-100" style="background: var(--card-bg-custom); border-color: var(--border-custom);">
+              <div class="card-body py-3">
+                <div class="fw-semibold mb-2" style="font-size: 0.9rem;">This app&apos;s data</div>
+                <table class="table table-sm mb-0" style="font-size: 0.82rem;">
+                  <tbody>
+                    <tr v-for="row in areaRows" :key="row.label">
+                      <td class="ps-0" style="border-color: var(--border-custom);">{{ row.label }}</td>
+                      <td class="text-end pe-0" style="border-color: var(--border-custom);">{{ fmtBytes(row.bytes) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div class="mt-2" style="font-size: 0.75rem; color: var(--text-muted-custom);">
+                  An em dash means this process cannot see that path from inside its container.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Host -->
+          <div class="col-12 col-lg-6">
+            <div class="card h-100" style="background: var(--card-bg-custom); border-color: var(--border-custom);">
+              <div class="card-body py-3">
+                <div class="fw-semibold mb-2" style="font-size: 0.9rem;">Host</div>
+
+                <template v-if="server.current.memory.used_pct !== null">
+                  <div class="d-flex justify-content-between" style="font-size: 0.82rem;">
+                    <span>Memory</span>
+                    <span>
+                      {{ fmtBytes(server.current.memory.total_bytes - server.current.memory.available_bytes) }}
+                      of {{ fmtBytes(server.current.memory.total_bytes) }}
+                    </span>
+                  </div>
+                  <div class="progress mt-1 mb-3" style="height: 0.5rem;">
+                    <div
+                      class="progress-bar"
+                      :class="usageClass(server.current.memory.used_pct, 90)"
+                      :style="{ width: server.current.memory.used_pct + '%' }"
+                    ></div>
+                  </div>
+                </template>
+
+                <table class="table table-sm mb-0" style="font-size: 0.82rem;">
+                  <tbody>
+                    <tr>
+                      <td class="ps-0" style="border-color: var(--border-custom);">Uptime</td>
+                      <td class="text-end pe-0" style="border-color: var(--border-custom);">
+                        {{ fmtUptime(server.current.uptime_seconds) }}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="ps-0" style="border-color: var(--border-custom);">Load average</td>
+                      <td class="text-end pe-0" style="border-color: var(--border-custom);">
+                        {{ server.current.load_average ? server.current.load_average.join('  ') : '—' }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Trend -->
+        <div class="card mb-3" style="background: var(--card-bg-custom); border-color: var(--border-custom);">
+          <div class="card-body py-3">
+            <div class="fw-semibold mb-1" style="font-size: 0.9rem;">Disk over time</div>
+            <div class="mb-2" style="font-size: 0.75rem; color: var(--text-muted-custom);">
+              Daily peak. Scaled to the range shown, not 0–100%, so small climbs stay visible.
+            </div>
+
+            <div v-if="!trendBars.length" style="font-size: 0.82rem; color: var(--text-muted-custom);">
+              No samples recorded yet — the self-check writes one every 15 minutes.
+            </div>
+            <div v-else class="d-flex align-items-end gap-1" style="height: 90px;">
+              <div
+                v-for="d in trendBars"
+                :key="d.day"
+                class="flex-fill rounded-top"
+                :class="usageClass(d.max_pct, server.current.disk.alert_pct)"
+                :style="{ height: d.height + '%', minWidth: '6px' }"
+                :title="d.day + ': peak ' + d.max_pct + '% (' + d.samples + ' sample(s))'"
+              ></div>
+            </div>
+            <div v-if="trendBars.length" class="d-flex justify-content-between mt-1" style="font-size: 0.72rem; color: var(--text-muted-custom);">
+              <span>{{ trendBars[0].day }} — {{ trendBars[0].max_pct }}%</span>
+              <span>{{ trendBars[trendBars.length - 1].day }} — {{ trendBars[trendBars.length - 1].max_pct }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Docker, as of last deploy -->
+        <div class="card" style="background: var(--card-bg-custom); border-color: var(--border-custom);">
+          <div class="card-body py-3">
+            <div class="fw-semibold mb-1" style="font-size: 0.9rem;">Docker</div>
+            <div v-if="!server.deploy" style="font-size: 0.82rem; color: var(--text-muted-custom);">
+              No deploy snapshot yet. The backend runs without a Docker socket by
+              design, so this is captured by <code>tooling/deploy-prod.sh</code> on
+              the host and will appear after the next deploy.
+            </div>
+            <template v-else>
+              <div class="mb-2" style="font-size: 0.75rem; color: var(--text-muted-custom);">
+                As of the deploy at {{ server.deploy.captured_at }}
+                <template v-if="server.deploy.commit">(<code>{{ server.deploy.commit }}</code>)</template>
+                — a point-in-time reading, not live.
+              </div>
+              <table class="table table-sm mb-0" style="font-size: 0.82rem;">
+                <tbody>
+                  <tr>
+                    <td class="ps-0" style="border-color: var(--border-custom);">Images</td>
+                    <td class="text-end pe-0" style="border-color: var(--border-custom);">{{ fmtBytes(server.deploy.images_bytes) }}</td>
+                  </tr>
+                  <tr>
+                    <td class="ps-0" style="border-color: var(--border-custom);">
+                      Build cache
+                      <span class="text-warning" v-if="server.deploy.build_cache_bytes > 2147483648">
+                        <i class="bi bi-exclamation-triangle-fill ms-1"></i>
+                      </span>
+                    </td>
+                    <td class="text-end pe-0" style="border-color: var(--border-custom);">{{ fmtBytes(server.deploy.build_cache_bytes) }}</td>
+                  </tr>
+                  <tr>
+                    <td class="ps-0" style="border-color: var(--border-custom);">Containers</td>
+                    <td class="text-end pe-0" style="border-color: var(--border-custom);">{{ fmtBytes(server.deploy.containers_bytes) }}</td>
+                  </tr>
+                  <tr>
+                    <td class="ps-0" style="border-color: var(--border-custom);">Volumes</td>
+                    <td class="text-end pe-0" style="border-color: var(--border-custom);">{{ fmtBytes(server.deploy.volumes_bytes) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </template>
           </div>
         </div>
       </div>

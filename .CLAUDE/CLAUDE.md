@@ -122,7 +122,8 @@ SLEEPY/
 │   │   ├── selfheal.py        # 15-min self-check: detect stuck states, repair the safe ones
 │   │   ├── app.py             # Flask app factory; calls local_db.init_db(); registers all *_bp.py blueprints below
 │   │   ├── auth_bp.py         # POST /api/auth/login|logout, GET /api/auth/me|config
-│   │   ├── admin_bp.py        # GET /api/admin/login-events — admin:security only
+│   │   ├── admin_bp.py        # GET /api/admin/login-events|ai-usage|alerts|system
+│   │   ├── system_stats.py    # Host disk/memory sampling + plain-English reading (Admin > Server)
 │   │   ├── geoip_lookup.py    # IP → (city, country) via a local DB-IP City Lite .mmdb, no external API
 │   │   ├── manage_users.py    # CLI: create-user/list-users/reset-password/delete-user (no signup UI)
 │   │   ├── ai_bp.py           # POST /api/ai/chat (SSE), /api/ai/edit/<id>/confirm|reject
@@ -273,6 +274,13 @@ Nightly `offsite_push` (03:30 IST, after `db_backup`). Two independent targets: 
 ### `code/backend/selfheal.py`
 `self_check` every 15 min. Seven checks, each `ok`/`fixed`/`alert`: stale git locks (fixed), permanently-failed idempotent tasks (requeued once, stamped `task_queue.recovered_at`), missing Daily file (enqueues `materialise`), empty vector index (enqueues `md_reindex`), disk space, `PRAGMA quick_check`, and backend health probed from the worker. Repairs are limited to idempotent, reversible actions; anything that could duplicate a side effect (`email`, `morning_briefing`, `news_watch_*`) or destroy data (corrupt DB) is only reported. Backend health is reported rather than acted on deliberately — restarting a container from inside would need the Docker socket mounted into a web process. Each check is isolated so one broken probe can't take the safety net down.
 
+### `code/backend/system_stats.py`
+Backs `GET /api/admin/system` and the Admin > Server tab. `collect()` reads host disk (via `shutil.disk_usage` on the bind-mounted data root, which reports the **host** volume, not the container overlay), `/proc/meminfo`, load average, uptime, and the byte size of each area the app owns (corpus / SQLite / backups / Chroma). `record_sample()` writes one `system_metrics` row per `self_check` (every 15 min, no commit — the worker owns the transaction), which is what lets `read_trend()` say "65% to 76% in one deploy" instead of just "76%". `summarise()` turns all of it into sentences, deterministically rather than via the LLM — this page has to be right when the box is sick, cost nothing, and never wait on an API call.
+
+**No Docker socket, by design** — the same line already held in `selfheal.check_backend_health`. The consequence is that the biggest consumer on this box (Docker images/build cache, ~2.8GB of 10GB) is invisible from inside the container: only the total is visible. `tooling/deploy-prod.sh` closes that gap by writing `docker system df` output to `data/klm/db/deploy-snapshot.json` on the host after a verified-healthy deploy; `read_deploy_snapshot()` reads it and the tab labels it with its own timestamp, so a stale snapshot reads as stale rather than as current truth. Docker prints human-readable sizes with no bytes format, so the script stores exactly what Docker printed and `parse_docker_size()` normalises it where it is testable. Every field degrades to `None` independently, and `None` ("could not measure") stays distinct from `0` ("measured, empty") throughout — the tab renders `None` as an em dash.
+
+One subtlety worth keeping: the corpus walk counts `db/` too, so the derived sizes are subtracted back out — but **only** for paths actually inside the data root. `CHROMA_PATH` is independently configurable and in prod belongs to another container; subtracting a directory the walk never visited drove `corpus_bytes` to 0 on the dev box (regression test in `test_system_stats.py`).
+
 ### `code/backend/worker.py`
 Separate process (`uv run python code/backend/worker.py`). Calls `local_db.init_db()`, sweeps abandoned git locks, starts APScheduler from `SCHEDULED_TASKS`, then loops calling `_drain_once()` which claims and dispatches all pending tasks. Shutdown is graceful: SIGTERM/SIGINT handlers raise `SystemExit` (Python's default SIGTERM disposition kills the process outright, so no teardown ran and the in-flight task was abandoned for the full 30-min lock), a stop is checked between tasks, and any in-flight task is handed back via `task_queue.release()` with its attempt refunded. Also watches `config.STOP_SENTINEL_PATH`, since Windows has no usable SIGTERM for a child process. Alerts on any task that reaches terminal failure.
 
@@ -300,6 +308,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | `users` | Login accounts — `username, password_hash, role` | Read/write, via `manage_users.py` only |
 | `login_events` | Every login attempt — `username, success, ip_address, user_agent, geo_city, geo_country` | Append-only |
 | `system_alerts` | Every alert raised — `alert_key, subject, body, suppressed, emailed` | Append-only |
+| `system_metrics` | Host usage sample per self-check — disk/memory/per-area bytes | Append-only |
 
 ### `ai_events` columns
 `id, event_type, prompt_hash, model, diff, accepted (1/0/NULL), voided, latency_ms, input_tokens, output_tokens, created_at`
