@@ -62,6 +62,14 @@ export const useTodayStore = defineStore('today', {
       }
     },
 
+    // The single "Reload" button in the UI: show whatever's cached right
+    // away, then kick off a real search so the list actually changes once
+    // it lands (see triggerNewsWatch/_pollNewsWatchStatus below).
+    async reloadNews() {
+      await this.fetchNews()
+      await this.triggerNewsWatch()
+    },
+
     async triggerNewsWatch() {
       this.cancelNewsWatchPoll()
       this.newsWatchStatus = 'queued'

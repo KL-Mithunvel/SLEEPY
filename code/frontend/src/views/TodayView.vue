@@ -185,27 +185,26 @@ onUnmounted(() => {
             </div>
             <div class="d-flex gap-1">
               <button
-                class="btn btn-sm btn-outline-secondary"
-                style="font-size: 0.72rem;"
-                :disabled="today.loadingNews"
-                title="Refresh news"
-                @click="today.fetchNews()"
-              >
-                <i class="bi bi-arrow-clockwise"></i>
-              </button>
-              <button
                 class="btn btn-sm btn-outline-primary"
                 style="font-size: 0.72rem;"
                 :disabled="today.newsWatchStatus === 'queued' || today.newsWatchStatus === 'processing'"
-                title="Run news watch now"
-                @click="today.triggerNewsWatch()"
+                :title="today.newsWatchStatus === 'queued' || today.newsWatchStatus === 'processing'
+                  ? 'Searching for new articles — this runs a real web search and takes a couple of minutes'
+                  : 'Search for new articles'"
+                @click="today.reloadNews()"
               >
-                <i class="bi bi-broadcast me-1"></i>
-                {{
-                  today.newsWatchStatus === 'queued' ? 'Queued…'
-                  : today.newsWatchStatus === 'processing' ? 'Watching…'
-                  : 'Watch'
-                }}
+                <i
+                  class="bi"
+                  :class="(today.newsWatchStatus === 'queued' || today.newsWatchStatus === 'processing')
+                    ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'"
+                ></i>
+                <span class="ms-1">
+                  {{
+                    today.newsWatchStatus === 'queued' ? 'Queued…'
+                    : today.newsWatchStatus === 'processing' ? 'Searching…'
+                    : 'Reload'
+                  }}
+                </span>
               </button>
             </div>
           </div>
@@ -619,6 +618,15 @@ onUnmounted(() => {
   display: flex;
   gap: 0.25rem;
   margin-top: 0.3rem;
+}
+
+.spin {
+  animation: news-spin 1s linear infinite;
+  display: inline-block;
+}
+@keyframes news-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .btn-feedback {
