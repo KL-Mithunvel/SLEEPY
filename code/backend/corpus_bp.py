@@ -100,10 +100,25 @@ def news_watch_trigger():
     Manually trigger an immediate news watch — scans every active project/topic
     (bypasses the day-of-week rotation the nightly cron uses), so a manual run
     doesn't just repeat whatever slice midnight already covered today.
+
+    Submits inline rather than enqueuing to the worker: the submit call itself
+    is just one fast "create batch" round-trip (the actual search runs async
+    on Anthropic's side over the next few minutes), and doing it here means
+    news_batch_state.json is already updated by the time this response
+    returns. Enqueuing it instead raced the immediate status poll that
+    follows — the poll would read whatever batch had *previously* finished
+    and already been marked finalized, report "complete" straight away, and
+    the button would unstick without a new search ever having run.
     """
-    db = _db()
-    task_id = task_queue.enqueue(db, "news_watch_submit", {"force_all": True})
-    return jsonify({"task_id": task_id, "message": "News watch queued"}), 202
+    try:
+        result = news_watch.news_watch_submit_for_user(config.USER_DATA_ROOT, force_all=True)
+    except Exception as exc:
+        logger.exception("news_watch_trigger: submit failed")
+        return jsonify({"status": "error", "error": str(exc)}), 500
+    ok_statuses = ("submitted", "no_projects", "no_requests")
+    if result.get("status") not in ok_statuses:
+        return jsonify(result), 500
+    return jsonify(result), (200 if result["status"] != "submitted" else 202)
 
 
 # ---------------------------------------------------------------------------

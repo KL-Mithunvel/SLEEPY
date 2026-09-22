@@ -74,8 +74,19 @@ export const useTodayStore = defineStore('today', {
       this.cancelNewsWatchPoll()
       this.newsWatchStatus = 'queued'
       try {
-        await apiPost('/api/corpus/news-watch', {})
-        this._pollNewsWatchStatus(0)
+        // The backend submits the batch inline (not via the task queue) so
+        // this response already reflects whether a *new* search actually
+        // started — polling status right after an async enqueue used to
+        // read the previous run's already-finalized state and report
+        // "complete" before the new submit had even happened.
+        const data = await apiPost('/api/corpus/news-watch', {})
+        if (data.status === 'submitted') {
+          this._pollNewsWatchStatus(0)
+        } else if (data.status === 'no_projects' || data.status === 'no_requests') {
+          this.newsWatchStatus = 'no_projects'
+        } else {
+          this.newsWatchStatus = 'error'
+        }
       } catch (e) {
         this.newsWatchStatus = 'error'
       }

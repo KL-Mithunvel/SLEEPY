@@ -200,7 +200,7 @@ onUnmounted(() => {
                 ></i>
                 <span class="ms-1">
                   {{
-                    today.newsWatchStatus === 'queued' ? 'Queued…'
+                    today.newsWatchStatus === 'queued' ? 'Submitting…'
                     : today.newsWatchStatus === 'processing' ? 'Searching…'
                     : 'Reload'
                   }}
