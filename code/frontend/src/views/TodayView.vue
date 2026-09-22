@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useTodayStore } from '../stores/today.js'
 import { useAiStore } from '../stores/ai.js'
@@ -101,6 +101,10 @@ onMounted(() => {
   today.fetchToday()
   today.fetchNews()
 })
+
+onUnmounted(() => {
+  today.cancelNewsWatchPoll()
+})
 </script>
 
 <template>
@@ -192,14 +196,32 @@ onMounted(() => {
               <button
                 class="btn btn-sm btn-outline-primary"
                 style="font-size: 0.72rem;"
-                :disabled="today.newsWatchStatus === 'queued'"
+                :disabled="today.newsWatchStatus === 'queued' || today.newsWatchStatus === 'processing'"
                 title="Run news watch now"
                 @click="today.triggerNewsWatch()"
               >
                 <i class="bi bi-broadcast me-1"></i>
-                {{ today.newsWatchStatus === 'queued' ? 'Queued…' : 'Watch' }}
+                {{
+                  today.newsWatchStatus === 'queued' ? 'Queued…'
+                  : today.newsWatchStatus === 'processing' ? 'Watching…'
+                  : 'Watch'
+                }}
               </button>
             </div>
+          </div>
+
+          <!-- News watch status -->
+          <div
+            v-if="today.newsWatchStatus === 'no_projects'"
+            class="text-muted" style="font-size: 0.76rem; flex-shrink:0;"
+          >
+            <i class="bi bi-info-circle me-1"></i>Nothing scheduled to watch today — check <code>news_topics:</code> on a project.
+          </div>
+          <div
+            v-else-if="today.newsWatchStatus === 'error'"
+            class="text-danger" style="font-size: 0.76rem; flex-shrink:0;"
+          >
+            <i class="bi bi-exclamation-triangle me-1"></i>News watch didn't finish — try again.
           </div>
 
           <!-- Error -->

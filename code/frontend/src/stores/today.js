@@ -15,7 +15,8 @@ export const useTodayStore = defineStore('today', {
     newsItems: [],
     loadingNews: false,
     newsError: null,
-    newsWatchStatus: null,   // null | 'queued' | 'error'
+    newsWatchStatus: null,   // null | 'queued' | 'processing' | 'no_projects' | 'error'
+    _newsWatchTimer: null,
   }),
 
   actions: {
@@ -62,11 +63,54 @@ export const useTodayStore = defineStore('today', {
     },
 
     async triggerNewsWatch() {
+      this.cancelNewsWatchPoll()
       this.newsWatchStatus = 'queued'
       try {
         await apiPost('/api/corpus/news-watch', {})
+        this._pollNewsWatchStatus(0)
       } catch (e) {
         this.newsWatchStatus = 'error'
+      }
+    },
+
+    // Submitting the batch is instant, but results only land after Anthropic
+    // finishes processing (the every-5-min news_watch_finalize cron) — poll
+    // status until it's done, then pull the fresh items in automatically.
+    async _pollNewsWatchStatus(attempt) {
+      const MAX_ATTEMPTS = 40 // ~10 min at 15s
+      let data
+      try {
+        data = await apiGet('/api/corpus/news-watch/status')
+      } catch (e) {
+        this.newsWatchStatus = 'error'
+        return
+      }
+      if (data.status === 'complete') {
+        this.newsWatchStatus = null
+        await this.fetchNews()
+        return
+      }
+      if (data.status === 'no_projects' || data.status === 'no_requests') {
+        this.newsWatchStatus = 'no_projects'
+        return
+      }
+      if (data.status === 'error') {
+        this.newsWatchStatus = 'error'
+        return
+      }
+      if (attempt >= MAX_ATTEMPTS) {
+        this.newsWatchStatus = 'error'
+        return
+      }
+      // 'no_batch' (submit task hasn't drained yet) / 'in_progress' / 'processing_results'
+      this.newsWatchStatus = 'processing'
+      this._newsWatchTimer = setTimeout(() => this._pollNewsWatchStatus(attempt + 1), 15000)
+    },
+
+    cancelNewsWatchPoll() {
+      if (this._newsWatchTimer) {
+        clearTimeout(this._newsWatchTimer)
+        this._newsWatchTimer = null
       }
     },
 
