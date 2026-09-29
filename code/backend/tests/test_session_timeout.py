@@ -84,3 +84,61 @@ def test_logout_without_token_is_401(client, monkeypatch):
     import config
     monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
     assert client.post("/api/auth/logout").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Maximum session length (2026-09-30 sandbox round 2): idle sign-out is
+# browser-only, so without a server-side cap a copied token could be kept
+# alive forever by refreshing it every few minutes.
+# ---------------------------------------------------------------------------
+
+def _claims(token):
+    return jwt.decode(token, _SECRET, algorithms=["HS256"])
+
+
+def test_login_token_records_auth_time(client, monkeypatch, create_user):
+    import time
+    token, _ = _login(client, monkeypatch, create_user)
+    assert abs(_claims(token)["auth_time"] - time.time()) < 60
+
+
+def test_refresh_keeps_the_original_auth_time(client, monkeypatch, create_user):
+    token, headers = _login(client, monkeypatch, create_user)
+    newer = client.post("/api/auth/refresh", headers=headers).get_json()["token"]
+    assert _claims(newer)["auth_time"] == _claims(token)["auth_time"]
+
+
+def _token_logged_in_hours_ago(client, monkeypatch, create_user, hours):
+    import time
+    import auth_utils
+    _login(client, monkeypatch, create_user)
+    return auth_utils.issue_token("erin", "user", auth_time=int(time.time() - hours * 3600))
+
+
+def test_refresh_refused_past_max_session_length(client, monkeypatch, create_user):
+    import config
+    monkeypatch.setattr(config, "AUTH_SESSION_MAX_HOURS", 12)
+    old = _token_logged_in_hours_ago(client, monkeypatch, create_user, 13)
+    resp = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {old}"})
+    assert resp.status_code == 401
+
+
+def test_refresh_allowed_inside_max_session_length(client, monkeypatch, create_user):
+    import config
+    monkeypatch.setattr(config, "AUTH_SESSION_MAX_HOURS", 12)
+    recent = _token_logged_in_hours_ago(client, monkeypatch, create_user, 11)
+    resp = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {recent}"})
+    assert resp.status_code == 200
+
+
+def test_token_without_auth_time_is_bounded_by_its_iat(client, monkeypatch, create_user):
+    """Tokens minted before auth_time existed: the chain starts counting from iat."""
+    import time
+    import config
+    _login(client, monkeypatch, create_user)
+    monkeypatch.setattr(config, "AUTH_SESSION_MAX_HOURS", 12)
+    now = int(time.time())
+    legacy = jwt.encode({"sub": "erin", "role": "user", "ver": 0, "iat": now - 13 * 3600,
+                         "exp": now + 600}, _SECRET, algorithm="HS256")
+    resp = client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {legacy}"})
+    assert resp.status_code == 401

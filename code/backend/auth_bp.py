@@ -96,10 +96,15 @@ def refresh():
     Exchange a still-valid token for a fresh one. validate_token has already
     rejected expired/revoked tokens, so reaching here proves the session is
     live. The new token keeps the same token_version, so logout still
-    revokes it along with every other one.
+    revokes it along with every other one, and the same auth_time, so the
+    chain as a whole dies AUTH_SESSION_MAX_HOURS after the password was typed
+    — idle sign-out is browser-only and can't stop a copied token otherwise.
     """
     if config.DEV_AUTH_BYPASS:
         return jsonify({"token": None})
+    auth_time = g.user["auth_time"]
+    if auth_utils.session_expired(auth_time):
+        return jsonify({"error": "Session expired — sign in again"}), 401
     conn = local_db.get_db()
     try:
         row = conn.execute(
@@ -110,7 +115,8 @@ def refresh():
         local_db.return_db(conn)
     if row is None:
         return jsonify({"error": "Token revoked"}), 401
-    return jsonify({"token": auth_utils.issue_token(row["username"], row["role"], row["token_version"])})
+    return jsonify({"token": auth_utils.issue_token(
+        row["username"], row["role"], row["token_version"], auth_time=auth_time)})
 
 
 @auth_bp.post("/logout")

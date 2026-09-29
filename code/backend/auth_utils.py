@@ -87,7 +87,14 @@ def verify_password(password: str, password_hash: str) -> bool:
 # Self-issued JWT (HS256) — no external identity provider
 # ---------------------------------------------------------------------------
 
-def issue_token(username: str, role: str, token_version: int = 0) -> str:
+def issue_token(username: str, role: str, token_version: int = 0,
+                auth_time: int | None = None) -> str:
+    """
+    `auth_time` is when the password was last actually entered (epoch
+    seconds). A fresh login leaves it None (= now); /api/auth/refresh passes
+    the old token's value through unchanged, so a refresh chain keeps its
+    original start and session_expired() can cap its total life.
+    """
     now = datetime.datetime.now(datetime.timezone.utc)
     payload = {
         "sub": username,
@@ -95,9 +102,16 @@ def issue_token(username: str, role: str, token_version: int = 0) -> str:
         "ver": int(token_version),
         "jti": uuid.uuid4().hex,
         "iat": now,
+        "auth_time": int(auth_time if auth_time is not None else now.timestamp()),
         "exp": now + datetime.timedelta(minutes=config.AUTH_TOKEN_TTL_MINUTES),
     }
     return jwt.encode(payload, config.AUTH_SECRET_KEY, algorithm="HS256")
+
+
+def session_expired(auth_time: int) -> bool:
+    """True once a login is older than AUTH_SESSION_MAX_HOURS, refreshed or not."""
+    age = datetime.datetime.now(datetime.timezone.utc).timestamp() - int(auth_time)
+    return age > config.AUTH_SESSION_MAX_HOURS * 3600
 
 
 def revoke_all_tokens(conn, username: str) -> None:
@@ -256,4 +270,7 @@ def validate_token():
         "roles": [role],
         "role": role,
         "permissions": compute_permissions([role]),
+        # Tokens minted before auth_time existed fall back to iat, so even
+        # those chains become bounded from their first refresh onward.
+        "auth_time": int(payload.get("auth_time", payload.get("iat", 0))),
     }

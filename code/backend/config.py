@@ -68,6 +68,10 @@ AUTH_SECRET_KEY: str     = _get("AUTH_SECRET_KEY", "")
 # the "are you still there?" prompt does.
 AUTH_TOKEN_TTL_MINUTES: int = int(_get("AUTH_TOKEN_TTL_MINUTES", 20))
 AUTH_IDLE_TIMEOUT_MINUTES: int = int(_get("AUTH_IDLE_TIMEOUT_MINUTES", 15))
+# Hard cap on one login's total life, however often it is refreshed. The idle
+# timeout above only runs in the browser, so without this a token copied off
+# a machine could be kept alive forever by refreshing it every few minutes.
+AUTH_SESSION_MAX_HOURS: int = int(_get("AUTH_SESSION_MAX_HOURS", 12))
 
 # DB-IP City Lite .mmdb, downloaded at Docker build time (see
 # Dockerfile.backend) — not present in local dev, geoip_lookup.py handles

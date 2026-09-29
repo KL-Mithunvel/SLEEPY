@@ -125,7 +125,13 @@ export const useAuthStore = defineStore('auth', () => {
         method: 'POST',
         headers: { Authorization: `Bearer ${_token}` },
       })
-      if (res.status === 401) return handleUnauthorized()
+      if (res.status === 401) {
+        // Usually the AUTH_SESSION_MAX_HOURS cap — say so rather than dropping
+        // to the login screen with no explanation.
+        handleUnauthorized()
+        notice.value = 'Your session has ended. Please sign in again.'
+        return
+      }
       if (!res.ok) return
       const data = await res.json()
       if (data.token) {
@@ -143,7 +149,13 @@ export const useAuthStore = defineStore('auth', () => {
     if (Date.now() - _lastRefresh > REFRESH_AFTER_MS) refreshToken()
   }
 
-  /** reason: 'idle' shows a notice on the login screen. */
+  /**
+   * reason: 'idle' shows a notice on the login screen and signs out THIS
+   * browser only. The server's logout revokes every token the user holds, so
+   * calling it on idle would kick an actively-used phone out because a laptop
+   * went quiet. The discarded token dies server-side within its short TTL
+   * anyway. A deliberate logout still means "sign out everywhere".
+   */
   async function logout(reason = '') {
     const token = _token
     // Drop the local session first so the UI is locked immediately, then tell
@@ -154,7 +166,7 @@ export const useAuthStore = defineStore('auth', () => {
     authenticated.value = false
     user.value = null
     notice.value = reason === 'idle' ? 'You were signed out after a period of inactivity.' : ''
-    if (!token || _devBypass) return
+    if (!token || _devBypass || reason === 'idle') return
     try {
       await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
     } catch {

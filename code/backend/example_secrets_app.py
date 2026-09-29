@@ -15,6 +15,7 @@ ANTHROPIC_API_KEY = "sk-ant-..."     # preferred key name going forward
 AUTH_SECRET_KEY = ""      # generate via: python -c "import secrets; print(secrets.token_hex(32))"
 AUTH_TOKEN_TTL_MINUTES = 20       # token lifetime; renewed while you are active
 AUTH_IDLE_TIMEOUT_MINUTES = 15    # signed out after this long idle (prompt appears 1 min before)
+AUTH_SESSION_MAX_HOURS = 12       # password required again after this long, however active you are
 
 # ---------------------------------------------------------------------------
 # SQLite DB path (absolute, or relative to code/backend/)
