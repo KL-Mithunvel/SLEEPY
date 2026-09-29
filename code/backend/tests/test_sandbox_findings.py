@@ -137,3 +137,58 @@ def test_email_allowlist_accepts_single_allowed_address(monkeypatch, to):
     import tools_registry
     monkeypatch.setattr(config, "USER_EMAIL", "me@gmail.com")
     assert tools_registry._is_allowed_email_recipient(to) is True
+
+
+# ---------------------------------------------------------------------------
+# git option injection via file names (2026-09-30 dependency/infra audit)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("rel", [
+    "--pathspec-from-file=L/list.md",
+    "-f.md",
+    "VIT/-rf.md",
+    "--help/x.md",
+])
+def test_names_starting_with_dash_are_refused(corpus, rel):
+    import md_editor
+    with pytest.raises(ValueError):
+        md_editor.validate_path(rel)
+
+
+def test_crafted_delete_cannot_remove_other_files(corpus, conn):
+    """Approving 'delete --pathspec-from-file=L/list.md' used to git-rm every file listed in L/list.md."""
+    import subprocess
+    import md_editor
+    _write(os.path.join(corpus, "VIT", "project-b.md"), "# B\n")
+    _write(os.path.join(corpus, "L", "list.md"), "VIT/proj.md\nVIT/project-b.md\n")
+    _write(os.path.join(corpus, "--pathspec-from-file=L", "list.md"), "x\n")
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "seed"]):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=corpus, check=True)
+    with pytest.raises(ValueError):
+        md_editor.propose_delete("--pathspec-from-file=L/list.md", "cleanup", conn)
+    assert os.path.exists(os.path.join(corpus, "VIT", "proj.md"))
+    assert os.path.exists(os.path.join(corpus, "VIT", "project-b.md"))
+
+
+def test_git_mv_and_rm_pass_an_option_terminator(corpus, conn, monkeypatch):
+    """Belt and braces: even a name that slipped past validate_path is never parsed as an option."""
+    import subprocess
+    import md_editor
+    _write(os.path.join(corpus, "VIT", "a.md"), "# A\n")
+    for args in (["init", "-q"], ["add", "-A"], ["commit", "-qm", "seed"]):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=corpus, check=True)
+    seen = []
+    import git
+    real_execute = git.cmd.Git.execute
+
+    def spy(self, command, *a, **kw):
+        if isinstance(command, (list, tuple)) and len(command) > 1 and command[1] in ("mv", "rm"):
+            seen.append(list(command))
+        return real_execute(self, command, *a, **kw)
+
+    monkeypatch.setattr(git.cmd.Git, "execute", spy)
+    mv = md_editor.propose_move("VIT/a.md", "VIT/b.md", "rename", conn)
+    md_editor.apply_move(mv["event_id"], conn)
+    rm = md_editor.propose_delete("VIT/b.md", "remove", conn)
+    md_editor.apply_delete(rm["event_id"], conn)
+    assert seen and all(cmd[2] == "--" for cmd in seen), seen

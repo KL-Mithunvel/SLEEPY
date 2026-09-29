@@ -151,6 +151,13 @@ def is_reserved_corpus_path(base: str, abs_path: str) -> bool:
     parts = rel.split(os.sep)
     if parts[0] == "db":
         return True
+    # A name starting with "-" is read by git as an option, not a path:
+    # deleting "--pathspec-from-file=L/list.md" ran `git rm` over every file
+    # listed in L/list.md while the Apply card named only the one (found
+    # 2026-09-30). The git calls below also pass "--"; this keeps such names
+    # out of the corpus entirely.
+    if any(p.startswith("-") for p in parts):
+        return True
     return any(p.startswith(".") and p not in (".", "..") for p in parts[:-1])
 
 
@@ -293,7 +300,7 @@ def validate_path(rel_path: str) -> str:
         raise ValueError(f"Path traversal detected (symlink leaves the data root): {rel_path!r}")
 
     if is_reserved_corpus_path(data_root, abs_path):
-        raise ValueError(f"Writes to db/ or dot-directories (.git/) are not allowed: {rel_path!r}")
+        raise ValueError(f"Writes to db/, dot-directories (.git/) or names starting with \"-\" are not allowed: {rel_path!r}")
 
     if not norm.endswith(".md"):
         raise ValueError(f"Only .md files may be edited by AI: {rel_path!r}")
@@ -635,7 +642,7 @@ def apply_move(event_id: int, conn: sqlite3.Connection) -> str:
         ensure_corpus_gitignore()
         src_rel_to_repo = os.path.relpath(src_abs, config.USER_DATA_ROOT)
         dst_rel_to_repo = os.path.relpath(dst_abs, config.USER_DATA_ROOT)
-        repo.git.mv(src_rel_to_repo, dst_rel_to_repo)
+        repo.git.mv("--", src_rel_to_repo, dst_rel_to_repo)
         author = ai_actor()
         commit = repo.index.commit(
             f"AI: {summary}",
@@ -730,7 +737,7 @@ def apply_delete(event_id: int, conn: sqlite3.Connection) -> str:
         repo = _get_repo()
         ensure_corpus_gitignore()
         rel_to_repo = os.path.relpath(abs_path, config.USER_DATA_ROOT)
-        repo.git.rm(rel_to_repo)
+        repo.git.rm("--", rel_to_repo)
         author = ai_actor()
         commit = repo.index.commit(
             f"AI: {summary}",
