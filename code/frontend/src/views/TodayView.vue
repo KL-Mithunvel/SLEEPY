@@ -4,6 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useTodayStore } from '../stores/today.js'
 import { useAiStore } from '../stores/ai.js'
 import { useProjectsStore } from '../stores/projects.js'
+import EditWarnings from '../components/EditWarnings.vue'
 import { renderMd } from '../mdRender.js'
 
 const today = useTodayStore()
@@ -460,10 +461,21 @@ onUnmounted(() => {
           <div class="px-2 py-1" style="border-bottom: 1px solid var(--border-color); background: rgba(110,168,254,0.05);">
             <template v-if="lastAiMsg.settled && lastAiMsg.confirmed">
               <i class="bi bi-check-circle-fill text-success me-1"></i>
-              Applied — <code style="font-size: 0.75rem;">{{ lastAiMsg.edit.rel_path }}</code>
+              Applied — <code style="font-size: 0.75rem;">{{ lastAiMsg.edit.rel_path || lastAiMsg.edit.dst_path }}</code>
             </template>
             <template v-else-if="lastAiMsg.settled">
               <i class="bi bi-x-circle me-1" style="color: #f87171;"></i> Discarded
+            </template>
+            <!-- Name the operation: this card used to say "Edit" for deletes and moves too. -->
+            <template v-else-if="lastAiMsg.edit.op === 'delete'">
+              <i class="bi bi-trash me-1" style="color: #f87171;"></i>
+              <strong style="color: #f87171;">Delete</strong> <code style="font-size: 0.75rem;">{{ lastAiMsg.edit.rel_path }}</code>
+              — {{ lastAiMsg.edit.summary }}
+            </template>
+            <template v-else-if="lastAiMsg.edit.op === 'move'">
+              <i class="bi bi-arrow-right-square me-1" style="color: var(--accent);"></i>
+              Move <code style="font-size: 0.75rem;">{{ lastAiMsg.edit.src_path }}</code> → <code style="font-size: 0.75rem;">{{ lastAiMsg.edit.dst_path }}</code>
+              — {{ lastAiMsg.edit.summary }}
             </template>
             <template v-else>
               <i class="bi bi-pencil-square me-1" style="color: var(--accent);"></i>
@@ -471,6 +483,8 @@ onUnmounted(() => {
               — {{ lastAiMsg.edit.summary }}
             </template>
           </div>
+
+          <EditWarnings v-if="!lastAiMsg.settled" compact :warnings="lastAiMsg.edit.warnings || []" />
 
           <div
             v-if="!lastAiMsg.settled"
@@ -484,8 +498,12 @@ onUnmounted(() => {
           </div>
 
           <div v-if="!lastAiMsg.settled" class="d-flex gap-2 px-2 py-1" style="border-top: 1px solid var(--border-color);">
-            <button class="btn btn-success btn-sm py-0" style="font-size: 0.74rem;" @click="ai.confirmEdit(ai.messages.length - 1)">
-              <i class="bi bi-check-lg me-1"></i>Apply
+            <button
+              :class="['btn', 'btn-sm', 'py-0', lastAiMsg.edit.op === 'delete' ? 'btn-danger' : 'btn-success']"
+              style="font-size: 0.74rem;"
+              @click="ai.confirmEdit(ai.messages.length - 1)"
+            >
+              <i class="bi bi-check-lg me-1"></i>{{ lastAiMsg.edit.op === 'delete' ? 'Confirm Delete' : 'Apply' }}
             </button>
             <button class="btn btn-outline-secondary btn-sm py-0" style="font-size: 0.74rem;" @click="ai.discardEdit(ai.messages.length - 1)">
               <i class="bi bi-x-lg me-1"></i>Discard

@@ -43,6 +43,7 @@ import time
 import git
 
 import config
+import untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +384,9 @@ def propose_edit(
 
     Raises ValueError if validation fails (no ai_events row written in that case).
     """
+    # Web-content labels are for the model's eyes only (untrusted.py); a
+    # read-then-rewrite must not persist them into the corpus.
+    new_content = untrusted.unwrap(new_content)
     validate_edit(rel_path, new_content)
 
     norm = rel_path.replace("\\", "/").lstrip("/")

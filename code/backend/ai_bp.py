@@ -27,6 +27,8 @@ import md_indexer
 import skills
 import task_queue
 import tools_registry
+import untrusted
+from action_risk import action_warnings
 from auth_utils import require_perm
 
 logger = logging.getLogger(__name__)
@@ -151,8 +153,10 @@ def _stage_pma_edits(text: str, conn) -> list[dict]:
     actions = []
     for m in _PMA_EDIT_RE.finditer(text):
         file_path = m.group(1).strip()
-        search_content = m.group(2)
-        replace_content = m.group(3)
+        # The model may quote lines it read with their web-content labels
+        # still on (untrusted.py) — strip them or the search never matches.
+        search_content = untrusted.unwrap(m.group(2))
+        replace_content = untrusted.unwrap(m.group(3))
 
         try:
             md_editor.validate_path(file_path)
@@ -414,6 +418,14 @@ def chat_endpoint():
             llm_tools = tools_registry.build_tools(conn=db, staged_actions=staged_by_tools)
             result = None
 
+            # Did web-sourced text reach the model this turn? Block 0 is
+            # SystemPrompt.MD, which names the tag in its own rules, so it's
+            # skipped; earlier turns count if they quoted a news bullet.
+            untrusted_seen = (
+                any(untrusted.contains_untrusted(b["text"]) for b in system_blocks[1:])
+                or any("📰" in str(m.get("content", "")) for m in messages)
+            )
+
             for chunk in llm.chat_stream(
                 messages,
                 system=system_blocks,
@@ -422,6 +434,8 @@ def chat_endpoint():
                 if isinstance(chunk, str):
                     yield f"data: {json.dumps({'type': 'delta', 'text': chunk})}\n\n"
                 elif isinstance(chunk, dict):
+                    if untrusted.contains_untrusted(str(chunk.get("result", ""))):
+                        untrusted_seen = True
                     yield f"data: {json.dumps({'type': 'tool_progress', 'event': chunk})}\n\n"
                 elif isinstance(chunk, llm.ChatResult):
                     result = chunk
@@ -429,6 +443,8 @@ def chat_endpoint():
             if result:
                 # Collect actions: tool-staged + any pma-edit blocks in response text
                 actions = staged_by_tools + _stage_pma_edits(result.text, db)
+                for action in actions:
+                    action["warnings"] = action_warnings(action, untrusted_seen)
 
                 # Log to ai_events — persists the full prompt/response text so
                 # past conversations are recoverable, not just token counts.

@@ -16,6 +16,7 @@ import md_editor
 import md_indexer
 import skills
 import task_queue
+import untrusted
 from llm import Tool
 
 _ALLOWED_EMAIL_DOMAIN = "@smtw.in"
@@ -128,7 +129,7 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
                     continue
         if not results:
             return f"No matches for: {pattern}"
-        return "\n".join(results[:200])
+        return untrusted.mark_untrusted("\n".join(results[:200]))
 
     def h_read_file(inp: dict) -> str:
         try:
@@ -138,7 +139,7 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
         if not os.path.isfile(abs_path):
             return f"[file not found: {inp['path']}]"
         with open(abs_path, encoding="utf-8", errors="replace") as f:
-            return f.read()
+            return untrusted.mark_untrusted(f.read())
 
     def h_read_src(inp: dict) -> str:
         try:
@@ -198,7 +199,7 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
                 header += f" § {c['heading']}"
             header += f" (score: {c.get('score', '?')})"
             parts.append(f"{header}\n{c['content']}")
-        return "\n\n---\n\n".join(parts)
+        return untrusted.mark_untrusted("\n\n---\n\n".join(parts))
 
     def h_send_email(inp: dict) -> str:
         to = inp["to"]

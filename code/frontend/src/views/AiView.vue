@@ -2,6 +2,7 @@
 import { ref, nextTick, watch } from 'vue'
 import { useAiStore } from '../stores/ai.js'
 import { renderMd } from '../mdRender.js'
+import EditWarnings from '../components/EditWarnings.vue'
 
 const ai = useAiStore()
 const messagesEl = ref(null)
@@ -132,7 +133,10 @@ function toolLabel(name) {
 
         <!-- AI edit proposal -->
         <div v-else-if="msg.type === 'edit'" class="msg-row msg-row--ai">
-          <div class="msg-edit-card" :class="{ 'msg-edit-card--danger': msg.edit.op === 'delete' && !msg.settled }">
+          <div class="msg-edit-card" :class="{
+            'msg-edit-card--danger': msg.edit.op === 'delete' && !msg.settled,
+            'msg-edit-card--warn': msg.edit.op !== 'delete' && (msg.edit.warnings || []).length && !msg.settled,
+          }">
             <!-- Header -->
             <div class="msg-edit-header">
               <i
@@ -170,6 +174,9 @@ function toolLabel(name) {
 
             <!-- Summary -->
             <div class="msg-edit-summary">{{ msg.edit.summary }}</div>
+
+            <!-- Risk warnings (computed server-side, not by the AI) -->
+            <EditWarnings v-if="!msg.settled" :warnings="msg.edit.warnings || []" />
 
             <!-- Diff -->
             <div v-if="!msg.settled" class="diff-viewer">
@@ -342,6 +349,10 @@ function toolLabel(name) {
 
 .msg-edit-card--danger {
   border-color: rgba(248,113,113,0.4);
+}
+
+.msg-edit-card--warn {
+  border-color: rgba(251,191,36,0.4);
 }
 
 .msg-edit-header {
