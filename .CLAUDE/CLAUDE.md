@@ -163,6 +163,7 @@ SLEEPY/
 │   ├── run-frontend-build.bat # npm run build from code/frontend
 │   ├── run-worker.bat         # Standalone worker process
 │   ├── diagnose.py            # Startup health-check script (config/DB/worker/integrations)
+│   ├── sandbox/               # Local attack sandbox: run_sandbox.py boots the app in prod posture on 127.0.0.1:5055 against a throwaway .sandbox/ corpus; attack_http.py / attack_ai_tools.py / attack_render.mjs re-run every known attack (exit code = VULN count). Re-run after any auth/path/render/tool change.
 │   ├── aws-ssh.sh             # plink-based SSH launcher for the AWS box (pinned host key)
 │   └── nginx-klm.smtw.in.conf # Reference for the host nginx reverse-proxy config on the AWS box
 ├── Dockerfile.backend / Dockerfile.frontend / docker-compose.yml   # Prod deploy (AWS EC2)

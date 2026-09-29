@@ -58,3 +58,6 @@ tooling/_*
 
 # Offsite deploy key (generated on the box, never committed) — see docs/RECOVERY.md section 3
 /secrets/
+
+# Local attack sandbox runtime data (tooling/sandbox/)
+.sandbox/
