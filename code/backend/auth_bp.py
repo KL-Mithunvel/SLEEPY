@@ -3,9 +3,10 @@ Auth routes — self-issued JWT login, no external identity provider.
 
 Public API:
     POST /api/auth/login   -- {username, password} -> {token, role, username}
+    POST /api/auth/refresh -- swap a still-valid token for a fresh one (activity keep-alive)
     POST /api/auth/logout  -- revokes all of the caller's tokens (token_version bump)
     GET  /api/auth/me      -- current user's identity + permissions
-    GET  /api/auth/config  -- public bootstrap info (devBypass flag only)
+    GET  /api/auth/config  -- public bootstrap info (devBypass flag + idle timeout)
 """
 
 import logging
@@ -50,7 +51,10 @@ def _log_attempt(conn, username: str, success: bool):
 
 @auth_bp.get("/config")
 def auth_config():
-    return jsonify({"devBypass": config.DEV_AUTH_BYPASS})
+    return jsonify({
+        "devBypass": config.DEV_AUTH_BYPASS,
+        "idleTimeoutMinutes": config.AUTH_IDLE_TIMEOUT_MINUTES,
+    })
 
 
 @auth_bp.post("/login")
@@ -84,6 +88,29 @@ def login():
         return jsonify({"token": token, "role": row["role"], "username": row["username"]})
     finally:
         local_db.return_db(conn)
+
+
+@auth_bp.post("/refresh")
+def refresh():
+    """
+    Exchange a still-valid token for a fresh one. validate_token has already
+    rejected expired/revoked tokens, so reaching here proves the session is
+    live. The new token keeps the same token_version, so logout still
+    revokes it along with every other one.
+    """
+    if config.DEV_AUTH_BYPASS:
+        return jsonify({"token": None})
+    conn = local_db.get_db()
+    try:
+        row = conn.execute(
+            "SELECT username, role, token_version FROM users WHERE username = ?",
+            (g.user["sub"],),
+        ).fetchone()
+    finally:
+        local_db.return_db(conn)
+    if row is None:
+        return jsonify({"error": "Token revoked"}), 401
+    return jsonify({"token": auth_utils.issue_token(row["username"], row["role"], row["token_version"])})
 
 
 @auth_bp.post("/logout")

@@ -13,7 +13,8 @@ ANTHROPIC_API_KEY = "sk-ant-..."     # preferred key name going forward
 # prod — config.py refuses to start with APP_ENV=production and this blank)
 # ---------------------------------------------------------------------------
 AUTH_SECRET_KEY = ""      # generate via: python -c "import secrets; print(secrets.token_hex(32))"
-AUTH_TOKEN_TTL_DAYS = 7   # how long a login stays valid before re-authenticating
+AUTH_TOKEN_TTL_MINUTES = 20       # token lifetime; renewed while you are active
+AUTH_IDLE_TIMEOUT_MINUTES = 15    # signed out after this long idle (prompt appears 1 min before)
 
 # ---------------------------------------------------------------------------
 # SQLite DB path (absolute, or relative to code/backend/)

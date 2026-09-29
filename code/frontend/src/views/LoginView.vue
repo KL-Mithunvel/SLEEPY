@@ -29,6 +29,10 @@ async function submit() {
           <p class="mb-0" style="font-size: 0.8rem; color: var(--text-muted-custom);">Sign in to continue</p>
         </div>
 
+        <div v-if="auth.notice" class="alert alert-secondary py-2 mb-3" style="font-size: 0.82rem;">
+          <i class="bi bi-clock-history me-1"></i>{{ auth.notice }}
+        </div>
+
         <div v-if="auth.error" class="alert alert-danger py-2 mb-3" style="font-size: 0.82rem;">
           <i class="bi bi-exclamation-triangle me-1"></i>{{ auth.error }}
         </div>

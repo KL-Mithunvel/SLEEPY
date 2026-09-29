@@ -58,7 +58,7 @@ else:
 if config.DEV_AUTH_BYPASS:
     ok("DEV_AUTH_BYPASS=1  (dev mode -- synthetic admin user, no login)")
 elif config.AUTH_SECRET_KEY:
-    ok(f"In-app auth: AUTH_SECRET_KEY set ({len(config.AUTH_SECRET_KEY)} chars), token TTL {config.AUTH_TOKEN_TTL_DAYS}d")
+    ok(f"In-app auth: AUTH_SECRET_KEY set ({len(config.AUTH_SECRET_KEY)} chars), token TTL {config.AUTH_TOKEN_TTL_MINUTES}m, idle timeout {config.AUTH_IDLE_TIMEOUT_MINUTES}m")
 else:
     fail("AUTH_SECRET_KEY blank with DEV_AUTH_BYPASS off", "config.py refuses to start like this")
 

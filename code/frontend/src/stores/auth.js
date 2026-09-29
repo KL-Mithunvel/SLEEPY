@@ -2,10 +2,13 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 const TOKEN_KEY = 'sleepy_token'
+// The token lives in sessionStorage, not localStorage: closing the tab or the
+// browser ends the session, so an unattended machine can't reopen it.
+const REFRESH_AFTER_MS = 4 * 60 * 1000  // server token TTL is 20 min; renew well inside it
 
 function _loadStoredToken() {
   try {
-    return localStorage.getItem(TOKEN_KEY)
+    return sessionStorage.getItem(TOKEN_KEY)
   } catch {
     return null
   }
@@ -13,10 +16,10 @@ function _loadStoredToken() {
 
 function _storeToken(token) {
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token)
-    else localStorage.removeItem(TOKEN_KEY)
+    if (token) sessionStorage.setItem(TOKEN_KEY, token)
+    else sessionStorage.removeItem(TOKEN_KEY)
   } catch {
-    // localStorage unavailable (private browsing, blocked site data, etc.) —
+    // sessionStorage unavailable (private browsing, blocked site data, etc.) —
     // the session just won't persist across reloads.
   }
 }
@@ -26,10 +29,14 @@ export const useAuthStore = defineStore('auth', () => {
   const authenticated = ref(false)
   const user = ref(null)
   const error = ref('')
+  const notice = ref('')            // non-error banner on the login screen (e.g. idle sign-out)
+  const idleTimeoutMinutes = ref(15)
+  const devBypass = ref(false)      // dev mode has no login, so no idle sign-out either
 
   // Internal — not exposed
   let _devBypass = false
   let _token = null
+  let _lastRefresh = 0
 
   async function _fetchMe() {
     const headers = {}
@@ -43,9 +50,11 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await fetch('/api/auth/config')
       const cfg = await res.json()
+      if (cfg.idleTimeoutMinutes) idleTimeoutMinutes.value = cfg.idleTimeoutMinutes
 
       if (cfg.devBypass) {
         _devBypass = true
+        devBypass.value = true
         user.value = await _fetchMe()
         authenticated.value = true
         return
@@ -56,6 +65,7 @@ export const useAuthStore = defineStore('auth', () => {
         try {
           user.value = await _fetchMe()
           authenticated.value = true
+          refreshToken()
         } catch {
           _token = null
           _storeToken(null)
@@ -70,6 +80,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(username, password) {
     error.value = ''
+    notice.value = ''
     let res
     try {
       res = await fetch('/api/auth/login', {
@@ -89,6 +100,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     _token = data.token
+    _lastRefresh = Date.now()
     _storeToken(_token)
     try {
       user.value = await _fetchMe()
@@ -102,16 +114,52 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function logout() {
+  /**
+   * Swap the current token for a fresh one. The server issues short-lived
+   * tokens, so this is what keeps an active session alive.
+   */
+  async function refreshToken() {
+    if (_devBypass || !_token) return
     try {
-      await fetch('/api/auth/logout', { method: 'POST' })
+      const res = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${_token}` },
+      })
+      if (res.status === 401) return handleUnauthorized()
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.token) {
+        _token = data.token
+        _lastRefresh = Date.now()
+        _storeToken(_token)
+      }
     } catch {
-      // best-effort — the client-side token discard below is what matters
+      // network blip — try again on the next activity
     }
+  }
+
+  /** Renew only if the token is getting old — called on every user activity. */
+  function refreshIfStale() {
+    if (Date.now() - _lastRefresh > REFRESH_AFTER_MS) refreshToken()
+  }
+
+  /** reason: 'idle' shows a notice on the login screen. */
+  async function logout(reason = '') {
+    const token = _token
+    // Drop the local session first so the UI is locked immediately, then tell
+    // the server. The Bearer header is required: the route isn't public, so
+    // without it the server answers 401 and never revokes anything.
     _token = null
     _storeToken(null)
     authenticated.value = false
     user.value = null
+    notice.value = reason === 'idle' ? 'You were signed out after a period of inactivity.' : ''
+    if (!token || _devBypass) return
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+    } catch {
+      // best-effort — the token expires on its own within minutes regardless
+    }
   }
 
   /** Called by api.js when a request comes back 401 — the token expired or was invalidated. */
@@ -128,5 +176,8 @@ export const useAuthStore = defineStore('auth', () => {
     return _token
   }
 
-  return { loading, authenticated, user, error, init, login, logout, getToken, handleUnauthorized }
+  return {
+    loading, authenticated, user, error, notice, idleTimeoutMinutes, devBypass,
+    init, login, logout, getToken, handleUnauthorized, refreshToken, refreshIfStale,
+  }
 })

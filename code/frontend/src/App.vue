@@ -5,6 +5,7 @@ import { useAuthStore } from './stores/auth.js'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import AppTopbar from './components/layout/AppTopbar.vue'
 import LoginView from './views/LoginView.vue'
+import IdleGuard from './components/IdleGuard.vue'
 
 const auth = useAuthStore()
 onMounted(() => auth.init())
@@ -21,6 +22,7 @@ onMounted(() => auth.init())
   <LoginView v-else-if="!auth.authenticated" />
 
   <div v-else class="app-layout">
+    <IdleGuard v-if="!auth.devBypass" />
     <AppSidebar />
     <div class="app-main">
       <AppTopbar />

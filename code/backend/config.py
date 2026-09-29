@@ -62,7 +62,12 @@ DEV_USER: str         = _get("DEV_USER", "klm")
 # AUTH_SECRET_KEY must be set for real (never blank) in prod: generate via
 # `python -c "import secrets; print(secrets.token_hex(32))"`.
 AUTH_SECRET_KEY: str     = _get("AUTH_SECRET_KEY", "")
-AUTH_TOKEN_TTL_DAYS: int = int(_get("AUTH_TOKEN_TTL_DAYS", 7))
+# Tokens are short-lived and renewed by the frontend while the user is active
+# (POST /api/auth/refresh). The TTL must comfortably exceed the idle timeout
+# plus the frontend's renewal interval (4 min), or a token could expire before
+# the "are you still there?" prompt does.
+AUTH_TOKEN_TTL_MINUTES: int = int(_get("AUTH_TOKEN_TTL_MINUTES", 20))
+AUTH_IDLE_TIMEOUT_MINUTES: int = int(_get("AUTH_IDLE_TIMEOUT_MINUTES", 15))
 
 # DB-IP City Lite .mmdb, downloaded at Docker build time (see
 # Dockerfile.backend) — not present in local dev, geoip_lookup.py handles

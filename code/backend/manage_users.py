@@ -68,7 +68,7 @@ def reset_password(username: str):
     conn = local_db.get_db()
     try:
         # token_version bump = every token issued under the old password is
-        # dead immediately, not in up to AUTH_TOKEN_TTL_DAYS.
+        # dead immediately, not within AUTH_TOKEN_TTL_MINUTES.
         cur = conn.execute(
             "UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE username = ?",
             (password_hash, username),

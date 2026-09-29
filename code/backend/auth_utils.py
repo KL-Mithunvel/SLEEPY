@@ -95,7 +95,7 @@ def issue_token(username: str, role: str, token_version: int = 0) -> str:
         "ver": int(token_version),
         "jti": uuid.uuid4().hex,
         "iat": now,
-        "exp": now + datetime.timedelta(days=config.AUTH_TOKEN_TTL_DAYS),
+        "exp": now + datetime.timedelta(minutes=config.AUTH_TOKEN_TTL_MINUTES),
     }
     return jwt.encode(payload, config.AUTH_SECRET_KEY, algorithm="HS256")
 
