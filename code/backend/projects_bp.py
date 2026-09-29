@@ -103,13 +103,18 @@ def _parse_project(rel_path: str) -> dict | None:
 
 
 def _safe_project_abs(rel_path: str) -> str | None:
-    """Return resolved absolute path only if it's inside USER_DATA_ROOT and ends in .md."""
+    """
+    Return resolved absolute path only if it's inside USER_DATA_ROOT, ends in
+    .md, and isn't under db/ or a dot-directory (the listing already hides
+    both; this stops a hand-built ?path= from reaching them anyway).
+    """
     norm = os.path.normpath(
         os.path.join(config.USER_DATA_ROOT, rel_path.replace("\\", "/").lstrip("/"))
     )
     root = os.path.normpath(config.USER_DATA_ROOT)
     if (norm.startswith(root + os.sep) and norm.endswith(".md")
-            and md_editor.is_within_root(root, norm)):
+            and md_editor.is_within_root(root, norm)
+            and not md_editor.is_reserved_corpus_path(root, norm)):
         return norm
     return None
 

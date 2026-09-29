@@ -7,6 +7,9 @@ Each handler is a closure that captures the db connection and data roots.
 
 import os
 import re
+import time
+
+import regex
 
 import config
 import md_editor
@@ -17,10 +20,18 @@ from llm import Tool
 
 _ALLOWED_EMAIL_DOMAIN = "@smtw.in"
 
-# The LLM's regex is untrusted input into Python's backtracking `re` engine
-# (no timeout). A length cap doesn't make catastrophic patterns impossible,
-# but it removes the room needed to build one and keeps honest searches intact.
+# The LLM's regex is untrusted input (prompt injection via news bullets can
+# steer it). A length cap alone doesn't stop catastrophic backtracking:
+# `(a+)+$` is 7 chars and took 20s on a 29-char line under stdlib `re` (found
+# by tooling/sandbox/), and prod runs ONE gunicorn worker, so one injected
+# grep froze the whole site. The `regex` engine takes a timeout and also
+# short-circuits many nested-quantifier patterns outright; the budget below
+# covers the whole search, not each line.
 _MAX_GREP_PATTERN_LEN = 200
+_GREP_TIME_BUDGET_SEC = 3.0
+
+# One plain address, nothing a mail API might split into several recipients.
+_SINGLE_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
 def _is_allowed_email_recipient(to: str) -> bool:
@@ -32,7 +43,9 @@ def _is_allowed_email_recipient(to: str) -> bool:
     exfiltration path without requiring a confirm-gate UI for routine mail.
     """
     to = (to or "").strip().lower()
-    if not to:
+    # fullmatch first: a bare endswith() accepted "attacker@evil.com,me@smtw.in"
+    # (also ";" and newline-joined lists) — found by tooling/sandbox/.
+    if not _SINGLE_EMAIL_RE.fullmatch(to):
         return False
     if to == (config.USER_EMAIL or "").strip().lower():
         return True
@@ -42,8 +55,6 @@ def _is_allowed_email_recipient(to: str) -> bool:
 def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
     data_root = config.USER_DATA_ROOT
     src_root = str(config.SRC_ROOT)
-
-    db_dir = os.path.normpath(os.path.join(data_root, "db"))
 
     def _safe_path(base: str, rel_path: str) -> str:
         norm = rel_path.replace("\\", "/").lstrip("/")
@@ -64,15 +75,15 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
         request may be an injected one.
         """
         abs_path = _safe_path(data_root, rel_path)
-        if abs_path.startswith(db_dir + os.sep) or abs_path == db_dir:
-            raise ValueError(f"db/ is internal app state and not readable: {rel_path!r}")
+        if md_editor.is_reserved_corpus_path(data_root, abs_path):
+            raise ValueError(f"db/ and dot-directories are internal and not readable: {rel_path!r}")
         if not abs_path.lower().endswith(".md"):
             raise ValueError(f"Only .md corpus files are readable: {rel_path!r}")
         return abs_path
 
     def _is_under_db(path: str) -> bool:
-        p = os.path.normpath(path)
-        return p.startswith(db_dir + os.sep) or p == db_dir
+        """True for db/ or a dot-directory (.git/) — a directory, so probe a child of it."""
+        return md_editor.is_reserved_corpus_path(data_root, os.path.join(path, "_"))
 
     def h_load_skill(inp: dict) -> str:
         return skills.get_skill_content(inp["name"])
@@ -88,11 +99,12 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
             except ValueError as e:
                 return f"[error: {e}]"
             if _is_under_db(search_dir):
-                return "[error: db/ is internal app state and not searchable]"
+                return "[error: db/ and dot-directories are internal and not searchable]"
         try:
-            regex = re.compile(pattern, re.IGNORECASE)
-        except re.error as e:
+            compiled = regex.compile(pattern, regex.IGNORECASE)
+        except regex.error as e:
             return f"[invalid regex: {e}]"
+        deadline = time.monotonic() + _GREP_TIME_BUDGET_SEC
         results = []
         for root, dirs, files in os.walk(search_dir):
             dirs[:] = sorted(d for d in dirs if not _is_under_db(os.path.join(root, d)))
@@ -104,8 +116,14 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
                 try:
                     with open(fpath, encoding="utf-8", errors="replace") as f:
                         for lineno, line in enumerate(f, 1):
-                            if regex.search(line):
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                raise TimeoutError
+                            if compiled.search(line, timeout=remaining):
                                 results.append(f"{rel}:{lineno}: {line.rstrip()}")
+                except TimeoutError:
+                    return (f"[error: search exceeded {_GREP_TIME_BUDGET_SEC:.0f}s — the pattern "
+                            "is too expensive; use a simpler, more literal one]")
                 except OSError:
                     continue
         if not results:
@@ -155,13 +173,11 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
                 search_dir = _safe_path(data_root, inp["path"])
             except ValueError as e:
                 return f"[error: {e}]"
-        db_dir = os.path.normpath(os.path.join(data_root, "db"))
+            if _is_under_db(search_dir):
+                return "[error: db/ and dot-directories are internal and not listable]"
         lines = []
         for root, dirs, files in os.walk(search_dir):
-            dirs[:] = sorted(
-                d for d in dirs
-                if not os.path.normpath(os.path.join(root, d)).startswith(db_dir)
-            )
+            dirs[:] = sorted(d for d in dirs if not _is_under_db(os.path.join(root, d)))
             rel_root = os.path.relpath(root, data_root).replace("\\", "/")
             for fname in sorted(files):
                 if fname.endswith(".md"):

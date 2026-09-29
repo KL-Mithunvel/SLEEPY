@@ -226,6 +226,7 @@ dependencies = [
     { name = "maxminddb" },
     { name = "msal" },
     { name = "pyjwt", extra = ["crypto"] },
+    { name = "regex" },
 ]
 
 [package.dev-dependencies]
@@ -247,6 +248,7 @@ requires-dist = [
     { name = "maxminddb", specifier = ">=2.6.2" },
     { name = "msal", specifier = ">=1.31.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.13.0" },
+    { name = "regex", specifier = ">=2026.5.9" },
 ]
 
 [package.metadata.requires-dev]

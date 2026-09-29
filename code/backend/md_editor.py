@@ -135,6 +135,24 @@ def is_within_root(base: str, path: str) -> bool:
     return real_path == real_base or real_path.startswith(real_base + os.sep)
 
 
+def is_reserved_corpus_path(base: str, abs_path: str) -> bool:
+    """
+    True if `abs_path` (already known to be inside `base`) is somewhere no
+    corpus read or write may reach: under db/ (SQLite with password hashes and
+    chat logs, Chroma, backups) or inside any dot-directory (.git/ above all —
+    the repo's own internals). Every path guard shares this one rule so a new
+    route can't forget half of it; the sandbox (tooling/sandbox/) found
+    GET /api/projects/content missing the db/ half and every write path
+    missing the .git/ half. normcase makes `DB/` count as `db/` on
+    case-insensitive filesystems (a no-op on Linux, where they differ).
+    """
+    rel = os.path.relpath(os.path.normcase(abs_path), os.path.normcase(base))
+    parts = rel.split(os.sep)
+    if parts[0] == "db":
+        return True
+    return any(p.startswith(".") and p not in (".", "..") for p in parts[:-1])
+
+
 @contextlib.contextmanager
 def corpus_git_lock(data_root: str | None = None):
     """
@@ -273,9 +291,8 @@ def validate_path(rel_path: str) -> str:
     if not is_within_root(data_root, abs_path):
         raise ValueError(f"Path traversal detected (symlink leaves the data root): {rel_path!r}")
 
-    db_dir = os.path.normpath(os.path.join(data_root, "db"))
-    if abs_path.startswith(db_dir + os.sep) or abs_path == db_dir:
-        raise ValueError(f"Writes to db/ are not allowed: {rel_path!r}")
+    if is_reserved_corpus_path(data_root, abs_path):
+        raise ValueError(f"Writes to db/ or dot-directories (.git/) are not allowed: {rel_path!r}")
 
     if not norm.endswith(".md"):
         raise ValueError(f"Only .md files may be edited by AI: {rel_path!r}")
