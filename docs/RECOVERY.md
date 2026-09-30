@@ -172,6 +172,37 @@ docker compose exec worker python -c \
    local_db.init_db(); c=local_db.get_db(); print(md_indexer.index_all(c), 'chunks')"
 ```
 
+### Laptop copy of the offsite backup
+
+The box holds a **write** deploy key for `sleepy-corpus`, so whoever takes over
+the box can force-push or delete the GitHub copy too. Branch protection would
+stop that, but GitHub only offers it for private repos on a paid plan. Instead,
+the dev PC keeps its own copy that the box can't reach:
+
+- `tooling/pull-corpus-backup.ps1` fetches `sleepy-corpus` into
+  `%USERPROFILE%\Backups\sleepy-corpus.git` and pins each new state as a dated
+  `snapshot-YYYY-MM-DD-HHMMSS` tag. Fetches never move tags, so a later wipe on
+  GitHub can't touch earlier snapshots.
+- It runs daily at 11:00 as the Windows scheduled task **SLEEPY corpus backup**
+  (runs on next login if the laptop was off). Log:
+  `%USERPROFILE%\Backups\sleepy-corpus-backup.log`.
+- If GitHub's history stops containing the last snapshot (rewritten or wiped),
+  the log gets an `ALERT` line **and `SLEEPY-BACKUP-ALERT.txt` appears on the
+  Desktop**. Treat GitHub as compromised until checked; the snapshots are fine.
+
+Restoring from it (in Git Bash):
+
+```bash
+git --git-dir="$USERPROFILE/Backups/sleepy-corpus.git" tag | tail -5   # newest snapshots
+git clone "$USERPROFILE/Backups/sleepy-corpus.git" restored-corpus
+git -C restored-corpus checkout -b restore snapshot-<pick one>
+# check it, then push it back as the new offsite copy:
+git -C restored-corpus push --force <corpus-remote-url> restore:master
+```
+
+Remove it: `Unregister-ScheduledTask -TaskName "SLEEPY corpus backup"` in
+PowerShell, then delete the `Backups` folder.
+
 ---
 
 ## 6. Rebuilding ChromaDB
