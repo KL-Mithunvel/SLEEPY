@@ -336,24 +336,17 @@ def test_system_endpoint_clamps_days(owner_client):
     assert owner_client.get("/api/admin/system?days=0").status_code == 200
 
 
-def test_system_endpoint_requires_permission(client, create_user):
+def test_system_endpoint_requires_permission(client, create_user, monkeypatch):
     """A plain 'user' must not see host internals; only admin gets admin:system."""
     import auth_utils
+    import config
+    # Set the key explicitly: this used to borrow whatever secrets_app.py
+    # held, so it passed locally and failed in CI (no secrets_app, empty key)
+    # once PyJWT 2.15 started refusing empty HMAC keys.
+    monkeypatch.setattr(config, "AUTH_SECRET_KEY", "system-stats-test-secret-0123456789abcdef")
     username, _pw, _role = create_user("plainuser", role="user")
     token = auth_utils.issue_token(username, "user")
+    monkeypatch.setattr(config, "DEV_AUTH_BYPASS", False)
 
-    import app as app_module
-    original = app_module.app.config.get("TESTING")
-    try:
-        os.environ["DEV_AUTH_BYPASS"] = "0"
-        import importlib
-        import config
-        importlib.reload(config)
-        resp = client.get("/api/admin/system", headers={"Authorization": f"Bearer {token}"})
-        assert resp.status_code in (401, 403)
-    finally:
-        os.environ["DEV_AUTH_BYPASS"] = "1"
-        import importlib
-        import config
-        importlib.reload(config)
-        app_module.app.config["TESTING"] = original
+    resp = client.get("/api/admin/system", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 403
