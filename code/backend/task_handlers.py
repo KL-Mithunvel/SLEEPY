@@ -138,12 +138,15 @@ def _handle_housekeeping(payload: dict, conn: sqlite3.Connection):
     import housekeeping as hk
     logger.info("housekeeping started")
 
-    # Prune done/failed task_queue entries older than 14 days (SQLite — handler may do this)
+    # Prune done/failed task_queue entries older than 14 days (SQLite — handler may do this).
+    # COALESCE: a task that failed without ever running to completion has no
+    # completed_at, and NULL < anything is never true, so such rows were never
+    # pruned (six July failures sat there for three months).
     conn.execute(
         """
         DELETE FROM task_queue
         WHERE status IN ('done', 'failed')
-          AND completed_at < datetime('now', '-14 days', 'localtime')
+          AND COALESCE(completed_at, created_at) < datetime('now', '-14 days', 'localtime')
         """
     )
     # login_events is written by unauthenticated requests (every failed attempt
@@ -175,6 +178,14 @@ def _handle_housekeeping(payload: dict, conn: sqlite3.Connection):
         """,
         (json.dumps(result),),
     )
+
+
+def _handle_retention(payload: dict, conn: sqlite3.Connection):
+    """Nightly: archive old alert/metric rows offsite, then delete them (retention.py)."""
+    import retention
+    logger.info("retention started")
+    result = retention.run_retention(conn)
+    logger.info("retention done: %s", result)
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +317,7 @@ HANDLERS: dict[str, callable] = {
     # Backups
     "db_backup":            _handle_db_backup,
     "offsite_push":         _handle_offsite_push,
+    "retention":            _handle_retention,
     # Self-healing
     "self_check":           _handle_self_check,
 }

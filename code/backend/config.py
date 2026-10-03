@@ -222,6 +222,13 @@ NEWS_MAX_RESHOW: int = int(_get("NEWS_MAX_RESHOW", 3))
 # corpus repo, so backups never risk landing in MD corpus git history.
 DB_BACKUP_RETENTION_DAYS: int = int(_get("DB_BACKUP_RETENTION_DAYS", 14))
 
+# Raw rows of the two append-only ops tables are kept this long. Older whole
+# days are rolled up to JSON, pushed offsite, and only then deleted
+# (retention.py). Metrics default to 90 because the Admin > Server trend chart
+# reads up to 90 days; alerts are noisier, so 30.
+ALERT_RETENTION_DAYS: int   = int(_get("ALERT_RETENTION_DAYS", 30))
+METRICS_RETENTION_DAYS: int = int(_get("METRICS_RETENTION_DAYS", 90))
+
 # ---------------------------------------------------------------------------
 # Offsite replication (offsite.py)
 # ---------------------------------------------------------------------------

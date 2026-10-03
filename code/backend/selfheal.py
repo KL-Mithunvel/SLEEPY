@@ -66,6 +66,7 @@ _AUTO_RECOVER_TASK_TYPES = frozenset({
     "housekeeping",
     "db_backup",
     "offsite_push",
+    "retention",     # archive-then-delete is idempotent; safe to run again
 })
 
 # A health probe gets a few tries before it is believed — one refused

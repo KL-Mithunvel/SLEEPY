@@ -313,6 +313,14 @@ installs the `sleepy-disk-cleanup.timer` systemd unit: every 6 hours
 build cache and old journals at or above it. Its log lines are in the system
 journal under the tag `sleepy-disk-cleanup`. It never touches volumes.
 
+**Old alert and metric rows (since 2026-10-03).** The `retention` task (03:45 IST)
+rolls `system_alerts` older than 30 days and `system_metrics` older than 90
+days up into `archive/ops/*.json` in the corpus repo, pushes it, and only then
+deletes the raw rows. If there is no remote, or the push fails, it deletes
+nothing and tries again the next night, so a stuck remote shows up as the
+tables not shrinking rather than as lost history. Restoring is just reading
+the JSON: one entry per day (per alert type for alerts).
+
 **Growth paths that are still uncapped** (none has bitten yet, all are
 one-time host config, none is in git because none of it lives in this repo):
 

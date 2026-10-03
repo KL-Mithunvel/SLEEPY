@@ -48,6 +48,17 @@ SCHEDULED_TASKS = [
     },
 
     # ------------------------------------------------------------------
+    # Retention at 03:45 IST — after offsite_push; it pushes again itself
+    # before deleting anything (see retention.py)
+    # ------------------------------------------------------------------
+    {
+        "task_type": "retention",
+        "trigger": "cron",
+        "trigger_kwargs": {"hour": 3, "minute": 45},
+        "payload": {},
+    },
+
+    # ------------------------------------------------------------------
     # Morning briefing at 06:30 IST daily
     # ------------------------------------------------------------------
     {
