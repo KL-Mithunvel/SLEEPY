@@ -373,7 +373,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | Public URL | `localhost:5000` | `https://klm.smtw.in` via the host's own nginx + certbot |
 | Git branch | `main` | `prod` — see "Dev/Prod Environment Separation & Deploy Workflow" below |
 
-**Pre-deploy checklist:** All tests green → `main.py` boots clean locally → `npm run build` succeeds (frontend changes) → `main` merged into `prod` → `docker compose build` succeeds on the box → `/healthz` passes → feature spot-checked live. Full sequence in the workflow section below.
+**Pre-deploy checklist:** All tests green → `main.py` boots clean locally → `npm run build` succeeds (frontend changes) → `main` → `canary` CI green → auto-promoted to `prod` → `docker compose build` succeeds on the box → `/healthz` passes → feature spot-checked live. Full sequence in the workflow section below.
 
 ---
 
