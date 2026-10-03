@@ -308,7 +308,7 @@ database.
 **Automatic cleanup (since 2026-10-03).** `deploy-prod.sh` now prunes again after
 the health check (the old image generation used to linger until the next
 deploy, pushing the box to 87%), caps journald at `SystemMaxUse=100M`, and
-installs `/etc/cron.d/sleepy-disk-cleanup`: every 6 hours
+installs the `sleepy-disk-cleanup.timer` systemd unit: every 6 hours
 `tooling/disk-cleanup.sh 80` does nothing under 80% and prunes unused images,
 build cache and old journals at or above it. Its log lines are in the system
 journal under the tag `sleepy-disk-cleanup`. It never touches volumes.

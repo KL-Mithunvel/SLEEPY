@@ -94,16 +94,19 @@ docker image prune -af || true
 df -h / | tail -1
 
 echo
-echo "--- install host hygiene (journald cap + disk cleanup cron) ---"
+echo "--- install host hygiene (journald cap + disk cleanup timer) ---"
 # Idempotent; re-applied every deploy so the box cannot drift from the repo.
 # Best-effort for the same reason as above.
 sudo mkdir -p /etc/systemd/journald.conf.d
 printf '[Journal]\nSystemMaxUse=100M\n' | sudo tee /etc/systemd/journald.conf.d/sleepy.conf >/dev/null \\
     && sudo systemctl restart systemd-journald \\
     && echo "  journald capped at 100M" || echo "  could not cap journald (non-fatal)"
-printf '0 */6 * * * ec2-user %s/tooling/disk-cleanup.sh 80\n' "\$(pwd)" | sudo tee /etc/cron.d/sleepy-disk-cleanup >/dev/null \\
-    && sudo chmod 644 /etc/cron.d/sleepy-disk-cleanup \\
-    && echo "  disk-cleanup cron installed (every 6h, acts at >=80%)" || echo "  could not install cron (non-fatal)"
+# systemd timer rather than /etc/cron.d: the box (Amazon Linux) ships no cron.
+printf '[Unit]\nDescription=SLEEPY disk cleanup (acts only past the threshold)\n\n[Service]\nType=oneshot\nUser=ec2-user\nExecStart=%s/tooling/disk-cleanup.sh 80\n' "\$(pwd)" | sudo tee /etc/systemd/system/sleepy-disk-cleanup.service >/dev/null \\
+    && printf '[Unit]\nDescription=SLEEPY disk cleanup every 6h\n\n[Timer]\nOnCalendar=*-*-* 00/6:15:00\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' | sudo tee /etc/systemd/system/sleepy-disk-cleanup.timer >/dev/null \\
+    && sudo systemctl daemon-reload \\
+    && sudo systemctl enable --now sleepy-disk-cleanup.timer \\
+    && echo "  disk-cleanup timer installed (every 6h, acts at >=80%)" || echo "  could not install timer (non-fatal)"
 
 echo
 echo "--- capture usage snapshot for Admin > Server ---"
