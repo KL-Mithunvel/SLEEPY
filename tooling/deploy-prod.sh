@@ -82,6 +82,30 @@ fi
 echo "healthz OK"
 
 echo
+echo "--- free disk after rebuild ---"
+# The pre-build prune above can only remove OLDER generations, so the images
+# this deploy just replaced stay behind (~2GB each for backend and worker)
+# until the next deploy — the box permanently carried one extra generation
+# and peaked right after each deploy (87% on 2026-10-03). The new containers
+# are up and healthy at this point, and rollback rebuilds from source, so the
+# previous generation is dead weight. Best-effort: never fails a good deploy.
+# Runs before the snapshot so Admin > Server reports the post-clean numbers.
+docker image prune -af || true
+df -h / | tail -1
+
+echo
+echo "--- install host hygiene (journald cap + disk cleanup cron) ---"
+# Idempotent; re-applied every deploy so the box cannot drift from the repo.
+# Best-effort for the same reason as above.
+sudo mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nSystemMaxUse=100M\n' | sudo tee /etc/systemd/journald.conf.d/sleepy.conf >/dev/null \\
+    && sudo systemctl restart systemd-journald \\
+    && echo "  journald capped at 100M" || echo "  could not cap journald (non-fatal)"
+printf '0 */6 * * * ec2-user %s/tooling/disk-cleanup.sh 80\n' "\$(pwd)" | sudo tee /etc/cron.d/sleepy-disk-cleanup >/dev/null \\
+    && sudo chmod 644 /etc/cron.d/sleepy-disk-cleanup \\
+    && echo "  disk-cleanup cron installed (every 6h, acts at >=80%)" || echo "  could not install cron (non-fatal)"
+
+echo
 echo "--- capture usage snapshot for Admin > Server ---"
 # The backend runs without a Docker socket on purpose, so from inside its
 # container it can see the disk TOTAL but not what is using it — and on this
