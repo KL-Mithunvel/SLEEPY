@@ -305,11 +305,18 @@ Nothing above touches the corpus, the SQLite DB, or the ChromaDB volume.
 Do **not** `docker volume prune` — the `pma_data` volume is the live
 database.
 
+**Automatic cleanup (since 2026-10-03).** `deploy-prod.sh` now prunes again after
+the health check (the old image generation used to linger until the next
+deploy, pushing the box to 87%), caps journald at `SystemMaxUse=100M`, and
+installs `/etc/cron.d/sleepy-disk-cleanup`: every 6 hours
+`tooling/disk-cleanup.sh 80` does nothing under 80% and prunes unused images,
+build cache and old journals at or above it. Its log lines are in the system
+journal under the tag `sleepy-disk-cleanup`. It never touches volumes.
+
 **Growth paths that are still uncapped** (none has bitten yet, all are
 one-time host config, none is in git because none of it lives in this repo):
 
-- `journalctl` has no `SystemMaxUse` — it reached 558MB before being
-  vacuumed by hand. Cap it in `/etc/systemd/journald.conf.d/`.
+- ~~`journalctl` has no `SystemMaxUse`~~ — capped by the deploy script as of 2026-10-03.
 - There is no `/etc/docker/daemon.json`, so container stdout/stderr logs
   rotate never. Currently only ~320KB total, so this is prevention, not
   a problem.
