@@ -381,9 +381,10 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 
 *(added 2026-09-16 — hardened after a stretch of prod-only bugs: Chroma version mismatch, missing `TZ`, a DB-init call missing from `app.py` that 500'd every route in prod while dev stayed fine. Environment drift between dev and prod is the recurring failure mode this project actually has — these rules exist to close it.)*
 
-**Two branches, two purposes.**
+**Three branches, three purposes** *(canary gate added 2026-10-03 — nothing goes from `main` straight to `prod` any more).*
 - `main` — the working/dev branch. Every code change lands here first.
-- `prod` — what the EC2 box actually deploys from (`git checkout prod` on the box, never `main`). Nothing reaches production except by a fast-forward merge from a `main` commit that has already passed the dev checklist. Never commit directly to `prod`, never `git push --force` it.
+- `canary` — the CI gate. Push a tested `main` commit here (fast-forward) and GitHub Actions (`.github/workflows/ci.yml`) runs backend tests + frontend build. Never commit directly to `canary`.
+- `prod` — what the EC2 box actually deploys from (`git checkout prod` on the box, never `main`/`canary`). **Only the CI `promote` job moves it**, and only after both CI jobs are green on that canary commit (a non-force `git push`, so it can only fast-forward). Never commit to `prod` or push it by hand, never `git push --force` it. A red canary run means prod does not move — fix on `main`, push to `canary` again.
 
 **No live staging environment on EC2.** The box runs one Docker Compose stack on a disk-constrained instance (see Known Technical Debt) — there is no parallel "dev" container stack there. This means container/environment-shaped bugs (image pins, `TZ`, volume mounts, secrets mount paths) are only ever caught at the `prod` rebuild step. Treat that rebuild + health check as a real test gate, not a formality — it is, in practice, the only environment that has ever caught these bugs.
 
@@ -392,14 +393,14 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 2. Implement on `main`.
 3. Test in dev: `tooling/run-backend-tests.bat` green; `main.py` boots clean; `npm run build` succeeds in `code/frontend/` for any frontend change.
 4. Commit to `main`. **One commit per logical phase of work** — never bundle unrelated phases into a single commit, and never skip a commit because "it's small."
-5. Only after step 3 is fully green: merge `main` → `prod` (fast-forward only) and push `prod`.
-6. Deploy: on the box, on the `prod` branch, `git pull`, `docker compose build`, `docker compose up -d`.
+5. Only after step 3 is fully green: fast-forward `canary` to `main` and push `canary`. Watch the CI run on GitHub; on green, its `promote` job fast-forwards `prod` by itself. Red → stop, fix on `main`, repeat.
+6. Deploy (only once `origin/prod` has advanced to the canary commit; ask the user first): on the box, on the `prod` branch, `git pull`, `docker compose build`, `docker compose up -d`.
 7. Verify in prod: `docker compose ps` shows every service healthy/running, `curl -sf https://klm.smtw.in/healthz` (or `http://localhost:5000/healthz` on the box) returns OK, and the specific feature that changed is spot-checked live — not just "containers are up."
 8. Only then start the next phase.
 
 **No unauthorized prod access.** Never read from or write to the live box's data (`data/klm/`, the SQLite DB, `secrets_app.py`, container filesystem, anything under `/home/ec2-user/sleepy`) without the user's explicit go-ahead in the *current* conversation — approval from an earlier session or an earlier message does not carry forward automatically. Read-only checks used purely to verify a deploy (`docker compose ps`, `/healthz`, log tails, `git status`) are fine on their own. Anything that mutates state on the box — `git pull`, `docker compose up`/`build`, `docker exec`, `docker image prune`, password resets, direct file edits — needs the user to either run it themselves or explicitly grant it for that session; do not attempt to self-grant that permission.
 
-**Rollback.** Because `prod` only ever fast-forwards from a tested `main` commit, rolling back is: on the box, `git checkout <previous prod commit>`, `docker compose build`, `docker compose up -d`. Never `git reset --hard` on either branch — history on both is shared and append-only in practice.
+**Rollback.** Because `prod` only ever fast-forwards from a CI-green `canary` commit, rolling back is: on the box, `git checkout <previous prod commit>`, `docker compose build`, `docker compose up -d`. Never `git reset --hard` on either branch — history on both is shared and append-only in practice.
 
 ---
 
@@ -422,7 +423,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 8. **AI interaction author is always `sleepy <sleepy@smtw.in>`.** GitPython must set this explicitly on every AI-initiated commit.
 9. **Thin blueprints.** Route dispatch only. Non-trivial validation/mutation in `<module>_recording.py`; state projection in `<module>_state.py`.
 10. **Test before every commit.** `tooling/run-backend-tests.bat` must pass. For frontend changes, `npm run build` in `code/frontend/` must succeed.
-11. **`main` is dev, `prod` is live — never push straight to `prod`.** Every change reaches production by a fast-forward merge from an already-tested `main` commit, deployed on the box from the `prod` branch. Full sequence in "Dev/Prod Environment Separation & Deploy Workflow" above.
+11. **`main` is dev, `canary` is the CI gate, `prod` is live — never push straight to `prod`.** Every change goes `main` → `canary` → (CI green, automatic) → `prod`, deployed on the box from the `prod` branch. Full sequence in "Dev/Prod Environment Separation & Deploy Workflow" above.
 12. **No prod access without asking, every time.** A previous session's or previous message's permission to touch the live box does not carry forward. Read-only verification is always fine; anything that mutates prod state needs to be run by the user or explicitly granted in the current conversation.
 13. **Multi-phase work gets one commit per phase**, each one tested in dev and deployed/verified before the next phase starts — don't batch several phases into one commit or one deploy.
 
