@@ -88,6 +88,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: a push from a depth-1 clone can't prove it is a
+          # fast-forward of prod, and the server refuses it.
+          fetch-depth: 0
 
       - name: Fast-forward prod to this commit
         run: git push origin "${GITHUB_SHA}:refs/heads/prod"
