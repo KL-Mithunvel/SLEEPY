@@ -70,3 +70,19 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  promote:
+    # Fast-forward prod to the canary commit that just went green. `git push`
+    # without --force is itself the safety: it is rejected if prod has
+    # commits canary lacks, so history can never be rewritten from here.
+    # The only job with write access; everything above stays read-only.
+    needs: [backend-tests, frontend-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/canary'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fast-forward prod to this commit
+        run: git push origin "${GITHUB_SHA}:refs/heads/prod"
