@@ -3,15 +3,20 @@ name: CI
 # Mechanical backstop for Development Rule 10 ("test before every commit"):
 # runs the same two gates the workflow already requires by hand —
 # tooling/run-backend-tests.bat and `npm run build` — on every push and PR
-# to main or prod. Doesn't deploy anything; deploys stay a manual,
-# permission-gated step on the EC2 box per
-# ".CLAUDE/CLAUDE.md#dev-prod-environment-separation--deploy-workflow".
+# to main or canary.
+#
+# `canary` is the gate in front of `prod`: a push to canary runs both jobs,
+# and ONLY if both pass does the `promote` job fast-forward `prod` to that
+# same commit. A red run leaves prod where it was. Promotion only moves the
+# branch — it deploys nothing; deploying stays a manual, permission-gated step
+# on the EC2 box (tooling/deploy-prod.sh), per
+# ".claude/CLAUDE.md#dev-prod-environment-separation--deploy-workflow".
 
 on:
   push:
-    branches: [main, prod]
+    branches: [main, canary]
   pull_request:
-    branches: [main, prod]
+    branches: [main, canary]
 
 # Least privilege: CI only reads the code. Without this the job's
 # GITHUB_TOKEN gets the repo's default permissions, which can include write.
