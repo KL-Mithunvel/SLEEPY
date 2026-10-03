@@ -149,6 +149,56 @@ def test_a_task_is_only_recovered_once(conn, corpus):
     assert task_queue.get(conn, tid)["status"] == "failed"   # left for a human
 
 
+def test_unretryable_failure_alerts_once_then_goes_quiet(conn, corpus):
+    """A dead email/news task used to re-alert on every 15-minute run, forever."""
+    import selfheal
+    import task_queue
+
+    tid = _fail_task(conn, "email")
+
+    first = selfheal.check_failed_tasks(conn, corpus)
+    second = selfheal.check_failed_tasks(conn, corpus)
+
+    assert first.status == selfheal.ALERT
+    assert first.alert_key == "failed_tasks:manual"
+    assert second.status == selfheal.OK
+    row = task_queue.get(conn, tid)
+    assert row["status"] == "failed"          # still failed, just acknowledged
+    assert row["recovered_at"] is not None
+
+
+def test_a_new_failure_alerts_after_old_ones_were_acknowledged(conn, corpus):
+    import selfheal
+
+    _fail_task(conn, "email")
+    selfheal.check_failed_tasks(conn, corpus)
+
+    _fail_task(conn, "news_watch_finalize")
+    finding = selfheal.check_failed_tasks(conn, corpus)
+
+    assert finding.status == selfheal.ALERT
+    assert "news_watch_finalize" in finding.detail
+    assert "email" not in finding.detail
+
+
+def test_skipped_task_is_not_swallowed_in_a_mixed_run(conn, corpus):
+    """Requeued + skipped in one run: the skipped one has not been reported yet,
+    so it must stay unacknowledged and alert on a later run."""
+    import selfheal
+    import task_queue
+
+    skipped_id = _fail_task(conn, "email")
+    _fail_task(conn, "materialise")
+
+    mixed = selfheal.check_failed_tasks(conn, corpus)
+    assert mixed.status == selfheal.FIXED
+    assert task_queue.get(conn, skipped_id)["recovered_at"] is None
+
+    later = selfheal.check_failed_tasks(conn, corpus)
+    assert later.status == selfheal.ALERT
+    assert f"{skipped_id}:email" in later.detail
+
+
 def test_no_failed_tasks_is_ok(conn, corpus):
     import selfheal
     assert selfheal.check_failed_tasks(conn, corpus).status == selfheal.OK

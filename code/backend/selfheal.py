@@ -114,6 +114,13 @@ def check_failed_tasks(conn, data_root: str) -> Finding:
     One retry, not a loop: recovered_at is stamped on the way through, and a
     task that fails again after being recovered is left alone for a human. The
     alert for the original failure has already gone out via the worker.
+
+    Tasks that are NOT safe to retry are reported here once and then stamped
+    too. Without that, the same dead rows matched this query on every 15-minute
+    run and re-raised "failed_tasks:manual" forever (1,277 alerts in 13 days
+    over six rows from July), which buried any genuinely new failure under the
+    same key. recovered_at is reused as the "already dealt with" marker rather
+    than adding a column: the query only cares that it is non-NULL.
     """
     rows = conn.execute(
         """
@@ -125,10 +132,11 @@ def check_failed_tasks(conn, data_root: str) -> Finding:
     if not rows:
         return Finding("failed_tasks", OK, "no failed tasks awaiting recovery")
 
-    requeued, skipped = [], []
+    requeued, skipped, skipped_ids = [], [], []
     for row in rows:
         if row["task_type"] not in _AUTO_RECOVER_TASK_TYPES:
             skipped.append(f"{row['id']}:{row['task_type']}")
+            skipped_ids.append(row["id"])
             continue
         conn.execute(
             """
@@ -143,6 +151,13 @@ def check_failed_tasks(conn, data_root: str) -> Finding:
         requeued.append(f"{row['id']}:{row['task_type']}")
 
     if not requeued:
+        # Stamped only on this path, the one that actually raises the alert.
+        # In a mixed run the skipped rows have not been reported yet, so they
+        # stay unstamped and get their alert on a later run.
+        conn.executemany(
+            "UPDATE task_queue SET recovered_at = datetime('now', 'localtime') WHERE id = ?",
+            [(i,) for i in skipped_ids],
+        )
         return Finding(
             "failed_tasks", ALERT,
             f"{len(skipped)} failed task(s) need a human (not safe to auto-retry): "
