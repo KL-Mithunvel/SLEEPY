@@ -102,9 +102,9 @@ SLEEPY/
 │   │   ├── local_db.py        # SQLite migration engine + connection management
 │   │   ├── db_helpers.py      # row_to_dict / rows_to_list serialisation helpers
 │   │   ├── task_queue.py      # DB-backed queue: enqueue/claim/done/fail
-│   │   ├── task_handlers.py   # Dispatch table: task_type → handler fn (12 handlers — see Key Modules)
+│   │   ├── task_handlers.py   # Dispatch table: task_type → handler fn (13 handlers — see Key Modules)
 │   │   ├── worker.py          # Standalone worker: APScheduler + drain loop
-│   │   ├── scheduled_tasks.py # Cron registry (SCHEDULED_TASKS list — 11 jobs)
+│   │   ├── scheduled_tasks.py # Cron registry (SCHEDULED_TASKS list — 12 jobs)
 │   │   ├── md_editor.py       # Confirm-gated AI edit flow: propose_edit/apply_edit/reject_edit
 │   │   ├── md_indexer.py      # ChromaDB indexing + semantic query
 │   │   ├── ai_client.py       # LiteLLM wrapper: chat(), generate_morning_briefing()
@@ -120,6 +120,7 @@ SLEEPY/
 │   │   ├── alerts.py          # Operational alerting — failed tasks/self-check findings → email
 │   │   ├── offsite.py         # Nightly offsite replication: corpus git push + gzipped SQLite snapshot
 │   │   ├── selfheal.py        # 15-min self-check: detect stuck states, repair the safe ones
+│   │   ├── retention.py       # Nightly: archive old system_alerts/system_metrics rows to JSON, push offsite, THEN delete
 │   │   ├── app.py             # Flask app factory; calls local_db.init_db(); registers all *_bp.py blueprints below
 │   │   ├── auth_bp.py         # POST /api/auth/login|logout, GET /api/auth/me|config
 │   │   ├── admin_bp.py        # GET /api/admin/login-events|ai-usage|alerts|system
@@ -236,11 +237,11 @@ CLI for the two fixed accounts (`create-user`/`list-users`/`reset-password`/`del
 - `HANDLERS: dict[str, callable]` — dispatch table mapping `task_type` to `handler(payload, conn)`.
 - `dispatch(task_type, payload, conn)` — looks up and calls handler.
 - **Handlers must NOT commit** — the worker owns the transaction boundary.
-- Current handlers (12): `md_reindex`, `db_backup`, `offsite_push`, `morning_briefing` (also runs `goal_planner` + emails the digest), `materialise`, `index_sync`, `commit_pending`, `housekeeping`, `news_watch_submit`, `news_watch_finalize`, `email`, `self_check`.
+- Current handlers (13): `md_reindex`, `db_backup`, `offsite_push`, `retention`, `morning_briefing` (also runs `goal_planner` + emails the digest), `materialise`, `index_sync`, `commit_pending`, `housekeeping`, `news_watch_submit`, `news_watch_finalize`, `email`, `self_check`.
 
 ### `code/backend/scheduled_tasks.py`
 - `SCHEDULED_TASKS` — list of `{task_type, trigger, trigger_kwargs, payload, enabled?}` dicts. APScheduler in the worker reads this to register cron/interval jobs that enqueue into `task_queue`.
-- Current schedule (11 jobs): `md_reindex` 02:00 IST, `db_backup` 03:15 IST, `offsite_push` 03:30 IST, `morning_briefing` 06:30 IST (deadline planning + email digest rides this), `index_sync` every 5 min, `commit_pending` hourly, `housekeeping` 23:00 IST, `materialise` 00:05 IST, `news_watch_submit` 00:00 IST, `news_watch_finalize` every 5 min, `self_check` every 15 min.
+- Current schedule (12 jobs): `md_reindex` 02:00 IST, `db_backup` 03:15 IST, `offsite_push` 03:30 IST, `retention` 03:45 IST, `morning_briefing` 06:30 IST (deadline planning + email digest rides this), `index_sync` every 5 min, `commit_pending` hourly, `housekeeping` 23:00 IST, `materialise` 00:05 IST, `news_watch_submit` 00:00 IST, `news_watch_finalize` every 5 min, `self_check` every 15 min.
 
 ### `code/backend/task_scan.py`
 Deterministic (non-LLM, non-RAG) task scanning — the foundation for the Today view's click-to-check list and the morning briefing's task context. `scan_open_tasks(data_root)` — every open task across every active project (general-purpose). `scan_todays_tasks(data_root)` — **what the Today view/briefing actually use**: reads only `<OU>/Daily/<today>.md`'s `## Tasks` section, i.e. the curated list, not every project's backlog. `toggle_task(data_root, rel_path, text, conn)` — flips one `- [ ] <text>` line via `md_editor`, auto-applied (no confirm gate — the click itself is the confirmation).
@@ -271,6 +272,9 @@ The confirm-gated AI edit flow: `validate_edit`/`propose_edit` (writes a pending
 
 ### `code/backend/offsite.py`
 Nightly `offsite_push` (03:30 IST, after `db_backup`). Two independent targets: `push_corpus()` git-pushes `data/klm`'s own repo, and `push_snapshot()` gzips the newest SQLite backup into `OFFSITE_SNAPSHOT_DIR`. Default mode `"auto"` pushes if the configured remote exists and skips quietly if not; `OFFSITE_PUSH_ENABLED=1` makes a missing remote a hard failure that alerts. **Needs a remote to be created once before it protects anything — see `docs/RECOVERY.md` §3.** The SQLite snapshot deliberately stays out of the git push (permanent history + binary blobs on a tight disk).
+
+### `code/backend/retention.py`
+Nightly `retention` (03:45 IST, after `offsite_push`). `system_alerts` and `system_metrics` only ever grew; one unretryable failed task once left 1,277 near-identical alert rows. Whole days older than `ALERT_RETENTION_DAYS` (30) / `METRICS_RETENTION_DAYS` (90, matches the Admin > Server chart's 90-day window) are rolled up to one entry per day (per `alert_key` for alerts) in `archive/ops/<alerts|metrics>-YYYY-MM.json` inside the corpus repo, committed as `sleepy`, pushed with `offsite.push_corpus`, and **only if that push really happened** are the raw rows deleted. No remote / push disabled / no repo → rows are kept and it retries next night; a push that is explicitly enabled and fails raises, so the task retries and alerts. Idempotent: each day's entry is replaced, never added to, so a crash between archive and delete cannot double-count. The directory is root `archive/` on purpose — every OU-discovery routine already skips it and the indexer only reads `.md`, so ops numbers never reach the AI's search of the user's notes. Housekeeping's `task_queue` prune now uses `COALESCE(completed_at, created_at)` — failed rows that never completed had NULL `completed_at` and were never pruned.
 
 ### `code/backend/selfheal.py`
 `self_check` every 15 min. Seven checks, each `ok`/`fixed`/`alert`: stale git locks (fixed), permanently-failed idempotent tasks (requeued once, stamped `task_queue.recovered_at`), missing Daily file (enqueues `materialise`), empty vector index (enqueues `md_reindex`), disk space, `PRAGMA quick_check`, and backend health probed from the worker. Repairs are limited to idempotent, reversible actions; anything that could duplicate a side effect (`email`, `morning_briefing`, `news_watch_*`) or destroy data (corrupt DB) is only reported. Backend health is reported rather than acted on deliberately — restarting a container from inside would need the Docker socket mounted into a web process. Each check is isolated so one broken probe can't take the safety net down.
@@ -308,8 +312,8 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 | `md_chunks_meta` | LlamaIndex chunk tracking for MD corpus | Rebuild on reindex |
 | `users` | Login accounts — `username, password_hash, role` | Read/write, via `manage_users.py` only |
 | `login_events` | Every login attempt — `username, success, ip_address, user_agent, geo_city, geo_country` | Append-only |
-| `system_alerts` | Every alert raised — `alert_key, subject, body, suppressed, emailed` | Append-only |
-| `system_metrics` | Host usage sample per self-check — disk/memory/per-area bytes | Append-only |
+| `system_alerts` | Every alert raised — `alert_key, subject, body, suppressed, emailed` | Append-only, except `retention.py` (rows older than 30 days, only after a pushed JSON rollup) |
+| `system_metrics` | Host usage sample per self-check — disk/memory/per-area bytes | Append-only, except `retention.py` (rows older than 90 days, only after a pushed JSON rollup) |
 
 ### `ai_events` columns
 `id, event_type, prompt_hash, model, diff, accepted (1/0/NULL), voided, latency_ms, input_tokens, output_tokens, created_at`
@@ -426,6 +430,7 @@ Single fetch wrapper. Exports `apiGet`, `apiPost`, `apiPut`, `apiDelete`. Inject
 11. **`main` is dev, `canary` is the CI gate, `prod` is live — never push straight to `prod`.** Every change goes `main` → `canary` → (CI green, automatic) → `prod`, deployed on the box from the `prod` branch. Full sequence in "Dev/Prod Environment Separation & Deploy Workflow" above.
 12. **No prod access without asking, every time.** A previous session's or previous message's permission to touch the live box does not carry forward. Read-only verification is always fine; anything that mutates prod state needs to be run by the user or explicitly granted in the current conversation.
 13. **Multi-phase work gets one commit per phase**, each one tested in dev and deployed/verified before the next phase starts — don't batch several phases into one commit or one deploy.
+14. **Canary-gated deploys only (standing rule, set by the user 2026-10-03).** The only route to production is `main` → push `canary` → wait for the GitHub Actions run on that exact commit to finish **green** (all three jobs, including `promote`) → confirm `origin/prod` now equals that commit → deploy with `tooling/deploy-prod.sh`. Push `canary` *before or without* a separate `main` push of the same commit, because GitHub does not start a fresh run for a SHA it has already built on another branch. Never deploy on a red or still-running canary, never move `prod` by hand, never skip the gate for a "small" or docs-only change. Check the run via the public API (`curl https://api.github.com/repos/KL-Mithunvel/SLEEPY/actions/runs?branch=canary&per_page=1` — no login needed); do not ask the user for GitHub credentials. After editing `ci.yml` (it has CRLF line endings, so string replaces can silently no-op), confirm a canary run actually *started* — an absent run is not a pass. The deploy step itself still needs the user's go-ahead each time (rule 12).
 
 ---
 
