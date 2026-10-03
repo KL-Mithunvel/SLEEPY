@@ -102,7 +102,7 @@ printf '[Journal]\nSystemMaxUse=100M\n' | sudo tee /etc/systemd/journald.conf.d/
     && sudo systemctl restart systemd-journald \\
     && echo "  journald capped at 100M" || echo "  could not cap journald (non-fatal)"
 # systemd timer rather than /etc/cron.d: the box (Amazon Linux) ships no cron.
-printf '[Unit]\nDescription=SLEEPY disk cleanup (acts only past the threshold)\n\n[Service]\nType=oneshot\nUser=ec2-user\nExecStart=%s/tooling/disk-cleanup.sh 80\n' "\$(pwd)" | sudo tee /etc/systemd/system/sleepy-disk-cleanup.service >/dev/null \\
+printf '[Unit]\nDescription=SLEEPY disk cleanup (acts only past the threshold)\n\n[Service]\nType=oneshot\nUser=ec2-user\nExecStart=/bin/bash %s/tooling/disk-cleanup.sh 80\n' "\$(pwd)" | sudo tee /etc/systemd/system/sleepy-disk-cleanup.service >/dev/null \\
     && printf '[Unit]\nDescription=SLEEPY disk cleanup every 6h\n\n[Timer]\nOnCalendar=*-*-* 00/6:15:00\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n' | sudo tee /etc/systemd/system/sleepy-disk-cleanup.timer >/dev/null \\
     && sudo systemctl daemon-reload \\
     && sudo systemctl enable --now sleepy-disk-cleanup.timer \\
