@@ -150,6 +150,30 @@ def scan_open_tasks(data_root: str) -> list[dict]:
     return tasks[:_MAX_TASKS]
 
 
+def list_active_projects(data_root: str) -> list[dict]:
+    """
+    Active `<OU>/<slug>.md` project files as {rel_path, title, ou} — exactly the
+    set add_task() will accept as a project (one OU level deep, never Daily/
+    Recur/Plans/... files). Titles only: no body text leaves the corpus here.
+    """
+    projects: list[dict] = []
+    for ou, ou_dir in _find_ous(data_root):
+        for f in _project_files(ou_dir):
+            try:
+                fm, _ = _parse_fm(f.read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            status = str(fm.get("status") or "").strip().lower()
+            if status and status != "active":
+                continue
+            projects.append({
+                "rel_path": f"{ou}/{f.name}",
+                "title": str(fm.get("title") or fm.get("key") or f.stem),
+                "ou": ou,
+            })
+    return projects
+
+
 def _extract_section(content: str, heading: str) -> str:
     """Body text between '## <heading>' and the next '## ' heading (or EOF)."""
     marker_re = re.compile(rf"(?m)^## {re.escape(heading)}\s*$")

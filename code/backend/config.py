@@ -124,6 +124,17 @@ DEBUG: bool        = os.getenv("DEBUG", "0") == "1"
 CORS_ORIGINS: list = _get("CORS_ORIGINS", "http://localhost:5173").split(",")
 
 # ---------------------------------------------------------------------------
+# MCP connector (docs/MCP_CONNECTOR.md) — a deliberately narrow to-do front
+# door for external AI apps (Claude mobile etc.). Off by default: the endpoint
+# does not exist (404) until this is switched on.
+# ---------------------------------------------------------------------------
+MCP_ENABLED: bool = str(_get("MCP_ENABLED", "0")).strip() in ("1", "true", "yes")
+# Browsers send an Origin header and a connector's server-side caller does not.
+# If one is present it must be listed — closes DNS-rebinding style access to
+# the endpoint from a web page.
+MCP_ALLOWED_ORIGINS: list = [o.strip() for o in _get("MCP_ALLOWED_ORIGINS", "https://claude.ai").split(",") if o.strip()]
+
+# ---------------------------------------------------------------------------
 # Performance
 # ---------------------------------------------------------------------------
 SLOW_REQUEST_MS: int = int(_get("SLOW_REQUEST_MS", 3000))
