@@ -11,7 +11,6 @@ Today Blueprint — endpoints that power the Today View.
 """
 
 import logging
-import os
 import re
 from datetime import datetime
 
@@ -19,7 +18,6 @@ from flask import Blueprint, jsonify, request
 
 import ai_client
 import config
-import md_editor
 import task_scan
 from auth_utils import require_perm
 
@@ -29,17 +27,7 @@ today_bp = Blueprint("today", __name__)
 
 _VALID_PRIORITIES = ("high", "medium", "low")
 _DUE_FORMAT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_MAX_LINE_LEN = 1000
-
-
-def _single_line(text: str) -> str:
-    """
-    Captures and ad-hoc tasks are appended as ONE markdown list line. A pasted
-    multi-line string would otherwise inject arbitrary lines — including new
-    `## ` headings that the materialiser/housekeeping parsers key off — into
-    inbox.md or a Daily file. Collapse all whitespace runs (incl. newlines).
-    """
-    return re.sub(r"\s+", " ", text or "").strip()[:_MAX_LINE_LEN]
+_single_line = task_scan.single_line
 
 
 # ---------------------------------------------------------------------------
@@ -233,23 +221,9 @@ def capture():
     if not text:
         return jsonify({"error": "text is required"}), 400
 
-    ts = datetime.now().strftime("%d-%m-%Y %H:%M")
-    line = f"- [ ] {text}  <!-- captured {ts} -->"
-
-    inbox_rel = "inbox.md"
-    inbox_abs = os.path.join(config.USER_DATA_ROOT, inbox_rel)
-    if os.path.isfile(inbox_abs):
-        with open(inbox_abs, encoding="utf-8", errors="replace") as f:
-            current = f.read()
-    else:
-        current = "# Inbox\n\nQuick captures land here.\n\n"
-
-    new_content = current.rstrip("\n") + "\n" + line + "\n"
-
     db = _db()
     try:
-        proposal = md_editor.propose_edit(inbox_rel, new_content, f"Capture: {text[:60]}", db)
-        sha = md_editor.apply_edit(proposal["event_id"], db)
+        line, sha = task_scan.capture_to_inbox(config.USER_DATA_ROOT, text, db)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except Exception:

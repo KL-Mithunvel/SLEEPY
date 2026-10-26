@@ -41,6 +41,13 @@ def mcp_on(monkeypatch):
     monkeypatch.setattr(config, "MCP_ENABLED", True)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_write_budget():
+    mcp_tools._write_times.clear()
+    yield
+    mcp_tools._write_times.clear()
+
+
 def rpc(client, method, params=None, msg_id=1, **kw):
     body = {"jsonrpc": "2.0", "method": method}
     if msg_id is not None:
@@ -134,12 +141,21 @@ def test_empty_batch_rejected(client, mcp_on):
 # Tool surface
 # ---------------------------------------------------------------------------
 
-def test_tools_list_is_exactly_the_read_tools(client, mcp_on):
+def test_tools_list_is_exactly_the_five_todo_tools(client, mcp_on):
     tools = rpc(client, "tools/list").get_json()["result"]["tools"]
-    assert {t["name"] for t in tools} == {"get_today", "list_projects"}
+    assert {t["name"] for t in tools} == {"get_today", "list_projects", "add_task", "capture", "toggle_task"}
     for t in tools:
-        assert t["annotations"]["readOnlyHint"] is True
         assert t["inputSchema"]["additionalProperties"] is False
+        assert t["annotations"]["destructiveHint"] is False
+        assert t["annotations"]["readOnlyHint"] is (t["name"] in {"get_today", "list_projects"})
+
+
+def test_read_scope_alone_sees_only_read_tools():
+    names = {t["name"] for t in mcp_tools.list_tools(frozenset({mcp_tools.SCOPE_READ}))}
+    assert names == {"get_today", "list_projects"}
+    with pytest.raises(mcp_tools.UnknownTool):
+        mcp_tools.call_tool("add_task", {"task": "x", "project": "VIT/magnet.md"},
+                            frozenset({mcp_tools.SCOPE_READ}), lambda: None)
 
 
 def test_tools_hidden_without_scope():
@@ -224,3 +240,140 @@ def test_list_projects_active_only_titles_only(client, mcp_on, corpus):
     assert set(by_path) == {"VIT/magnet.md", "Personal/home.md"}   # paused one, ABOUT.md, Daily/ excluded
     assert by_path["VIT/magnet.md"] == {"rel_path": "VIT/magnet.md", "title": "Magnet Embedding", "ou": "VIT"}
     assert "secret body task" not in text and "no frontmatter" not in text
+
+
+# ---------------------------------------------------------------------------
+# Write tools
+# ---------------------------------------------------------------------------
+
+def call(client, name, **arguments):
+    return tool_text(rpc(client, "tools/call", {"name": name, "arguments": arguments}))
+
+
+def daily_text(corpus):
+    return (corpus / "VIT" / "Daily" / f"{date.today():%Y-%m-%d}.md").read_text(encoding="utf-8")
+
+
+def test_add_task_lands_in_todays_daily_file(client, mcp_on, corpus):
+    text, is_error = call(client, "add_task", task="Call the printer", project="VIT/magnet.md",
+                          priority="high", due="2026-12-24")
+    assert not is_error and json.loads(text)["added"] is True
+    assert "- [ ] Call the printer priority:high due:2026-12-24 VIT/magnet.md" in daily_text(corpus)
+    # and the web UI's own scan sees it
+    assert "Call the printer" in call(client, "get_today")[0]
+
+
+def test_add_task_twice_is_idempotent(client, mcp_on, corpus):
+    call(client, "add_task", task="Renew domain", project="VIT/magnet.md")
+    text, is_error = call(client, "add_task", task="renew DOMAIN", project="VIT/magnet.md")
+    assert not is_error and json.loads(text)["added"] is False
+    assert daily_text(corpus).lower().count("renew domain") == 1
+
+
+@pytest.mark.parametrize("project", [
+    "SMTW/old.md",              # paused project
+    "ABOUT.md",                 # not a project
+    "VIT/Daily/x.md",           # generated subfolder
+    "../outside.md",
+    "VIT/nope.md",
+])
+def test_add_task_rejects_non_active_or_unlisted_project(client, mcp_on, corpus, project):
+    text, is_error = call(client, "add_task", task="Sneaky", project=project)
+    assert is_error and "list_projects" in text
+    assert "Sneaky" not in daily_text(corpus)
+
+
+@pytest.mark.parametrize("task", [
+    "do it priority:high",
+    "x due:2026-01-01",
+    "link ^p:deadbeef",
+    "file Personal/home.md",
+    "   ",
+])
+def test_add_task_rejects_parser_syntax_and_empty(client, mcp_on, corpus, task):
+    _, is_error = call(client, "add_task", task=task, project="VIT/magnet.md")
+    assert is_error
+
+
+def test_add_task_newlines_cannot_inject_a_heading(client, mcp_on, corpus):
+    call(client, "add_task", task="innocent\n\n## Evil heading\n- [ ] second line", project="VIT/magnet.md")
+    body = daily_text(corpus)
+    assert "\n## Evil heading" not in body
+    assert body.count("innocent ## Evil heading - [ ] second line") == 1
+
+
+def test_add_task_strips_comment_markers(client, mcp_on, corpus):
+    call(client, "add_task", task="hide <!-- this --> well", project="VIT/magnet.md")
+    body = daily_text(corpus)
+    assert "<!--" not in body.split("## Tasks", 1)[1].split("## Log")[0]
+
+
+@pytest.mark.parametrize("bad", [
+    {"priority": "urgent"},
+    {"due": "tomorrow"},
+    {"due": "2026-13-45"},
+    {"task": "x" * 301},
+    {"task": 5},
+])
+def test_add_task_validates_arguments(client, mcp_on, corpus, bad):
+    args = {"task": "ok", "project": "VIT/magnet.md", **bad}
+    _, is_error = call(client, "add_task", **args)
+    assert is_error
+
+
+def test_capture_appends_to_inbox(client, mcp_on, corpus):
+    text, is_error = call(client, "capture", text="Try the new\nresin printer")
+    assert not is_error
+    inbox = (corpus / "inbox.md").read_text(encoding="utf-8")
+    assert "- [ ] Try the new resin printer  <!-- captured " in inbox
+
+
+def test_capture_strips_comment_markers_and_length_limited(client, mcp_on, corpus):
+    call(client, "capture", text="a --> b <!-- c")
+    line = [ln for ln in (corpus / "inbox.md").read_text(encoding="utf-8").splitlines() if ln.startswith("- [ ] a")][0]
+    assert line.startswith("- [ ] a  b  c  <!-- captured ")   # only our own comment remains
+    assert line.count("<!--") == 1 and line.count("-->") == 1
+    _, is_error = call(client, "capture", text="x" * 501)
+    assert is_error
+
+
+def test_toggle_marks_done_only_for_a_line_on_todays_list(client, mcp_on, corpus):
+    rel = f"VIT/Daily/{date.today():%Y-%m-%d}.md"
+    exact = "Write report priority:high due:2026-12-01 VIT/magnet.md"
+    text, is_error = call(client, "toggle_task", rel_path=rel, exact_text=exact)
+    assert not is_error and json.loads(text)["done"] is True
+    assert f"- [x] {exact}" in daily_text(corpus)
+    assert "Write report" not in call(client, "get_today")[0]
+
+
+def test_toggle_refuses_a_project_backlog_line(client, mcp_on, corpus):
+    _, is_error = call(client, "toggle_task", rel_path="VIT/magnet.md", exact_text="secret body task")
+    assert is_error
+    assert "- [ ] secret body task" in (corpus / "VIT" / "magnet.md").read_text(encoding="utf-8")
+
+
+def test_toggle_refuses_arbitrary_paths(client, mcp_on, corpus):
+    for rel in ("../../etc/passwd", "ABOUT.md", "inbox.md", "VIT/Daily/../magnet.md"):
+        _, is_error = call(client, "toggle_task", rel_path=rel, exact_text="anything")
+        assert is_error
+
+
+def test_write_budget_stops_a_flood(client, mcp_on, corpus, monkeypatch):
+    monkeypatch.setattr(mcp_tools, "WRITE_LIMIT", 3)
+    results = [call(client, "capture", text=f"note {i}") for i in range(5)]
+    assert [e for _, e in results] == [False, False, False, True, True]
+    assert "limit" in results[-1][0].lower()
+
+
+def test_failed_validation_does_not_spend_write_budget(client, mcp_on, corpus, monkeypatch):
+    monkeypatch.setattr(mcp_tools, "WRITE_LIMIT", 1)
+    call(client, "add_task", task="bad priority:high", project="VIT/magnet.md")
+    call(client, "add_task", task="ok", project="VIT/nope.md")
+    _, is_error = call(client, "capture", text="still allowed")
+    assert not is_error
+
+
+def test_writes_are_committed_by_sleepy(client, mcp_on, corpus):
+    import git
+    call(client, "capture", text="authored check")
+    assert git.Repo(str(corpus)).head.commit.author.email == "sleepy@smtw.in"

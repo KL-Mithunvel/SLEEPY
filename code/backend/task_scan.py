@@ -19,7 +19,7 @@ import logging
 import os
 import re
 import uuid
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import yaml
@@ -35,6 +35,17 @@ _PRIORITY_RE = re.compile(r"\bpriority:(high|medium|low)\b", re.IGNORECASE)
 _PROJECT_REF_RE = re.compile(r"(?:^|\s)(\S+/\S+\.md)(?=\s|$)")
 _PROMOTED_RE = re.compile(r"\^p:([0-9a-f]{8})\b")
 _MAX_TASKS = 40
+_MAX_LINE_LEN = 1000
+
+
+def single_line(text: str) -> str:
+    """
+    Captures and ad-hoc tasks are appended as ONE markdown list line. A pasted
+    multi-line string would otherwise inject arbitrary lines — including new
+    `## ` headings that the materialiser/housekeeping parsers key off — into
+    inbox.md or a Daily file. Collapse all whitespace runs (incl. newlines).
+    """
+    return re.sub(r"\s+", " ", text or "").strip()[:_MAX_LINE_LEN]
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +381,30 @@ def add_task(
         logger.exception("task_scan: add_task failed for %s", rel_path)
         return False
     return True
+
+
+def capture_to_inbox(data_root: str, text: str, conn) -> tuple[str, str]:
+    """
+    Append `- [ ] <text>  <!-- captured DD-MM-YYYY HH:MM -->` to inbox.md
+    (created with a header if absent), auto-applied via md_editor with no
+    confirm gate. `text` must already be one line (single_line()). Returns
+    (line, sha). Raises ValueError if md_editor rejects the edit.
+    """
+    ts = datetime.now().strftime("%d-%m-%Y %H:%M")
+    line = f"- [ ] {text}  <!-- captured {ts} -->"
+
+    inbox_rel = "inbox.md"
+    inbox_abs = os.path.join(data_root, inbox_rel)
+    if os.path.isfile(inbox_abs):
+        with open(inbox_abs, encoding="utf-8", errors="replace") as f:
+            current = f.read()
+    else:
+        current = "# Inbox\n\nQuick captures land here.\n\n"
+
+    new_content = current.rstrip("\n") + "\n" + line + "\n"
+    proposal = md_editor.propose_edit(inbox_rel, new_content, f"Capture: {text[:60]}", conn)
+    sha = md_editor.apply_edit(proposal["event_id"], conn)
+    return line, sha
 
 
 def _daily_rel_path(ou: str) -> str:

@@ -45,8 +45,9 @@ def _initialize(params: dict) -> dict:
         "capabilities": {"tools": {"listChanged": False}},
         "serverInfo": SERVER_INFO,
         "instructions": (
-            "Access to the user's to-do list only: read today's tasks and list "
-            "projects. There is no access to notes, news or files."
+            "Access to the user's to-do list only: read today's tasks, list projects, "
+            "add a task, mark a task done, and save a quick note to the inbox. "
+            "There is no access to other notes, news or files."
         ),
     }
 
