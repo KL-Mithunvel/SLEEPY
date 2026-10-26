@@ -38,6 +38,12 @@ services:
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
       - CORS_ORIGINS=https://klm.smtw.in
+      # MCP connector for external AI apps (docs/MCP_CONNECTOR.md). Backend only:
+      # the worker serves no HTTP. PUBLIC_BASE_URL is the OAuth issuer; config.py
+      # refuses to boot in production unless it is https. Set MCP_ENABLED=0 (and
+      # redeploy) to make /mcp and /oauth/* disappear again - they 404 when off.
+      - MCP_ENABLED=1
+      - PUBLIC_BASE_URL=https://klm.smtw.in
       # Nightly cron schedule (scheduled_tasks.py) is written in IST wall-clock
       # terms (e.g. 06:30 morning briefing) — without this the container's
       # default UTC clock fires everything 5.5 hours off.

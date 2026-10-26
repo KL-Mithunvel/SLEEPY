@@ -85,14 +85,25 @@ Security properties (each has a test in `tests/test_oauth.py`):
 - Known trade-off: a refresh response lost in transit makes the retry look like token theft and ends the
   grant (re-approve once). Chosen over a replay grace window.
 
-## Switching it on (not done yet)
+## Switching it on
 
-1. `PUBLIC_BASE_URL=https://klm.smtw.in`, `MCP_ENABLED=1` in the prod env.
-2. Splice the new `location` blocks from `tooling/nginx-klm.smtw.in.conf` into the box's nginx and reload.
-3. Deploy through the canary gate. Then in claude.ai → Settings → Connectors → *Add custom connector* →
-   `https://klm.smtw.in/mcp`; approve on the SLEEPY page.
-4. If the consent page reports a redirect it does not know, the app's callback differs from the default —
-   add that exact URL to `OAUTH_ALLOWED_REDIRECT_URIS`.
+1. **Env** *(done 2026-10-26, in `docker-compose.yml`, backend service only)*: `MCP_ENABLED=1`,
+   `PUBLIC_BASE_URL=https://klm.smtw.in`. Turn it off again by setting `MCP_ENABLED=0` and redeploying —
+   every `/mcp` and `/oauth/*` route then 404s.
+2. **nginx** *(done 2026-10-26 on the box)*: the `sleepy_oauth` throttle zone plus `/oauth/`,
+   `/.well-known/oauth-*` and `/mcp` locations were spliced into `/etc/nginx/nginx.conf` (backup left at
+   `nginx.conf.bak-20261026-*`, `nginx -t` green, reloaded). `tooling/nginx-klm.smtw.in.conf` holds the same
+   blocks. Note the box's live config is *older* than that reference file in other respects (no
+   `sleepy_login` throttle on `/api/auth/login`, no `client_max_body_size`) — not touched here.
+3. **Deploy** through the canary gate (`main` → `canary` → CI green → `prod` → `tooling/deploy-prod.sh`).
+4. **Connect:** in the Claude app/site → Settings → Connectors → *Add custom connector* →
+   `https://klm.smtw.in/mcp`. Claude opens the SLEEPY consent page; sign in, leave **Allow changes** ticked
+   (or untick for read-only), Approve.
+5. If the consent page says the redirect address does not match, the app's callback differs from the
+   default — add that exact URL to `OAUTH_ALLOWED_REDIRECT_URIS`.
+
+Revoking: `manage_users.py list-connectors` / `revoke-connectors <user>` on the box, or remove the connector
+in Claude (it calls `/oauth/revoke`).
 
 ## Verification record (2026-10-26)
 

@@ -65,3 +65,46 @@ def test_dev_env_with_bypass_and_no_api_key_starts_cleanly():
         "ANTHROPIC_API_KEY": "", "CLAUDE_API_KEY": "", "SQLITE_DB_PATH": ":memory:",
     })
     assert result.returncode == 0, result.stderr
+
+
+# --- MCP connector -----------------------------------------------------------
+
+_PROD_OK = {
+    "APP_ENV": "production", "DEV_AUTH_BYPASS": "0", "ANTHROPIC_API_KEY": "sk-ant-fake",
+    "AUTH_SECRET_KEY": "f" * 64, "SQLITE_DB_PATH": ":memory:",
+}
+
+
+def test_prod_connector_with_non_https_base_url_refuses_to_start():
+    result = _run_import({**_PROD_OK, "MCP_ENABLED": "1", "PUBLIC_BASE_URL": "http://klm.smtw.in"})
+    assert result.returncode != 0
+    assert "PUBLIC_BASE_URL" in result.stderr
+
+
+def test_prod_connector_with_https_base_url_starts_cleanly():
+    # The exact settings docker-compose.yml deploys.
+    result = _run_import({**_PROD_OK, "MCP_ENABLED": "1", "PUBLIC_BASE_URL": "https://klm.smtw.in"})
+    assert result.returncode == 0, result.stderr
+
+
+def test_prod_with_connector_off_does_not_care_about_base_url():
+    result = _run_import({**_PROD_OK, "MCP_ENABLED": "0", "PUBLIC_BASE_URL": "http://localhost:5000"})
+    assert result.returncode == 0, result.stderr
+
+
+def test_prod_with_loopback_oauth_redirects_refuses_to_start():
+    result = _run_import({**_PROD_OK, "OAUTH_ALLOW_LOOPBACK_REDIRECTS": "1"})
+    assert result.returncode != 0
+    assert "OAUTH_ALLOW_LOOPBACK_REDIRECTS" in result.stderr
+
+
+def test_connector_defaults_off_with_claude_only_redirects():
+    result = subprocess.run(
+        [sys.executable, "-c", "import config; print(config.MCP_ENABLED, config.OAUTH_ALLOWED_REDIRECT_URIS)"],
+        cwd=_BACKEND_DIR, env={**os.environ, "DEV_AUTH_BYPASS": "1", "SQLITE_DB_PATH": ":memory:"},
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout.strip()
+    assert out.startswith("False ")
+    assert "claude.ai/api/mcp/auth_callback" in out and "evil" not in out
