@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 mcp_bp = Blueprint("mcp", __name__)
 
+MAX_BATCH = 10
+
 
 def _db():
     from app import get_db
@@ -82,8 +84,11 @@ def mcp_post():
     scopes = g.mcp_scopes
 
     if isinstance(body, list):
-        if not body:
-            return jsonify(mcp_server.error_response(None, mcp_server.INVALID_REQUEST, "Empty batch")), 400
+        # Each message can touch the corpus; an unbounded batch would turn one
+        # 2 MB request into thousands of file scans. (The 2025-06-18 spec drops
+        # batching entirely, so a small cap costs real clients nothing.)
+        if not body or len(body) > MAX_BATCH:
+            return jsonify(mcp_server.error_response(None, mcp_server.INVALID_REQUEST, "Invalid batch size")), 400
         replies = [r for r in (mcp_server.handle_message(m, scopes, _db) for m in body) if r is not None]
         if not replies:
             return Response(status=202)

@@ -90,6 +90,10 @@ def t_unauth_routes():
     for rule in app.url_map.iter_rules():
         if rule.endpoint == "static" or rule.rule in public:
             continue
+        # The MCP connector authenticates with its own OAuth credential and is
+        # attacked separately by attack_mcp.py.
+        if rule.rule == "/mcp" or rule.rule.startswith(("/oauth/", "/.well-known/")):
+            continue
         path = rule.rule.replace("<int:event_id>", "1")
         for m in sorted(rule.methods - {"HEAD", "OPTIONS"}):
             s, _, _ = http(m, path, body={} if m != "GET" else None)

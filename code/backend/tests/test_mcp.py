@@ -137,6 +137,19 @@ def test_empty_batch_rejected(client, mcp_on):
     assert client.post("/mcp", json=[]).status_code == 400
 
 
+def test_oversized_batch_rejected_before_any_work(client, mcp_on, monkeypatch):
+    calls = []
+    monkeypatch.setattr("mcp_server.handle_message", lambda *a: calls.append(a))
+    batch = [{"jsonrpc": "2.0", "id": i, "method": "ping"} for i in range(11)]
+    assert client.post("/mcp", json=batch).status_code == 400
+    assert calls == []
+
+
+def test_batch_at_the_cap_is_served(client, mcp_on):
+    ok = [{"jsonrpc": "2.0", "id": i, "method": "ping"} for i in range(10)]
+    assert len(client.post("/mcp", json=ok).get_json()) == 10
+
+
 # ---------------------------------------------------------------------------
 # Tool surface
 # ---------------------------------------------------------------------------

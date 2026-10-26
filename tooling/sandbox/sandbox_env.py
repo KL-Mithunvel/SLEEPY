@@ -28,6 +28,9 @@ DB_PATH = USER_ROOT / "db" / "sqlite" / "pma.db"
 
 HOST, PORT = "127.0.0.1", 5055
 BASE_URL = f"http://{HOST}:{PORT}"
+# What the connector advertises as its own address. Production posture refuses a
+# non-https base URL, so the sandbox claims one; attack scripts still talk to BASE_URL.
+PUBLIC_URL = "https://sandbox.example"
 
 # Known accounts. Passwords are sandbox-only.
 USERS = {
@@ -74,6 +77,13 @@ def apply_env() -> None:
         "PMA_NEWS_WATCH_CRON_DISABLED": "1",
         "CORS_ORIGINS": "http://localhost:5173",
         "USER_NICK": "KLM",
+        # MCP connector switched on, in the same posture as prod: exact-match Claude
+        # redirect URIs only, no loopback callbacks.
+        "MCP_ENABLED": "1",
+        "PUBLIC_BASE_URL": PUBLIC_URL,
+        "OAUTH_ALLOW_LOOPBACK_REDIRECTS": "0",
+        # Attack runs register hundreds of throwaway clients; the real cap (50) has its own unit test.
+        "OAUTH_MAX_CLIENTS": "1000",
     }
     os.environ.update(env)
     if str(BACKEND_DIR) not in sys.path:

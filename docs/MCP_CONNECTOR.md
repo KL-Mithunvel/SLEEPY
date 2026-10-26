@@ -28,8 +28,8 @@ pins that. Every write tool wraps existing `task_scan` code, so path guards, the
 | 1 | Protocol layer (`mcp_server.py`), transport (`mcp_bp.py`), read tools, `MCP_ENABLED` flag (default off) | ✅ 2026-10-26 |
 | 2 | Write tools: `add_task`, `capture`, `toggle_task` + hostile-argument handling + write rate limit | ✅ 2026-10-26 |
 | 3 | OAuth 2.1 authorization server: metadata, dynamic client registration, consent page, PKCE token endpoint, scoped/revocable tokens. `/mcp` accepts **only** connector tokens; connector tokens are refused on `/api/*` | ✅ 2026-10-26 |
-| 4 | Sandbox attack scripts for the new surface, setup guide, CLAUDE.md update | |
-| — | Deploy (needs the user's go-ahead; canary-gated) and add the connector in claude.ai | |
+| 4 | Sandbox attack script (`tooling/sandbox/attack_mcp.py`, 140 checks), JSON-RPC batch cap, CLAUDE.md update | ✅ 2026-10-26 |
+| — | Deploy (needs the user's go-ahead; canary-gated) and add the connector in claude.ai | pending |
 
 
 ## Design decisions
@@ -93,3 +93,14 @@ Security properties (each has a test in `tests/test_oauth.py`):
    `https://klm.smtw.in/mcp`; approve on the SLEEPY page.
 4. If the consent page reports a redirect it does not know, the app's callback differs from the default —
    add that exact URL to `OAUTH_ALLOWED_REDIRECT_URIS`.
+
+## Verification record (2026-10-26)
+
+- Backend suite green (see CLAUDE.md for the count); `tests/test_mcp.py`, `tests/test_oauth.py` cover protocol,
+  tools, hostile arguments, the whole OAuth flow, replay/rotation, scope, and token-family separation.
+- Sandbox (production posture, throwaway corpus): `attack_http.py` 26 checks / 0 VULN (the connector
+  routes are excluded from its "every route needs a token" sweep and covered by `attack_mcp.py`),
+  `attack_mcp.py` 140 checks / 0 VULN, run twice back-to-back.
+- Found by planning the attacks, fixed before they ran: an unbounded JSON-RPC batch (`MAX_BATCH = 10`).
+- Not testable here: the real Claude client and the real nginx. First live connect is the final check —
+  if Claude reports a redirect URI problem, add that exact callback to `OAUTH_ALLOWED_REDIRECT_URIS`.
