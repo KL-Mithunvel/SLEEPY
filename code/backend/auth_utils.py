@@ -213,15 +213,25 @@ def unlock_user(conn, username: str) -> int:
 
 _PUBLIC_PATHS = {"/healthz", "/api/auth/config", "/api/auth/login"}
 
+# Not covered by a session JWT, on purpose: /mcp checks its own OAuth bearer
+# (mcp_bp.py), and the OAuth endpoints + discovery documents have to be
+# reachable before anyone holds a token. All of it is 404 unless
+# config.MCP_ENABLED, and no /api/* route is reachable through these prefixes.
+_SELF_AUTH_PATHS = {"/mcp"}
+_SELF_AUTH_PREFIXES = ("/oauth/", "/.well-known/")
+
 
 def validate_token():
     """
     before_request handler. Populates g.user or aborts with 401.
-    Skipped for OPTIONS and the public bootstrap/login paths.
+    Skipped for OPTIONS, the public bootstrap/login paths and the connector's
+    self-authenticating paths.
     """
     if request.method == "OPTIONS":
         return
-    if request.path in _PUBLIC_PATHS:
+    if request.path in _PUBLIC_PATHS or request.path in _SELF_AUTH_PATHS:
+        return
+    if request.path.startswith(_SELF_AUTH_PREFIXES):
         return
 
     if config.DEV_AUTH_BYPASS:

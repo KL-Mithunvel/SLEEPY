@@ -10,6 +10,9 @@ Usage (from code/backend/, or via `uv run python code/backend/manage_users.py ..
     delete-user <username>
     unlock-user <username>          clear a brute-force lockout early (it also
                                      self-clears after LOCKOUT_WINDOW_MINUTES)
+    list-connectors                 external AI apps (MCP connector) currently approved
+    revoke-connectors <username>    cut every connector grant for that user at once
+                                     (reset-password and delete-user do this too)
 """
 
 import argparse
@@ -19,6 +22,7 @@ import sys
 import auth_utils
 import config_rbac
 import local_db
+import oauth_store
 
 
 def _prompt_password() -> str:
@@ -77,7 +81,9 @@ def reset_password(username: str):
         if cur.rowcount == 0:
             print(f"No such user: {username}", file=sys.stderr)
             sys.exit(1)
-        print(f"Password updated for {username} (all existing sessions signed out)")
+        n = oauth_store.revoke_all_for_user(conn, username)
+        print(f"Password updated for {username} (all existing sessions signed out"
+              f"{f', {n} connector token(s) revoked' if n else ''})")
     finally:
         local_db.return_db(conn)
 
@@ -90,7 +96,30 @@ def delete_user(username: str):
         if cur.rowcount == 0:
             print(f"No such user: {username}", file=sys.stderr)
             sys.exit(1)
+        oauth_store.revoke_all_for_user(conn, username)
         print(f"Deleted {username}")
+    finally:
+        local_db.return_db(conn)
+
+
+def list_connectors():
+    conn = local_db.get_db()
+    try:
+        grants = oauth_store.list_connectors(conn)
+        if not grants:
+            print("No connectors approved.")
+        for g in grants:
+            print(f"{g['client_name'] or '?':24s} user={g['username']:12s} scope=[{g['scope']}] "
+                  f"approved {g['auth_time']}  last used {g['last_used_at'] or 'never'}")
+    finally:
+        local_db.return_db(conn)
+
+
+def revoke_connectors(username: str):
+    conn = local_db.get_db()
+    try:
+        n = oauth_store.revoke_all_for_user(conn, username)
+        print(f"Revoked {n} connector token(s) for {username}.")
     finally:
         local_db.return_db(conn)
 
@@ -131,6 +160,11 @@ def main():
     p_unlock = sub.add_parser("unlock-user")
     p_unlock.add_argument("username")
 
+    sub.add_parser("list-connectors")
+
+    p_revoke = sub.add_parser("revoke-connectors")
+    p_revoke.add_argument("username")
+
     args = parser.parse_args()
 
     local_db.init_db()
@@ -145,6 +179,10 @@ def main():
         delete_user(args.username)
     elif args.command == "unlock-user":
         unlock_user(args.username)
+    elif args.command == "list-connectors":
+        list_connectors()
+    elif args.command == "revoke-connectors":
+        revoke_connectors(args.username)
 
 
 if __name__ == "__main__":

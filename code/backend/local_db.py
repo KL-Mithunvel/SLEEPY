@@ -192,6 +192,57 @@ _MIGRATIONS = [
         """,
         "CREATE INDEX IF NOT EXISTS idx_system_metrics_created ON system_metrics (created_at)",
     ]),
+    (11, "Add OAuth tables for the MCP connector (oauth_store.py)", [
+        # Opaque, hashed, revocable tokens — deliberately NOT the session JWT, so
+        # a connector credential can never be replayed against /api/* and a
+        # session JWT can never be replayed against /mcp. Only sha256 hashes of
+        # codes/tokens are stored; the raw value exists once, in the response.
+        # Times are naive-IST 'YYYY-MM-DD HH:MM:SS' strings like everywhere else.
+        """
+        CREATE TABLE IF NOT EXISTS oauth_clients (
+            client_id     TEXT PRIMARY KEY,
+            client_name   TEXT NOT NULL,
+            redirect_uris TEXT NOT NULL,
+            created_at    TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        )
+        """,
+        # Single-use authorization codes (60 s). family_id ties every token
+        # minted from one consent together so reuse of any of them can revoke
+        # the whole grant.
+        """
+        CREATE TABLE IF NOT EXISTS oauth_codes (
+            code_hash      TEXT PRIMARY KEY,
+            client_id      TEXT NOT NULL,
+            username       TEXT NOT NULL,
+            redirect_uri   TEXT NOT NULL,
+            code_challenge TEXT NOT NULL,
+            scope          TEXT NOT NULL,
+            family_id      TEXT NOT NULL,
+            auth_time      TEXT NOT NULL,
+            expires_at     TEXT NOT NULL,
+            used           INTEGER NOT NULL DEFAULT 0
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS oauth_tokens (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            token_hash   TEXT NOT NULL UNIQUE,
+            kind         TEXT NOT NULL,
+            family_id    TEXT NOT NULL,
+            client_id    TEXT NOT NULL,
+            username     TEXT NOT NULL,
+            scope        TEXT NOT NULL,
+            auth_time    TEXT NOT NULL,
+            expires_at   TEXT NOT NULL,
+            revoked      INTEGER NOT NULL DEFAULT 0,
+            used         INTEGER NOT NULL DEFAULT 0,
+            created_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            last_used_at TEXT
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_oauth_tokens_family ON oauth_tokens (family_id)",
+        "CREATE INDEX IF NOT EXISTS idx_oauth_tokens_user ON oauth_tokens (username)",
+    ]),
 ]
 
 

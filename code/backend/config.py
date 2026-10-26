@@ -134,6 +134,41 @@ MCP_ENABLED: bool = str(_get("MCP_ENABLED", "0")).strip() in ("1", "true", "yes"
 # the endpoint from a web page.
 MCP_ALLOWED_ORIGINS: list = [o.strip() for o in _get("MCP_ALLOWED_ORIGINS", "https://claude.ai").split(",") if o.strip()]
 
+# OAuth 2.1 authorization server for the connector (oauth_bp.py / oauth_store.py).
+# PUBLIC_BASE_URL is the issuer and the root of the resource URL (<base>/mcp);
+# it is configuration, never taken from the Host header, so a spoofed Host can't
+# poison the discovery documents.
+PUBLIC_BASE_URL: str = str(_get("PUBLIC_BASE_URL", "http://localhost:5000")).strip().rstrip("/")
+# Dynamic client registration is open by design (the connector registers itself),
+# so the only thing that decides who can ever be sent an authorization code is
+# this exact-match list of redirect URIs. Extend it for another app (e.g. ChatGPT)
+# only with that app's documented callback URL.
+OAUTH_ALLOWED_REDIRECT_URIS: list = [u.strip() for u in _get(
+    "OAUTH_ALLOWED_REDIRECT_URIS",
+    "https://claude.ai/api/mcp/auth_callback,https://claude.com/api/mcp/auth_callback",
+).split(",") if u.strip()]
+# http://localhost / 127.0.0.1 callbacks (MCP Inspector, local testing) — never in prod.
+OAUTH_ALLOW_LOOPBACK_REDIRECTS: bool = str(_get("OAUTH_ALLOW_LOOPBACK_REDIRECTS", "0")).strip() in ("1", "true", "yes")
+OAUTH_CODE_TTL_SECONDS: int = int(_get("OAUTH_CODE_TTL_SECONDS", 60))
+OAUTH_ACCESS_TTL_MINUTES: int = int(_get("OAUTH_ACCESS_TTL_MINUTES", 60))
+OAUTH_REFRESH_TTL_DAYS: int = int(_get("OAUTH_REFRESH_TTL_DAYS", 30))
+# A grant (one consent) dies this many days after the password was typed, however
+# often it is refreshed — the connector then has to be re-approved. Same idea as
+# AUTH_SESSION_MAX_HOURS for the browser session.
+OAUTH_GRANT_MAX_DAYS: int = int(_get("OAUTH_GRANT_MAX_DAYS", 90))
+OAUTH_MAX_CLIENTS: int = int(_get("OAUTH_MAX_CLIENTS", 50))
+
+if IS_PROD and MCP_ENABLED and not PUBLIC_BASE_URL.startswith("https://"):
+    raise RuntimeError(
+        "APP_ENV=production with MCP_ENABLED but PUBLIC_BASE_URL is not an https:// URL — refusing "
+        "to start. OAuth discovery would advertise insecure endpoints."
+    )
+if IS_PROD and OAUTH_ALLOW_LOOPBACK_REDIRECTS:
+    raise RuntimeError(
+        "APP_ENV=production with OAUTH_ALLOW_LOOPBACK_REDIRECTS enabled — refusing to start. "
+        "Loopback callbacks are for local testing only."
+    )
+
 # ---------------------------------------------------------------------------
 # Performance
 # ---------------------------------------------------------------------------

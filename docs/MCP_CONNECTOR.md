@@ -27,12 +27,10 @@ pins that. Every write tool wraps existing `task_scan` code, so path guards, the
 |---|---|---|
 | 1 | Protocol layer (`mcp_server.py`), transport (`mcp_bp.py`), read tools, `MCP_ENABLED` flag (default off) | ✅ 2026-10-26 |
 | 2 | Write tools: `add_task`, `capture`, `toggle_task` + hostile-argument handling + write rate limit | ✅ 2026-10-26 |
-| 3 | OAuth 2.1 authorization server: metadata, dynamic client registration, consent page, PKCE token endpoint, scoped/revocable tokens. `/mcp` accepts **only** MCP tokens; MCP tokens are refused on `/api/*` | |
+| 3 | OAuth 2.1 authorization server: metadata, dynamic client registration, consent page, PKCE token endpoint, scoped/revocable tokens. `/mcp` accepts **only** connector tokens; connector tokens are refused on `/api/*` | ✅ 2026-10-26 |
 | 4 | Sandbox attack scripts for the new surface, setup guide, CLAUDE.md update | |
 | — | Deploy (needs the user's go-ahead; canary-gated) and add the connector in claude.ai | |
 
-**Phase 1 must not be deployed with `MCP_ENABLED=1` on its own** — until phase 3, `/mcp` would accept
-the app's ordinary session token, which is a broader credential than a phone connector should hold.
 
 ## Design decisions
 
@@ -52,3 +50,46 @@ the app's ordinary session token, which is a broader credential than a phone con
   (in-process; the backend runs one gunicorn worker).
 - **Shared code, not copies:** `capture_to_inbox` and `single_line` moved into `task_scan` so the web
   UI and the connector use identical logic.
+
+## OAuth layer (phase 3)
+
+What the user sees: add the connector in Claude → Claude opens the SLEEPY consent page → sign in with the
+normal username/password → tick/untick **Allow changes** → Approve. Claude never sees the password or a
+web-session token.
+
+| Piece | Where |
+|---|---|
+| Rules + storage (PKCE, codes, rotation, revocation) | `oauth_store.py`, tables `oauth_clients/codes/tokens` (migration 11) |
+| Discovery, registration, consent page, `/oauth/token`, `/oauth/revoke` | `oauth_bp.py` |
+| `/mcp` bearer check + `WWW-Authenticate` pointer | `mcp_bp.py` |
+| CLI | `manage_users.py list-connectors` / `revoke-connectors <user>` (reset-password and delete-user also revoke) |
+
+Security properties (each has a test in `tests/test_oauth.py`):
+
+- **Two credential families that cannot be swapped.** Connector tokens are opaque (`sla_…`/`slr_…`), stored
+  as sha256 only; the web session is an HS256 JWT. `/mcp` accepts only the former, `/api/*` only the latter.
+- **PKCE S256 mandatory**, codes single-use and 60 s; replaying a spent code or a spent refresh token revokes
+  the whole grant ("family"). Refresh tokens rotate; scope can narrow on refresh, never widen.
+- **Redirect allowlist is the real gatekeeper.** Registration is open (that is how connectors work), so a
+  client can only be sent a code at an exact URI from `OAUTH_ALLOWED_REDIRECT_URIS` (default: Claude's two
+  callbacks). Unknown client / unregistered redirect → error page, never a redirect. Loopback callbacks only
+  with `OAUTH_ALLOW_LOOPBACK_REDIRECTS`, which the config refuses to boot with in prod.
+- **Sign-in shares the web login's lockout and `login_events`** — five wrong passwords lock both.
+- **Lifetimes:** access 60 min, refresh 30 days (rotating), whole grant 90 days from the password entry,
+  then re-approve. Deleting the user or resetting their password revokes everything.
+- **Discovery URLs come from `PUBLIC_BASE_URL`**, never the Host header. Prod refuses to boot with
+  `MCP_ENABLED` and a non-https base URL.
+- **Consent page:** server-rendered, no JavaScript, `frame-ancestors 'none'`, no-store. The final hop back
+  to the app is a 200 page with a meta refresh, not a 302 — the site CSP's `form-action 'self'` makes Chrome
+  block the redirect that follows a form POST.
+- Known trade-off: a refresh response lost in transit makes the retry look like token theft and ends the
+  grant (re-approve once). Chosen over a replay grace window.
+
+## Switching it on (not done yet)
+
+1. `PUBLIC_BASE_URL=https://klm.smtw.in`, `MCP_ENABLED=1` in the prod env.
+2. Splice the new `location` blocks from `tooling/nginx-klm.smtw.in.conf` into the box's nginx and reload.
+3. Deploy through the canary gate. Then in claude.ai → Settings → Connectors → *Add custom connector* →
+   `https://klm.smtw.in/mcp`; approve on the SLEEPY page.
+4. If the consent page reports a redirect it does not know, the app's callback differs from the default —
+   add that exact URL to `OAUTH_ALLOWED_REDIRECT_URIS`.

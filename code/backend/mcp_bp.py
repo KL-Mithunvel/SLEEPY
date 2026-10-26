@@ -15,6 +15,7 @@ from flask import Blueprint, Response, g, jsonify, request
 import config
 import mcp_server
 import mcp_tools
+import oauth_store
 
 logger = logging.getLogger(__name__)
 
@@ -26,14 +27,20 @@ def _db():
     return get_db()
 
 
-def _scopes() -> frozenset:
-    """Scopes the caller's credential grants. Replaced by token scopes in the OAuth phase."""
-    return mcp_tools.ALL_SCOPES if getattr(g, "user", None) else frozenset()
-
-
 def _origin_allowed() -> bool:
     origin = request.headers.get("Origin")
     return origin is None or origin in config.MCP_ALLOWED_ORIGINS
+
+
+def _unauthorized(presented: bool) -> Response:
+    """401 that points the client at the OAuth discovery document (RFC 9728 / MCP auth spec)."""
+    challenge = f'Bearer resource_metadata="{config.PUBLIC_BASE_URL}/.well-known/oauth-protected-resource"'
+    if presented:
+        challenge += ', error="invalid_token"'
+    resp = jsonify({"error": "unauthorized"})
+    resp.status_code = 401
+    resp.headers["WWW-Authenticate"] = challenge
+    return resp
 
 
 @mcp_bp.before_request
@@ -42,6 +49,23 @@ def _gate():
         return jsonify({"error": "Not found"}), 404
     if not _origin_allowed():
         return jsonify({"error": "Origin not allowed"}), 403
+
+    header = request.headers.get("Authorization", "")
+    # Local development only (config refuses DEV_AUTH_BYPASS in prod): no header at
+    # all means the MCP Inspector or a curl on this machine. A header, if sent, is
+    # still checked for real so the OAuth path can be exercised locally.
+    if config.DEV_AUTH_BYPASS and not header:
+        g.mcp_scopes = mcp_tools.ALL_SCOPES
+        return
+    if not header.startswith("Bearer "):
+        return _unauthorized(presented=False)
+    # Only a connector access token opens /mcp. A web-session JWT is not one: it
+    # is a broader credential and is rejected here by construction.
+    grant = oauth_store.authenticate_access(_db(), header[len("Bearer "):].strip())
+    if grant is None:
+        return _unauthorized(presented=True)
+    g.mcp_scopes = grant["scopes"]
+    g.mcp_user = grant["username"]
 
 
 @mcp_bp.get("/mcp")
@@ -55,7 +79,7 @@ def mcp_post():
     if body is None:
         return jsonify(mcp_server.error_response(None, mcp_server.PARSE_ERROR, "Parse error")), 400
 
-    scopes = _scopes()
+    scopes = g.mcp_scopes
 
     if isinstance(body, list):
         if not body:
