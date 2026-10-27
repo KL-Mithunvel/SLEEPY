@@ -115,3 +115,27 @@ in Claude (it calls `/oauth/revoke`).
 - Found by planning the attacks, fixed before they ran: an unbounded JSON-RPC batch (`MAX_BATCH = 10`).
 - Not testable here: the real Claude client and the real nginx. First live connect is the final check —
   if Claude reports a redirect URI problem, add that exact callback to `OAUTH_ALLOWED_REDIRECT_URIS`.
+
+## Status — NOT DONE (as of 2026-10-27)
+
+Server side is deployed and verified; **the connector has never been connected from a real Claude client.**
+Pick up here:
+
+1. **First real connect (the user's step).** From a device that can reach `klm.smtw.in` (the dev PC's
+   Fortinet firewall 403s it — use a phone on mobile data): claude.ai → Settings → Connectors → add custom
+   connector → `https://klm.smtw.in/mcp` → sign in on the SLEEPY consent page → leave "Allow changes" ticked
+   (or untick for read-only) → Approve → enable it in a chat. Menu names and plan availability are unverified.
+2. **Then test** with "What's on my list today?", "Add 'order resin' to Magnet Embedding", "Note: …".
+3. **Likely first failure:** consent page says the redirect address doesn't match → Claude's real callback
+   differs from the two defaults (set from memory). Add the exact URL to `OAUTH_ALLOWED_REDIRECT_URIS` in
+   `docker-compose.yml` (backend env) and ship via the canary gate.
+4. **Still unverified:** the successful DCR → consent → token flow on prod (deliberately not run, it writes
+   to the prod DB); `manage_users.py list-connectors|revoke-connectors` inside the container (the
+   `docker compose exec backend uv run python code/backend/manage_users.py …` form is untested); whether a
+   lost refresh response forces re-approval.
+5. **Later:** ChatGPT (needs its callback URL on the allowlist; plan/support unverified).
+
+Live state: `MCP_ENABLED=1` + `PUBLIC_BASE_URL=https://klm.smtw.in` in `docker-compose.yml`; box runs
+`2cb7c42`. Box nginx (`/etc/nginx/nginx.conf`) has the `/oauth/`, `/.well-known/oauth-`, `/mcp` locations,
+`sleepy_oauth` and `sleepy_login` zones, and `client_max_body_size 2m` (backups `nginx.conf.bak-20261026-*`,
+`nginx.conf.bak-20261027-074631`). Kill switch: `MCP_ENABLED=0` + redeploy.
