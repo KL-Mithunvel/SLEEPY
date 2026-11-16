@@ -95,10 +95,22 @@ def scan_diff_for_secrets(diff: str) -> list[str]:
     """
     if not diff:
         return []
-    added_text = "\n".join(
-        line[1:] for line in diff.splitlines()
-        if line.startswith("+") and not line.startswith("+++")
-    )
+    # Only the real file header is skipped: a "+++ " line directly after the
+    # "--- " line, before the first hunk. Skipping every line that starts with
+    # "+++" also skipped any added content line beginning with "++", so
+    # "++ sk-ant-..." went into the corpus unscanned (found 2026-11-16).
+    added: list[str] = []
+    in_hunk = False
+    prev = ""
+    for line in diff.splitlines():
+        if line.startswith("@@"):
+            in_hunk = True
+        elif line.startswith("+"):
+            is_header = not in_hunk and line.startswith("+++ ") and prev.startswith("--- ")
+            if not is_header:
+                added.append(line[1:])
+        prev = line
+    added_text = "\n".join(added)
     if not added_text:
         return []
     return [name for name, pattern in _SECRET_PATTERNS if pattern.search(added_text)]

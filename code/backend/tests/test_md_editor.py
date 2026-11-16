@@ -237,6 +237,20 @@ def test_scan_diff_for_secrets_ignores_file_header_lines():
     assert hits == []
 
 
+def test_scan_diff_for_secrets_scans_content_lines_starting_with_plus_plus():
+    """A content line beginning '++' shows up in the diff as '+++...' — it is
+    content, not the file header, and must be scanned (sandbox 2026-11-16)."""
+    diff = "--- a/x.md\n+++ b/x.md\n@@ -0,0 +1,2 @@\n+# Notes\n+++ key AKIAABCDEFGHIJKLMNOP\n"
+    assert "AWS access key" in md_editor.scan_diff_for_secrets(diff)
+
+
+def test_propose_edit_blocked_by_secret_on_plus_plus_line(data_root, db):
+    for content in ("# Notes\n++ key AKIAABCDEFGHIJKLMNOP\n", "++ key AKIAABCDEFGHIJKLMNOP\n"):
+        with pytest.raises(ValueError, match="Blocked.*secret"):
+            md_editor.propose_edit("OU/leak2.md", content, "add key", db)
+    assert db.execute("SELECT COUNT(*) AS n FROM ai_events").fetchone()["n"] == 0
+
+
 def test_scan_diff_for_secrets_clean_diff_is_empty():
     diff = "--- a/x.md\n+++ b/x.md\n@@ -0,0 +1 @@\n+Just a normal note about the project.\n"
     assert md_editor.scan_diff_for_secrets(diff) == []

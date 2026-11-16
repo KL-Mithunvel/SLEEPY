@@ -305,4 +305,8 @@ Still open / by design:
 
 **Verified.** Backend tests 693 passed. `attack_http.py` against the fixed sandbox: 0 VULN.
 
-**Also noticed, not fixed (low).** `md_editor.scan_diff_for_secrets` skips diff lines starting with `+++` to ignore the file header, so a new content line that itself begins with `++` is never scanned for secrets.
+### Second finding, same round — secret scanner skipped lines starting with `++`
+
+**Severity:** low. **Status:** fixed on `main`.
+
+`md_editor.scan_diff_for_secrets` ignored every diff line starting with `+++` so that the `+++ b/<path>` file header was never scanned. An added content line that itself begins with `++` also appears in the diff as `+++...`, so a line such as `++ sk-ant-...` was written to the corpus and committed without being checked. The scanner now skips only the real header (a `+++ ` line directly after the `--- ` line, before the first hunk) and scans everything else. Regression tests in `tests/test_md_editor.py`. Backend tests: 695 passed.
