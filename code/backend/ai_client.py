@@ -227,8 +227,10 @@ def _load_inbox(data_root: str) -> str:
     if not path.is_file():
         return ""
     raw = path.read_text(encoding="utf-8", errors="replace")
+    # split("\n"), not splitlines(): splitlines also breaks on VT/FF/NEL/U+2028,
+    # which would cut a 📰 line in two and leave its tail outside the label.
     return untrusted.mark_untrusted(
-        "\n".join(line for line in raw.splitlines() if not _CHECKED_LINE_RE.match(line)))
+        "\n".join(line for line in raw.split("\n") if not _CHECKED_LINE_RE.match(line)))
 
 
 def _briefing_header(now=None) -> str:

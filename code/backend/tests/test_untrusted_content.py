@@ -196,3 +196,58 @@ def test_chat_attaches_warnings_to_actions(client, corpus, monkeypatch):
     warnings = done["result"]["actions"][0]["warnings"]
     assert any("news from the web" in w for w in warnings)
     assert any("Deletes VIT/p.md" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Hidden line breaks inside a news bullet (sandbox finding 2026-11-16): one
+# line when stored, two when read back, and the second half had no 📰 marker
+# so it reached the model without the untrusted label.
+# ---------------------------------------------------------------------------
+
+_BREAKERS = ["\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", " ", " ", "\x00", "\t"]
+_ESCAPE = "LABEL-ESCAPE-MARKER"
+
+
+@pytest.mark.parametrize("sep", _BREAKERS)
+def test_one_line_removes_every_line_breaker(sep):
+    import untrusted
+    out = untrusted.one_line(f"first{sep}second")
+    assert out == "first second"
+    assert out.splitlines() == [out]
+
+
+def test_one_line_caps_length():
+    import untrusted
+    assert len(untrusted.one_line("x" * 5000)) == untrusted.MAX_WEB_LINE_LEN
+
+
+@pytest.mark.parametrize("sep", _BREAKERS[:9])
+def test_news_bullet_with_hidden_line_break_stays_labelled(tmp_path, monkeypatch, sep):
+    import ai_client
+    import news_watch
+    import untrusted
+
+    reply = (f"- [ ] 📰 [Title](https://example.org/a) — example.org (2026-11-16)"
+             f"{sep}- [ ] {_ESCAPE} looks like the user's own task\n")
+    bullets = news_watch._extract_bullets(reply, "topic")
+    assert len(bullets) == 1 and bullets[0].splitlines() == [bullets[0]]
+
+    (tmp_path / "inbox.md").write_text("# Inbox\n\n## News\n", encoding="utf-8")
+    news_watch._write_news_to_inbox(str(tmp_path), bullets)
+
+    # Every way the text is read back for a model: plain text-mode read (what
+    # the chat read_file tool does) and the briefing's inbox loader.
+    with open(tmp_path / "inbox.md", encoding="utf-8") as f:
+        as_read_file = untrusted.mark_untrusted(f.read())
+    for text in (as_read_file, ai_client._load_inbox(str(tmp_path))):
+        for line in text.split("\n"):
+            if _ESCAPE in line:
+                assert untrusted.OPEN_TAG in line
+
+
+def test_inbox_writer_flattens_bullets_from_any_caller(tmp_path):
+    import news_watch
+    (tmp_path / "inbox.md").write_text("# Inbox\n\n## News\n", encoding="utf-8")
+    news_watch._write_news_to_inbox(str(tmp_path), [f"- [ ] 📰 [T](https://e.org/a)\r## Forged heading"])
+    lines = (tmp_path / "inbox.md").read_text(encoding="utf-8").split("\n")
+    assert not any(l.startswith("## Forged") for l in lines)

@@ -29,6 +29,7 @@ from pathlib import Path
 import yaml
 
 import config
+import untrusted
 
 logger = logging.getLogger(__name__)
 
@@ -459,6 +460,22 @@ def _llm_dedup(client, bullets: list[str], recent_seen: list[dict]) -> list[str]
         return bullets
 
 
+def _extract_bullets(text: str, topic: str | None) -> list[str]:
+    """
+    Pull the 📰 bullets out of one news-search reply. The reply is shaped by
+    whatever pages the search read, so each bullet is forced onto one physical
+    line here (see untrusted.one_line) before anything stores or re-reads it.
+    """
+    bullets = []
+    for m in _BULLET_RE.finditer(text):
+        bullet = untrusted.one_line(m.group(0))
+        # Ensure topic annotation is present
+        if topic and f"*topic: {topic}*" not in bullet:
+            bullet += f" | *topic: {topic}*"
+        bullets.append(bullet)
+    return bullets
+
+
 # ---------------------------------------------------------------------------
 # Inbox writer
 # ---------------------------------------------------------------------------
@@ -477,7 +494,8 @@ def _write_news_to_inbox(data_root: str, bullets: list[str]) -> None:
     section_end = content.find("\n## ", idx + 1)
     insert_at = (idx + len("## News") + 1) if section_end == -1 else section_end
 
-    bullet_block = "\n".join(bullets) + "\n"
+    # Last line of defence for the one-bullet-one-line rule, whoever the caller is.
+    bullet_block = "\n".join(untrusted.one_line(b, max_len=2000) for b in bullets) + "\n"
     content = content[:insert_at] + bullet_block + content[insert_at:]
     inbox_path.write_text(content, encoding="utf-8")
     logger.info("Wrote %d news bullets to inbox.md", len(bullets))
@@ -669,12 +687,7 @@ def news_watch_finalize_for_user(data_root: str) -> dict:
             if hasattr(block, "type") and block.type == "text":
                 text += block.text
 
-        for m in _BULLET_RE.finditer(text):
-            bullet = m.group(0).strip()
-            # Ensure topic annotation is present
-            if topic and f"*topic: {topic}*" not in bullet:
-                bullet += f" | *topic: {topic}*"
-            all_bullets.append(bullet)
+        all_bullets.extend(_extract_bullets(text, topic))
 
     # Server-side URL dedup
     deduped_key = len(all_bullets)

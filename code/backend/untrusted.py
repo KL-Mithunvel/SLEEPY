@@ -26,6 +26,27 @@ _NEWS_MARKER = "📰"
 _TAG_NAME_RE = re.compile(r"untrusted[\s_\-]*web[\s_\-]*content", re.IGNORECASE)
 
 
+# Everything Python treats as a line boundary somewhere: "\n" and "\r" (a lone
+# "\r" becomes "\n" when a file is read back in text mode), the rest of the C0
+# controls, and the separators str.splitlines() also breaks on.
+_LINE_BREAKERS_RE = re.compile("[\x00-\x1f\x7f\x85  ]+")
+MAX_WEB_LINE_LEN = 700
+
+
+def one_line(text: str, max_len: int = MAX_WEB_LINE_LEN) -> str:
+    """
+    Force web-sourced text onto a single physical line before it is stored.
+
+    The label below is applied per line, to lines carrying the 📰 marker. A
+    bullet with a carriage return (or VT/FF/NEL/U+2028) inside it is ONE line
+    when written and TWO when read back, and the second half has no marker —
+    so it reached the model as ordinary, trusted corpus text (sandbox finding
+    2026-11-16). Flattening at the point of entry is what keeps "one bullet"
+    and "one labelled line" the same thing.
+    """
+    return _LINE_BREAKERS_RE.sub(" ", text or "").strip()[:max_len]
+
+
 def _wrap(line: str) -> str:
     return f"{OPEN_TAG}{_TAG_NAME_RE.sub('[removed]', line)}{CLOSE_TAG}"
 

@@ -310,3 +310,25 @@ Still open / by design:
 **Severity:** low. **Status:** fixed on `main`.
 
 `md_editor.scan_diff_for_secrets` ignored every diff line starting with `+++` so that the `+++ b/<path>` file header was never scanned. An added content line that itself begins with `++` also appears in the diff as `+++...`, so a line such as `++ sk-ant-...` was written to the corpus and committed without being checked. The scanner now skips only the real header (a `+++ ` line directly after the `--- ` line, before the first hunk) and scans everything else. Regression tests in `tests/test_md_editor.py`. Backend tests: 695 passed.
+
+### Third finding, same round — web text could escape the "untrusted" label via a hidden line break
+
+**Severity:** low to medium (weakens a prompt-injection defence; the hard gates — Apply click, path guards, email allowlist — were not bypassed). **Status:** fixed on `main`.
+
+**Background.** News bullets come from a model that has just read public web pages, so every `📰` line is wrapped in `<untrusted_web_content>` before any other model sees it (`untrusted.py`). The label is applied per line, to lines carrying the `📰` marker.
+
+**What was wrong.** `news_watch` accepted a bullet as "everything up to the next `\n`". A bullet containing a carriage return, or VT / FF / NEL / U+2028 / U+2029, is one line when written to `inbox.md` but two lines when read back: Python turns a lone `\r` into `\n` on a text-mode read, and `str.splitlines()` (used by the briefing's inbox loader) breaks on all of the others. The second half has no `📰` marker, so it was handed to the chat model and the briefing model as ordinary corpus text — for example as what looks like the user's own inbox task or a `## ` heading.
+
+**What an attacker would need.** A web page that the nightly news search reads and that persuades the search model to put such a character in its reply. No login needed, but it depends on steering a model.
+
+**Proof (sandbox, before the fix).** A bullet with each separator was passed through the real bullet regex and inbox writer. With `\r` the tail came back unlabelled from the chat `read_file` tool and the briefing loader; with VT, FF, NEL and U+2028 it came back unlabelled from the briefing loader.
+
+**Fix.**
+- `untrusted.one_line()` replaces every control and line-separator character with a space and caps the length (700 characters).
+- `news_watch._extract_bullets()` (new, split out of the finalize step) applies it to every bullet; `_write_news_to_inbox()` applies it again whoever the caller is.
+- `ai_client._load_inbox()` splits on `\n` only, so it can no longer cut a labelled line in two.
+- Sandbox: `attack_ai_tools.py` gained a check covering seven separators across `read_file`, `grep` and the briefing loader. Regression tests in `tests/test_untrusted_content.py`.
+
+**Verified.** Backend tests 717 passed. `attack_ai_tools.py`: 12 checks, 0 VULN.
+
+**Not covered.** A bullet already stored in `inbox.md` with such a character from before this fix would still split on read. None is known to exist; a one-off check of the live `inbox.md` would confirm.
