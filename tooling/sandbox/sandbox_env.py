@@ -17,6 +17,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,18 @@ SANDBOX = REPO_ROOT / ".sandbox"
 DATA_ROOT = SANDBOX / "data"
 USER_ROOT = DATA_ROOT / "klm"
 DB_PATH = USER_ROOT / "db" / "sqlite" / "pma.db"
+
+# A second "outside" canary that is NOT under any dot-directory. Everything
+# above lives inside `.sandbox/`, and the corpus guards reject any path with a
+# dot-directory in it — so an absolute path to those canaries was refused for
+# that reason alone, which hid a real absolute-path read for three audit rounds
+# (found 2026-11-16). Production paths (/app/..., /home/...) have no such luck.
+ABS_OUTSIDE = Path(tempfile.gettempdir()).resolve() / "sleepy-sandbox-outside" / "outside.md"
+
+
+def rooted(path: Path) -> str:
+    """Absolute path as a client would send it: forward slashes, no drive letter."""
+    return "/" + path.resolve().as_posix().split(":", 1)[-1].lstrip("/")
 
 HOST, PORT = "127.0.0.1", 5055
 BASE_URL = f"http://{HOST}:{PORT}"
@@ -109,6 +122,7 @@ def seed(reset: bool = False) -> None:
     _w(SANDBOX / "outside.md", f"# outside\n{CANARY_OUT}\n- [ ] {CANARY_OUT}\n")
     _w(DATA_ROOT / "sibling.md", f"# sibling\n{CANARY_OUT}\n- [ ] {CANARY_OUT}\n")
     _w(SANDBOX / "secrets_app.py", f'AUTH_SECRET_KEY = "{CANARY_SRC}"\n')
+    _w(ABS_OUTSIDE, f"# outside\n\n## Tasks\n- [ ] {CANARY_OUT}\n\n## Notes\n{CANARY_OUT}\n")
 
     import datetime as _dt
     today = _dt.date.today().isoformat()

@@ -245,7 +245,12 @@ def _set_task_marker(data_root: str, rel_path: str, text: str, marker: str, summ
     match) and auto-apply via md_editor (no confirm gate — the click itself is
     the confirmation). Returns False if no exact match is found (e.g. file
     changed since the list was fetched) or the edit fails validation."""
-    abs_path = Path(data_root) / rel_path
+    # Resolve before reading: the write below is validated by md_editor anyway,
+    # but the read used to happen first, on the raw caller-supplied path.
+    found = md_editor.corpus_md_path(data_root, rel_path)
+    if not found:
+        return False
+    abs_path, rel_path = Path(found[0]), found[1]
     if not abs_path.is_file():
         return False
 
@@ -457,7 +462,10 @@ def promote_task(data_root: str, rel_path: str, text: str, conn) -> str | None:
     clicked from may be stale). Returns "added", "removed", or None if the
     source line isn't found or a write fails.
     """
-    abs_path = Path(data_root) / rel_path
+    found = md_editor.corpus_md_path(data_root, rel_path)
+    if not found:
+        return None
+    abs_path, rel_path = Path(found[0]), found[1]
     if not abs_path.is_file():
         return None
     content = abs_path.read_text(encoding="utf-8", errors="replace")

@@ -295,6 +295,111 @@ def test_structured_invalid_path(client, monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Absolute paths — the guard and the file open must agree on the path
+# (sandbox finding 2026-11-16: the guard stripped the leading "/" and checked
+# <root>/abs/path.md, then project_editor opened /abs/path.md itself)
+# ---------------------------------------------------------------------------
+
+_SECRET = "OUTSIDE-THE-CORPUS-SECRET"
+
+
+def _rooted(path) -> str:
+    """Absolute path as a client would send it: forward slashes, no drive letter."""
+    return "/" + path.resolve().as_posix().split(":", 1)[-1].lstrip("/")
+
+
+def _corpus_and_outside(tmp_path, name):
+    root = tmp_path / name / "corpus"
+    (root / "SMTW").mkdir(parents=True)
+    (root / "SMTW" / "alpha.md").write_text(_PROJECT_MD, encoding="utf-8")
+    outside = tmp_path / name / "elsewhere" / "notes.md"
+    outside.parent.mkdir(parents=True)
+    outside.write_text(
+        f"---\nstatus: active\n---\n# Outside\n\n## Tasks\n- [ ] {_SECRET}\n\n## Notes\n{_SECRET}\n",
+        encoding="utf-8",
+    )
+    return root, outside
+
+
+@pytest.mark.parametrize("spell", [
+    lambda p: _rooted(p),
+    lambda p: "/" + _rooted(p),
+    lambda p: _rooted(p).replace("/", "\\"),
+    lambda p: str(p),
+])
+def test_structured_refuses_absolute_path_outside_corpus(client, monkeypatch, tmp_path, spell):
+    import config
+    root, outside = _corpus_and_outside(tmp_path, "abs1")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.get("/api/projects/structured", query_string={"path": spell(outside)})
+    assert resp.status_code in (400, 404)
+    assert _SECRET not in resp.get_data(as_text=True)
+
+
+def test_structured_refuses_absolute_path_into_db_dir(client, monkeypatch, tmp_path):
+    """db/ is reserved; spelling it as an absolute path must not get around that."""
+    import config
+    root, _ = _corpus_and_outside(tmp_path, "abs2")
+    (root / "db").mkdir()
+    (root / "db" / "leak.md").write_text(f"# internal\n\n## Notes\n{_SECRET}\n", encoding="utf-8")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+
+    resp = client.get("/api/projects/structured", query_string={"path": _rooted(root / "db" / "leak.md")})
+    assert resp.status_code in (400, 404)
+    assert _SECRET not in resp.get_data(as_text=True)
+
+
+def test_editor_write_routes_refuse_absolute_path(client, monkeypatch, tmp_path):
+    import config
+    root, outside = _corpus_and_outside(tmp_path, "abs3")
+    monkeypatch.setattr(config, "USER_DATA_ROOT", str(root))
+    before = outside.read_text(encoding="utf-8")
+    p = _rooted(outside)
+
+    calls = [
+        ("post", "/api/projects/tasks", {"path": p, "action": "add", "text": "x"}),
+        ("post", "/api/projects/tasks", {"path": p, "action": "remove", "old_line": f"- [ ] {_SECRET}"}),
+        ("put", "/api/projects/section", {"path": p, "heading": "Notes", "text": "x"}),
+        ("post", "/api/projects/list-item", {"path": p, "section": "Decisions", "action": "add", "text": "x"}),
+        ("put", "/api/projects/status", {"path": p, "status": "archived"}),
+    ]
+    for method, url, body in calls:
+        resp = getattr(client, method)(url, json=body)
+        assert resp.status_code in (400, 404), url
+    assert outside.read_text(encoding="utf-8") == before
+
+
+def test_project_editor_never_opens_a_path_outside_the_root(tmp_path):
+    """Defence in depth: the helpers hold the line even if a route forgets to."""
+    import project_editor
+    import task_scan
+    root, outside = _corpus_and_outside(tmp_path, "abs4")
+    p = _rooted(outside)
+
+    assert project_editor.parse_structured(str(root), p) is None
+    assert project_editor.parse_structured(str(root), "../elsewhere/notes.md") is None
+    assert project_editor.add_task(str(root), p, "x", None, None, None) is False
+    assert project_editor.set_status(str(root), p, "archived", None) is None
+    assert task_scan.toggle_task(str(root), p, _SECRET, None) is False
+    assert task_scan.promote_task(str(root), p, _SECRET, None) is None
+    # ...and a normal relative path still works.
+    assert project_editor.parse_structured(str(root), "SMTW/alpha.md")["rel_path"] == "SMTW/alpha.md"
+
+
+def test_corpus_md_path_returns_what_it_checked(tmp_path):
+    import md_editor
+    root = tmp_path / "abs5"
+    (root / "SMTW").mkdir(parents=True)
+
+    abs_path, rel = md_editor.corpus_md_path(str(root), "/SMTW\\alpha.md")
+    assert rel == "SMTW/alpha.md"
+    assert os.path.normpath(abs_path) == os.path.normpath(str(root / "SMTW" / "alpha.md"))
+    for bad in ("", "../x.md", "db/x.md", ".git/x.md", "SMTW/x.txt", "SMTW/-x.md", "SMTW/a\x00.md", None):
+        assert md_editor.corpus_md_path(str(root), bad) is None
+
+
+# ---------------------------------------------------------------------------
 # POST /api/projects/tasks
 # ---------------------------------------------------------------------------
 

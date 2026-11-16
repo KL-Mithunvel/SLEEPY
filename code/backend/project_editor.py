@@ -126,11 +126,25 @@ def _build_task_line(
 
 
 # ---------------------------------------------------------------------------
+# Path resolution
+# ---------------------------------------------------------------------------
+
+def _resolve(data_root: str, rel_path: str) -> tuple[str | None, str | None]:
+    """(abs_path, norm_rel) for a corpus .md path, or (None, None) if it leaves
+    the corpus. Every function below opens the returned abs_path and passes the
+    returned rel on, so what was checked is what gets read and written."""
+    found = md_editor.corpus_md_path(data_root, rel_path)
+    return found if found else (None, None)
+
+
+# ---------------------------------------------------------------------------
 # Read
 # ---------------------------------------------------------------------------
 
 def parse_structured(data_root: str, rel_path: str) -> dict | None:
-    abs_path = os.path.join(data_root, rel_path)
+    abs_path, rel_path = _resolve(data_root, rel_path)
+    if not abs_path:
+        return None
     try:
         content = open(abs_path, encoding="utf-8", errors="replace").read()
     except OSError:
@@ -206,8 +220,8 @@ def _apply_full_content(data_root: str, rel_path: str, new_content: str, summary
 # ---------------------------------------------------------------------------
 
 def add_task(data_root: str, rel_path: str, description: str, priority: str | None, due: str | None, conn) -> bool:
-    abs_path = os.path.join(data_root, rel_path)
-    if not os.path.isfile(abs_path):
+    abs_path, rel_path = _resolve(data_root, rel_path)
+    if not abs_path or not os.path.isfile(abs_path):
         return False
     content = open(abs_path, encoding="utf-8", errors="replace").read()
     section = _extract_section(content, "Tasks")
@@ -223,8 +237,8 @@ def edit_task(
     data_root: str, rel_path: str, old_line: str,
     description: str, done: bool, priority: str | None, due: str | None, conn,
 ) -> bool:
-    abs_path = os.path.join(data_root, rel_path)
-    if not os.path.isfile(abs_path):
+    abs_path, rel_path = _resolve(data_root, rel_path)
+    if not abs_path or not os.path.isfile(abs_path):
         return False
     lines = open(abs_path, encoding="utf-8", errors="replace").read().splitlines(keepends=True)
     target = old_line.strip()
@@ -248,8 +262,8 @@ def edit_task(
 
 
 def remove_task(data_root: str, rel_path: str, old_line: str, conn) -> bool:
-    abs_path = os.path.join(data_root, rel_path)
-    if not os.path.isfile(abs_path):
+    abs_path, rel_path = _resolve(data_root, rel_path)
+    if not abs_path or not os.path.isfile(abs_path):
         return False
     lines = open(abs_path, encoding="utf-8", errors="replace").read().splitlines(keepends=True)
     target = old_line.strip()
@@ -269,8 +283,8 @@ def remove_task(data_root: str, rel_path: str, old_line: str, conn) -> bool:
 def add_list_item(data_root: str, rel_path: str, heading: str, text: str, conn) -> bool:
     if heading not in _LIST_SECTIONS:
         return False
-    abs_path = os.path.join(data_root, rel_path)
-    if not os.path.isfile(abs_path):
+    abs_path, rel_path = _resolve(data_root, rel_path)
+    if not abs_path or not os.path.isfile(abs_path):
         return False
     content = open(abs_path, encoding="utf-8", errors="replace").read()
     section = _extract_section(content, heading)
@@ -285,8 +299,8 @@ def add_list_item(data_root: str, rel_path: str, heading: str, text: str, conn) 
 def remove_list_item(data_root: str, rel_path: str, heading: str, text: str, conn) -> bool:
     if heading not in _LIST_SECTIONS:
         return False
-    abs_path = os.path.join(data_root, rel_path)
-    if not os.path.isfile(abs_path):
+    abs_path, rel_path = _resolve(data_root, rel_path)
+    if not abs_path or not os.path.isfile(abs_path):
         return False
     content = open(abs_path, encoding="utf-8", errors="replace").read()
     section = _extract_section(content, heading)
@@ -306,8 +320,8 @@ def remove_list_item(data_root: str, rel_path: str, heading: str, text: str, con
 # ---------------------------------------------------------------------------
 
 def update_section_text(data_root: str, rel_path: str, heading: str, new_body: str, conn) -> bool:
-    abs_path = os.path.join(data_root, rel_path)
-    if not os.path.isfile(abs_path):
+    abs_path, rel_path = _resolve(data_root, rel_path)
+    if not abs_path or not os.path.isfile(abs_path):
         return False
     content = open(abs_path, encoding="utf-8", errors="replace").read()
     new_content = _replace_section_body(content, heading, new_body)
@@ -326,8 +340,8 @@ def set_status(data_root: str, rel_path: str, new_status: str, conn) -> str | No
     if new_status not in _VALID_STATUSES:
         return None
 
-    abs_path = os.path.join(data_root, rel_path)
-    if not os.path.isfile(abs_path):
+    abs_path, rel_path = _resolve(data_root, rel_path)
+    if not abs_path or not os.path.isfile(abs_path):
         return None
     content = open(abs_path, encoding="utf-8", errors="replace").read()
 

@@ -186,6 +186,11 @@ TRAVERSALS = [
     "db/leak.md", "./db/leak.md", "VIT/../db/leak.md", "DB/leak.md",
     "../../secrets_app.py", "..%2f..%2foutside.md", "....//....//outside.md",
     str(sb.SANDBOX / "outside.md"), "C:outside.md",
+    # Rooted absolute paths to a canary outside every dot-directory. A guard
+    # that strips the leading "/" before checking, while the code behind it
+    # opens the original string, passes these straight through.
+    sb.rooted(sb.ABS_OUTSIDE), "/" + sb.rooted(sb.ABS_OUTSIDE),
+    sb.rooted(sb.ABS_OUTSIDE).replace("/", "\\"), str(sb.ABS_OUTSIDE),
 ]
 
 
@@ -228,6 +233,32 @@ def t_task_oracle(tok):
     after = (sb.SANDBOX / "outside.md").read_text(encoding="utf-8")
     if f"- [x] {sb.CANARY_OUT}" in after or f"- [-] {sb.CANARY_OUT}" in after:
         report("VULN", "Task toggle modified a file outside the corpus")
+
+
+def t_absolute_path_editor_routes(tok):
+    """The structured-editor write routes take the same `path` as the read route."""
+    before = sb.ABS_OUTSIDE.read_text(encoding="utf-8")
+    p = sb.rooted(sb.ABS_OUTSIDE)
+    line = f"- [ ] {sb.CANARY_OUT}"
+    calls = (
+        ("POST", "/api/projects/tasks", {"path": p, "action": "add", "text": "PWNED"}),
+        ("POST", "/api/projects/tasks", {"path": p, "action": "remove", "old_line": line}),
+        ("POST", "/api/projects/tasks", {"path": p, "action": "edit", "old_line": line, "text": "PWNED"}),
+        ("PUT", "/api/projects/section", {"path": p, "heading": "Notes", "text": "PWNED"}),
+        ("POST", "/api/projects/list-item", {"path": p, "section": "Decisions", "action": "add", "text": "PWNED"}),
+        ("PUT", "/api/projects/status", {"path": p, "status": "archived"}),
+        ("POST", "/api/today/tasks/toggle", {"rel_path": p, "text": sb.CANARY_OUT}),
+        ("POST", "/api/today/tasks/cancel", {"rel_path": p, "text": sb.CANARY_OUT}),
+        ("POST", "/api/today/tasks/promote", {"rel_path": p, "text": sb.CANARY_OUT}),
+    )
+    hits = []
+    for method, route, body in calls:
+        s, text, _ = http(method, route, token=tok, body=body)
+        if s == 200 or leaked(text):
+            hits.append(f"{method} {route} -> {s}")
+    if sb.ABS_OUTSIDE.read_text(encoding="utf-8") != before:
+        hits.append("file outside the corpus was modified")
+    report("VULN" if hits else "BLOCKED", "Absolute path on editor/task write routes", "; ".join(hits))
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +332,7 @@ def main():
     t_traversal_reads(tok_owner)
     t_traversal_writes(tok_owner)
     t_task_oracle(tok_owner)
+    t_absolute_path_editor_routes(tok_owner)
     t_stored_xss(tok_owner)
     t_cors(tok_owner)
     t_body_limit(tok_owner)

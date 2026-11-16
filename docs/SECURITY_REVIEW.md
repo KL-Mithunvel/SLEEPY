@@ -280,3 +280,29 @@ done about them, all in the same pass:
 Still open / by design:
 - Dev runs Flask and the worker as two processes on one embedded Chroma directory (Chroma says unsupported). Documented in SETUP.md with the containerised alternative.
 - No TOTP second factor. The original requirement was for Keycloak-provided TOTP; with in-app auth it would need its own implementation.
+
+---
+
+## 5. Addendum — 2026-11-16 sandbox round 4: absolute-path read via the Projects structured routes
+
+**Severity:** medium (needs a valid login; any role, including `user`). **Status:** fixed on `main`, not yet deployed.
+
+**What was wrong.** `GET /api/projects/structured?path=...` checked one spelling of the path and opened another. The route's guard (`projects_bp._safe_project_abs`) stripped a leading `/` and validated `<data root>/abs/path.md`, which is inside the root and passes. The route then handed the *original* string to `project_editor.parse_structured`, which did `os.path.join(data_root, "/abs/path.md")`. `os.path.join` discards everything before an absolute component, so the file actually opened was `/abs/path.md`.
+
+**What an attacker could do.** Read any `.md` file the backend process can read, anywhere on the filesystem, parsed into JSON (frontmatter, sections, task lines). The same spelling also got past the `db/` rule, because the guard saw `<root>/<abs path>/db/x.md` and `db` was no longer the first path part. The write routes sharing the pattern (`/api/projects/tasks`, `/section`, `/list-item`, `/status`, `/api/today/tasks/toggle|cancel|promote`) read the outside file first and were only stopped afterwards by `md_editor.validate_path`, so nothing outside the corpus could be modified.
+
+**Proof (sandbox, before the fix).** Logged in as the low-privilege `limited` account:
+`GET /api/projects/structured?path=/Users/.../docs/RECOVERY.md` → 200 with the full file contents. `attack_http.py` reported `VULN Traversal read via GET /api/projects/structured` for the `/rooted` and `\rooted` spellings.
+
+**Why three earlier rounds missed it.** Every sandbox canary lived under `.sandbox/`, and the guards reject any path containing a dot-directory, so absolute paths to the canaries were refused for an unrelated reason. Production paths have no dot-directory in them.
+
+**Fix.**
+- `md_editor.corpus_md_path(base, rel_path)` resolves a caller-supplied path once and returns `(abs_path, norm_rel)`; callers open and pass on what it returns, never the input string.
+- `project_editor` (all eight entry points) and `task_scan._set_task_marker` / `promote_task` resolve through it before any read.
+- `projects_bp` routes use the normalised path the guard returned.
+- Sandbox: a new canary outside every dot-directory (`sandbox_env.ABS_OUTSIDE`), rooted spellings added to `TRAVERSALS`, and a new `t_absolute_path_editor_routes` check.
+- Regression tests in `tests/test_projects_bp.py` (route level, helper level, `db/` via absolute path).
+
+**Verified.** Backend tests 693 passed. `attack_http.py` against the fixed sandbox: 0 VULN.
+
+**Also noticed, not fixed (low).** `md_editor.scan_diff_for_secrets` skips diff lines starting with `+++` to ignore the file header, so a new content line that itself begins with `++` is never scanned for secrets.

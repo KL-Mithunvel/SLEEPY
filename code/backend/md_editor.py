@@ -161,6 +161,30 @@ def is_reserved_corpus_path(base: str, abs_path: str) -> bool:
     return any(p.startswith(".") and p not in (".", "..") for p in parts[:-1])
 
 
+def corpus_md_path(base: str, rel_path: str) -> tuple[str, str] | None:
+    """
+    Resolve a caller-supplied corpus path to `(abs_path, norm_rel)`, or None if
+    it is not a `.md` file location inside `base` that corpus code may touch
+    (outside the root, through a symlink, under db/ or a dot-directory).
+
+    Callers must open `abs_path` and pass `norm_rel` on — never the string they
+    were given. Checking one spelling and opening another is how
+    GET /api/projects/structured read any .md on the filesystem (found
+    2026-11-16): the route's guard stripped a leading "/" and validated
+    `<root>/etc/x.md`, then project_editor did os.path.join(root, "/etc/x.md"),
+    which discards the root and opens `/etc/x.md`.
+    """
+    if not isinstance(rel_path, str) or not rel_path.strip() or "\x00" in rel_path:
+        return None
+    root = os.path.normpath(base)
+    abs_path = os.path.normpath(os.path.join(root, rel_path.replace("\\", "/").lstrip("/")))
+    if not abs_path.startswith(root + os.sep) or not abs_path.endswith(".md"):
+        return None
+    if not is_within_root(root, abs_path) or is_reserved_corpus_path(root, abs_path):
+        return None
+    return abs_path, os.path.relpath(abs_path, root).replace(os.sep, "/")
+
+
 @contextlib.contextmanager
 def corpus_git_lock(data_root: str | None = None):
     """

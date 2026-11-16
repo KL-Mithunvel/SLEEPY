@@ -102,21 +102,26 @@ def _parse_project(rel_path: str) -> dict | None:
     }
 
 
-def _safe_project_abs(rel_path: str) -> str | None:
+def _safe_project(rel_path: str) -> tuple[str, str] | None:
     """
-    Return resolved absolute path only if it's inside USER_DATA_ROOT, ends in
+    (abs_path, norm_rel) only if the path is inside USER_DATA_ROOT, ends in
     .md, and isn't under db/ or a dot-directory (the listing already hides
     both; this stops a hand-built ?path= from reaching them anyway).
+
+    Routes must use what this returns, not the string the client sent — see
+    md_editor.corpus_md_path for the bug that checking-then-reusing caused.
     """
-    norm = os.path.normpath(
-        os.path.join(config.USER_DATA_ROOT, rel_path.replace("\\", "/").lstrip("/"))
-    )
-    root = os.path.normpath(config.USER_DATA_ROOT)
-    if (norm.startswith(root + os.sep) and norm.endswith(".md")
-            and md_editor.is_within_root(root, norm)
-            and not md_editor.is_reserved_corpus_path(root, norm)):
-        return norm
-    return None
+    return md_editor.corpus_md_path(config.USER_DATA_ROOT, rel_path)
+
+
+def _safe_project_abs(rel_path: str) -> str | None:
+    found = _safe_project(rel_path)
+    return found[0] if found else None
+
+
+def _safe_project_rel(rel_path: str) -> str | None:
+    found = _safe_project(rel_path)
+    return found[1] if found else None
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +189,8 @@ def save_project_content():
 @projects_bp.get("/api/projects/structured")
 @require_perm("projects:read")
 def project_structured():
-    rel = (request.args.get("path") or "").strip()
-    if not rel or not _safe_project_abs(rel):
+    rel = _safe_project_rel((request.args.get("path") or "").strip())
+    if not rel:
         return jsonify({"error": "Invalid path"}), 400
 
     data = project_editor.parse_structured(config.USER_DATA_ROOT, rel)
@@ -200,9 +205,9 @@ def project_tasks():
     from app import get_db
 
     body = request.get_json(silent=True) or {}
-    rel = (body.get("path") or "").strip()
+    rel = _safe_project_rel((body.get("path") or "").strip())
     action = (body.get("action") or "").strip()
-    if not rel or not _safe_project_abs(rel):
+    if not rel:
         return jsonify({"error": "Invalid path"}), 400
 
     db = get_db()
@@ -240,11 +245,11 @@ def project_list_item():
     from app import get_db
 
     body = request.get_json(silent=True) or {}
-    rel = (body.get("path") or "").strip()
+    rel = _safe_project_rel((body.get("path") or "").strip())
     heading = (body.get("section") or "").strip()
     action = (body.get("action") or "").strip()
     text = (body.get("text") or "").strip()
-    if not rel or not _safe_project_abs(rel):
+    if not rel:
         return jsonify({"error": "Invalid path"}), 400
     if not text:
         return jsonify({"error": "text is required"}), 400
@@ -268,10 +273,10 @@ def project_section():
     from app import get_db
 
     body = request.get_json(silent=True) or {}
-    rel = (body.get("path") or "").strip()
+    rel = _safe_project_rel((body.get("path") or "").strip())
     heading = (body.get("heading") or "").strip()
     text = body.get("text", "")
-    if not rel or not _safe_project_abs(rel):
+    if not rel:
         return jsonify({"error": "Invalid path"}), 400
     if not heading:
         return jsonify({"error": "heading is required"}), 400
@@ -289,9 +294,9 @@ def project_status():
     from app import get_db
 
     body = request.get_json(silent=True) or {}
-    rel = (body.get("path") or "").strip()
+    rel = _safe_project_rel((body.get("path") or "").strip())
     status = (body.get("status") or "").strip()
-    if not rel or not _safe_project_abs(rel):
+    if not rel:
         return jsonify({"error": "Invalid path"}), 400
 
     db = get_db()
