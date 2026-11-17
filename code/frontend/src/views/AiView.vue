@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick, watch } from 'vue'
+import { ref, nextTick, watch, onMounted } from 'vue'
 import { useAiStore } from '../stores/ai.js'
 import { renderMd } from '../mdRender.js'
 import EditWarnings from '../components/EditWarnings.vue'

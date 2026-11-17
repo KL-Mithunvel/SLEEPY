@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { apiPost, apiStream } from '../api.js'
+import { apiGet, apiPost, apiStream } from '../api.js'
 
 // A staged action's op ('write' | 'move' | 'delete') decides which fields it
 // carries (rel_path vs. src_path/dst_path) and how to describe it in chat.
@@ -140,6 +140,25 @@ export const useAiStore = defineStore('ai', {
         this.error = e.message
       } finally {
         this.loading = false
+      }
+    },
+
+    // Proposals staged outside this chat (mainly by a connected AI app) that nobody
+    // has applied or discarded yet. Shown as the same Apply/Discard cards.
+    async loadPending() {
+      try {
+        const { pending } = await apiGet('/api/ai/pending')
+        const shown = new Set(this.messages.filter(m => m.edit).map(m => m.edit.event_id))
+        for (const action of pending || []) {
+          if (shown.has(action.event_id)) continue
+          const { content, historyContent } = describeStagedAction(action)
+          this.messages.push({
+            role: 'assistant', type: 'edit', content, historyContent,
+            edit: action, settled: false, confirmed: false,
+          })
+        }
+      } catch (e) {
+        // Non-critical: the chat works without the pending list.
       }
     },
 

@@ -3,9 +3,33 @@
 *Started 2026-10-26.* Lets an AI app (Claude mobile first; ChatGPT later) work with the
 user's to-do list through a **remote MCP server** at `https://klm.smtw.in/mcp`.
 
-## Scope — deliberately narrow
+## Update 2026-11-17 — notes access + grill-me (supersedes "to-do only" below)
 
-The connector is a **to-do front door, not a second copy of the app.** External apps get a fixed
+The user widened the scope after the first real connect attempt (Claude could see a `SMTW/weather-station.md`
+project existed but could not read it). Two new OAuth scopes, each with its **own tick-box on the consent page**
+(default ticked; `corpus:propose` is dropped if `corpus:read` is unticked):
+
+| Tool | Scope | Does |
+|---|---|---|
+| `list_files`, `read_file`, `grep`, `search_corpus` | `corpus:read` | Thin wrappers over the **chat tools' own handlers** (`tools_registry`), so the path guards (inside root, no `db/`/dot-dirs, `.md` only, symlink-safe), grep timeout and untrusted-text labelling are the same code |
+| `propose_write`, `propose_move`, `propose_delete` | `corpus:propose` | **Stage only.** Creates a pending `ai_events` row (secret scan + validation as in chat). The connector cannot apply it: `/api/*` rejects connector tokens and no tool applies. The user presses Apply in the web UI (AI view loads `GET /api/ai/pending` cards, flagged "Proposed by a connected AI app"). Summary carries the `[via connector] ` prefix, which is how the UI recognises the origin. Counts against the 60/hour write budget |
+
+Still **not reachable:** news feed, morning briefing, email, admin, direct (unconfirmed) writes.
+Trade-off accepted by the user: a read grant puts the whole corpus (incl. `inbox.md`, which holds web-sourced
+news lines) in front of the external app's model, so a prompt-injected app can read and *propose*, never *apply*.
+
+**Grill-me over MCP:** `initialize.instructions` carries an always-on "ask, don't guess" rule (ONE question,
+2–4 options from real data, last option "something else"), and the server offers an MCP prompt `grill_me`
+(`prompts/list`, `prompts/get`) for an explicit interview. The server is stateless/JSON-only, so it cannot
+ask the user itself — the client's model does the asking. Web chat equivalent: the `ask_user` tool renders
+buttons + a type-your-own box (`SystemPrompt.MD` "When Uncertain").
+
+**Existing grants don't widen:** a refresh can't add scopes, so re-approve the connector to get the notes tools.
+`tooling/sandbox/attack_mcp.py` now has `t_notes_access` (167 checks, 0 VULN); `test_mcp_corpus.py` has the unit tests.
+
+## Scope — original design (to-do only; kept for history)
+
+The connector was first built as a **to-do front door, not a second copy of the app.** External apps got a fixed
 list of tools and nothing else:
 
 | Tool | Scope | Does |

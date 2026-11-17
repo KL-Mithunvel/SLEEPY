@@ -22,6 +22,7 @@ from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
 import ai_client
 import llm
+import mcp_tools
 import md_editor
 import md_indexer
 import skills
@@ -350,6 +351,53 @@ def edit_propose():
 # ---------------------------------------------------------------------------
 # AI MD edit — confirm / reject
 # ---------------------------------------------------------------------------
+
+_PENDING_MAX_AGE_DAYS = 14
+_CONNECTOR_WARNING = (
+    "Proposed by a connected AI app (e.g. Claude on your phone). That app may have read other "
+    "content before proposing this — make sure it is a change you asked for."
+)
+
+
+def _pending_action(row) -> dict | None:
+    """Rebuild the card payload for one unsettled proposal from its stored JSON."""
+    try:
+        p = json.loads(row["diff"])
+    except (TypeError, ValueError):
+        return None
+    eid, summary = row["id"], p.get("summary", "")
+    if row["event_type"] == "md_move":
+        action = {"event_id": eid, "op": "move", "src_path": p.get("src_rel"),
+                  "dst_path": p.get("dst_rel"), "diff": p.get("diff", ""), "summary": summary}
+    elif row["event_type"] == "md_delete":
+        action = {"event_id": eid, "op": "delete", "rel_path": p.get("rel_path"),
+                  "diff": p.get("diff", ""), "summary": summary}
+    else:
+        action = {"event_id": eid, "op": "write", "rel_path": p.get("rel_path"),
+                  "diff": p.get("diff", ""), "summary": summary, "is_new": p.get("base_hash") is None}
+    action["warnings"] = action_warnings(action, False)
+    if summary.startswith(mcp_tools.CONNECTOR_SUMMARY_PREFIX):
+        action["summary"] = summary[len(mcp_tools.CONNECTOR_SUMMARY_PREFIX):]
+        action["warnings"].insert(0, _CONNECTOR_WARNING)
+    return action
+
+
+@ai_bp.get("/api/ai/pending")
+@require_perm("ai:edit_md")
+def pending_edits():
+    """Proposals nobody has applied or discarded yet — chiefly ones a connected app staged."""
+    rows = _db().execute(
+        """
+        SELECT id, event_type, diff FROM ai_events
+        WHERE event_type IN ('md_edit', 'md_move', 'md_delete')
+          AND accepted IS NULL AND voided = 0
+          AND created_at >= datetime('now', 'localtime', ?)
+        ORDER BY id DESC LIMIT 20
+        """,
+        (f"-{_PENDING_MAX_AGE_DAYS} days",),
+    ).fetchall()
+    return jsonify({"pending": [a for a in map(_pending_action, rows) if a]})
+
 
 @ai_bp.post("/api/ai/edit/<int:event_id>/confirm")
 @require_perm("ai:edit_md")

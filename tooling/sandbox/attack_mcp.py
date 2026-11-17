@@ -95,11 +95,15 @@ def refresh_target(body: str) -> str | None:
     return html.unescape(m.group(1)) if m else None
 
 
-def approve(cid, challenge, *, user="owner", password=None, write=True, ip=None, **over):
+def approve(cid, challenge, *, user="owner", password=None, write=True, notes=False, propose=False, ip=None, **over):
     form = auth_form(cid, challenge, **over)
     form.update({"username": user, "password": password or sb.USERS[user][0], "action": "approve"})
     if write:
         form["allow_write"] = "1"
+    if notes:
+        form["allow_notes"] = "1"
+    if propose:
+        form["allow_propose"] = "1"
     return http("POST", "/oauth/authorize", form=form, ip=ip)
 
 
@@ -120,12 +124,12 @@ def exchange(cid, code, verifier, **over):
 _PRIMARY: list[str] = []
 
 
-def grant(write=True) -> tuple[str, dict]:
+def grant(write=True, notes=False, propose=False) -> tuple[str, dict]:
     if not _PRIMARY:                      # one registered client reused for every grant
         _PRIMARY.append(new_client())
     cid = _PRIMARY[0]
     verifier, challenge = pkce()
-    s, b, _ = approve(cid, challenge, write=write)
+    s, b, _ = approve(cid, challenge, write=write, notes=notes, propose=propose)
     code = code_from(b)
     assert code, f"no code: {s} {b[:200]}"
     s, b, _ = exchange(cid, code, verifier)
@@ -322,7 +326,7 @@ def t_tool_surface():
                  "get_briefing", "get_news", "send_email", "run_command", "load_skill"):
         s, body = call(t["access_token"], tool, path="ABOUT.md", query="CANARY")
         check("error" in body and s == 200, f"Call non-existent tool {tool}", f"-> {str(body.get('error'))[:60]}")
-    for method in ("resources/list", "resources/read", "prompts/list", "completion/complete", "logging/setLevel", "sampling/createMessage"):
+    for method in ("resources/list", "resources/read", "completion/complete", "logging/setLevel", "sampling/createMessage"):
         s, b, _ = rpc(t["access_token"], method, {"uri": "file:///etc/passwd"})
         check("error" in json.loads(b), f"MCP method {method}", b[:60])
 
@@ -336,6 +340,62 @@ def t_read_tools_do_not_leak():
         check(hit is None, f"{tool} output contains no canary or project body text", hit or "clean")
     s, body = call(t["access_token"], "get_today", path="../../outside.md")
     check(body.get("result", {}).get("isError") is True, "get_today rejects unexpected arguments")
+
+
+def t_notes_access():
+    """corpus:read / corpus:propose — the widest surface the connector has. Proposals must only STAGE."""
+    # 1. A tasks-only grant (the default consent ticks) can't see any notes tool.
+    _, t = grant()
+    s, body = call(t["access_token"], "read_file", path="VIT/secret-project.md")
+    check("error" in body, "Tasks-only grant cannot call read_file")
+    s, body = call(t["access_token"], "propose_write", path="x.md", content="x", summary="x")
+    check("error" in body, "Tasks-only grant cannot call propose_write")
+
+    # 2. A read grant can read notes but not stage, and cannot escape the corpus.
+    _, t = grant(write=False, notes=True)
+    tok = t["access_token"]
+    s, body = call(tok, "read_file", path="VIT/secret-project.md")
+    check(sb.CANARY_IN in json.dumps(body), "Read grant can read an in-corpus note (intended)")
+    s, body = call(tok, "propose_write", path="x.md", content="x", summary="x")
+    check("error" in body, "Read-only grant cannot stage edits")
+    for bad in ("../outside.md", "..\\..\\outside.md", str(sb.SANDBOX / "outside.md"), "../../sibling.md",
+                "db/leak.md", ".git/config", "VIT/../../outside.md", "%2e%2e/outside.md", "ABOUT.md\x00.txt",
+                "../secrets_app.py"):
+        s, body = call(tok, "read_file", path=bad)
+        text = json.dumps(body)
+        check(leaked(text) in (None, sb.CANARY_IN) and sb.CANARY_OUT not in text and sb.CANARY_DB not in text
+              and sb.CANARY_SRC not in text, f"read_file refuses {bad!r}")
+    s, body = call(tok, "grep", pattern=".*")
+    text = json.dumps(body)
+    check(sb.CANARY_OUT not in text and sb.CANARY_DB not in text and sb.CANARY_SRC not in text,
+          "grep '.*' never surfaces outside-root, db/ or backend-secret canaries")
+    s, body = call(tok, "list_files")
+    check("leak.md" not in json.dumps(body) and "db/" not in json.dumps(body) and leaked(json.dumps(body)) is None,
+          "list_files hides db/ files and shows no canary")
+    s, body = call(tok, "grep", pattern="(a+)+$" )
+    check(s == 200, "Catastrophic-backtracking regex does not hang the server")
+
+    # 3. A propose grant stages but never writes, and cannot apply.
+    _, t = grant(write=False, notes=True, propose=True)
+    tok = t["access_token"]
+    target = sb.USER_ROOT / "VIT" / "secret-project.md"
+    before = target.read_text(encoding="utf-8")
+    s, body = call(tok, "propose_write", path="VIT/secret-project.md", content="# wiped\n", summary="x")
+    check(target.read_text(encoding="utf-8") == before, "propose_write leaves the file untouched")
+    s, body = call(tok, "propose_delete", path="VIT/secret-project.md", summary="x")
+    check(target.exists(), "propose_delete leaves the file in place")
+    for bad in ("../outside.md", "db/evil.md", ".git/hooks/pre-commit", "x.txt", "ABOUT.md/../../outside.md"):
+        s, body = call(tok, "propose_write", path=bad, content="x", summary="x")
+        check(body.get("result", {}).get("isError") is True, f"propose_write refuses {bad!r}")
+    s, body = call(tok, "propose_write", path="VIT/new.md", content="key: sk-ant-api03-" + "A" * 40, summary="x")
+    check(body.get("result", {}).get("isError") is True, "propose_write blocks an embedded secret")
+    # The connector must have no route to Apply: /api/* rejects its token, and no tool applies.
+    s, b, _ = http("POST", "/api/ai/edit/1/confirm", headers={"Authorization": f"Bearer {tok}"}, json_body={})
+    check(s in (401, 403), "Connector token cannot call /api/ai/edit/<id>/confirm", f"-> {s}")
+    s, b, _ = http("GET", "/api/ai/pending", headers={"Authorization": f"Bearer {tok}"})
+    check(s in (401, 403), "Connector token cannot list pending proposals", f"-> {s}")
+    check(target.read_text(encoding="utf-8") == before and not (sb.USER_ROOT / "VIT" / "new.md").exists(),
+          "Nothing was written by any staged proposal")
 
 
 def corpus_snapshot() -> dict:
@@ -376,7 +436,7 @@ def t_write_tool_abuse():
     for pl in payloads:
         call(tok, "add_task", task=pl, project="VIT/secret-project.md")
         call(tok, "capture", text=pl)
-    daily = next(p for p in (sb.USER_ROOT / "VIT" / "Daily").glob("*.md"))
+    daily = sb.USER_ROOT / "VIT" / "Daily" / f"{__import__('datetime').date.today():%Y-%m-%d}.md"
     d_text, i_text = daily.read_text(encoding="utf-8"), (sb.USER_ROOT / "inbox.md").read_text(encoding="utf-8")
     heading_lines = [ln for txt in (d_text, i_text) for ln in txt.splitlines() if ln.startswith("# New") or ln.startswith("## Tasks") and txt is i_text]
     check(not heading_lines, "Newline-injected headings never reach the corpus as their own line", str(heading_lines[:2]))
@@ -544,6 +604,7 @@ def main():
     t_scope_enforcement()
     t_tool_surface()
     t_read_tools_do_not_leak()
+    t_notes_access()
     t_write_tool_abuse()
     t_argument_fuzz()
     t_batch_amplification()

@@ -154,7 +154,7 @@ def test_protected_resource_metadata_both_paths(client):
         m = client.get(path).get_json()
         assert m["resource"] == RESOURCE
         assert m["authorization_servers"] == ["http://localhost:5000"]
-        assert set(m["scopes_supported"]) == {"tasks:read", "tasks:write"}
+        assert set(m["scopes_supported"]) == {"tasks:read", "tasks:write", "corpus:read", "corpus:propose"}
 
 
 def test_metadata_ignores_spoofed_host_header(client):
@@ -226,7 +226,8 @@ def test_consent_page_shows_app_and_destination(client):
     page = resp.get_data(as_text=True)
     assert resp.status_code == 200
     assert "My Claude" in page and "claude.ai" in page
-    assert "will not be able to see your notes, news, briefings or files" in page
+    assert "will not be able to see news, briefings or send email" in page
+    assert "Allow reading my notes" in page and "I approve each one in SLEEPY" in page
     assert resp.headers["X-Frame-Options"] == "DENY"
     assert "no-store" in resp.headers["Cache-Control"]
     assert "frame-ancestors 'none'" in resp.headers["Content-Security-Policy"]

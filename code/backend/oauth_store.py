@@ -34,7 +34,7 @@ from urllib.parse import urlsplit
 
 import config
 
-SUPPORTED_SCOPES = ("tasks:read", "tasks:write")
+SUPPORTED_SCOPES = ("tasks:read", "tasks:write", "corpus:read", "corpus:propose")
 _FMT = "%Y-%m-%d %H:%M:%S"
 _CHALLENGE_RE = re.compile(r"^[A-Za-z0-9_\-]{43,128}$")
 _VERIFIER_RE = re.compile(r"^[A-Za-z0-9\-._~]{43,128}$")

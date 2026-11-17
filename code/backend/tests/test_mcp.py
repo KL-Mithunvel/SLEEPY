@@ -101,7 +101,7 @@ def test_bad_json_is_parse_error(client, mcp_on):
 def test_initialize_echoes_supported_version(client, mcp_on):
     r = rpc(client, "initialize", {"protocolVersion": "2025-03-26"}).get_json()["result"]
     assert r["protocolVersion"] == "2025-03-26"
-    assert r["capabilities"] == {"tools": {"listChanged": False}}
+    assert r["capabilities"] == {"tools": {"listChanged": False}, "prompts": {"listChanged": False}}
     assert r["serverInfo"]["name"] == "sleepy"
 
 
@@ -154,13 +154,17 @@ def test_batch_at_the_cap_is_served(client, mcp_on):
 # Tool surface
 # ---------------------------------------------------------------------------
 
-def test_tools_list_is_exactly_the_five_todo_tools(client, mcp_on):
+def test_tools_list_is_exactly_the_expected_tools(client, mcp_on):
     tools = rpc(client, "tools/list").get_json()["result"]["tools"]
-    assert {t["name"] for t in tools} == {"get_today", "list_projects", "add_task", "capture", "toggle_task"}
+    assert {t["name"] for t in tools} == {
+        "get_today", "list_projects", "add_task", "capture", "toggle_task",
+        "list_files", "read_file", "grep", "search_corpus",
+        "propose_write", "propose_move", "propose_delete",
+    }
     for t in tools:
         assert t["inputSchema"]["additionalProperties"] is False
         assert t["annotations"]["destructiveHint"] is False
-        assert t["annotations"]["readOnlyHint"] is (t["name"] in {"get_today", "list_projects"})
+        assert t["annotations"]["readOnlyHint"] is (t["name"] in {"get_today", "list_projects", "list_files", "read_file", "grep", "search_corpus"})
 
 
 def test_read_scope_alone_sees_only_read_tools():
@@ -183,12 +187,14 @@ def test_every_tool_declares_a_known_scope():
 
 
 def test_unknown_tool_is_invalid_params(client, mcp_on):
-    r = rpc(client, "tools/call", {"name": "read_file", "arguments": {"path": "ABOUT.md"}}).get_json()
+    r = rpc(client, "tools/call", {"name": "write_file", "arguments": {"path": "ABOUT.md", "content": "x"}}).get_json()
     assert r["error"]["code"] == -32602
 
 
-def test_no_file_or_search_tools_exist():
-    forbidden = {"read_file", "write_file", "grep", "search", "move_file", "delete_file", "news", "get_briefing"}
+def test_no_direct_write_news_or_briefing_tools_exist():
+    # Notes access was added 2026-11-17 (read + STAGED proposals, see test_mcp_corpus.py). What must
+    # never exist: a tool that writes directly, or exposes news / the briefing (both carry web text).
+    forbidden = {"write_file", "move_file", "delete_file", "search", "news", "get_briefing", "send_email"}
     assert forbidden.isdisjoint(mcp_tools.TOOLS)
 
 

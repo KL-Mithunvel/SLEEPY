@@ -266,14 +266,18 @@ button.go{background:#3b6fd4;border-color:#3b6fd4;color:#fff} .err{background:#3
 <ul>
  <li>See today's tasks and your project names</li>
  {% if can_write %}<li>Add tasks, mark tasks done and save quick notes</li>{% endif %}
+ {% if can_read_notes %}<li>Read and search your notes and project files</li>{% endif %}
+ {% if can_propose %}<li>Propose edits, moves and deletes to your notes. Nothing changes until you press Apply in SLEEPY.</li>{% endif %}
 </ul>
-<p class="no">It will not be able to see your notes, news, briefings or files. You can revoke it at any time.</p>
+<p class="no">It will not be able to see news, briefings or send email. Your notes are shared with that app's AI, so only approve apps you trust. You can revoke it at any time.</p>
 {% if error %}<div class="err" role="alert">{{ error }}</div>{% endif %}
 <form method="post" action="/oauth/authorize" autocomplete="on">
  {% for name, value in hidden.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
  <label for="u">Username</label><input id="u" name="username" type="text" autocomplete="username" autocapitalize="none" required maxlength="64" value="{{ username }}">
  <label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required>
- {% if can_write %}<div class="check"><input id="w" name="allow_write" type="checkbox" value="1" checked><label for="w" style="margin:0">Allow changes (add tasks, mark done, quick notes). Untick for read-only.</label></div>{% endif %}
+ {% if can_write %}<div class="check"><input id="w" name="allow_write" type="checkbox" value="1" checked><label for="w" style="margin:0">Allow to-do changes (add tasks, mark done, quick notes).</label></div>{% endif %}
+ {% if can_read_notes %}<div class="check"><input id="n" name="allow_notes" type="checkbox" value="1" checked><label for="n" style="margin:0">Allow reading my notes and project files.</label></div>{% endif %}
+ {% if can_propose %}<div class="check"><input id="x" name="allow_propose" type="checkbox" value="1" checked><label for="x" style="margin:0">Allow proposing note edits (I approve each one in SLEEPY).</label></div>{% endif %}
  <div class="row"><button type="submit" name="action" value="deny" formnovalidate>Deny</button><button class="go" type="submit" name="action" value="approve">Approve</button></div>
 </form></main></body></html>"""
 
@@ -284,6 +288,8 @@ def _consent(ctx: dict, error: str | None = None, status: int = 200, username: s
         client_name=ctx["client"]["client_name"],
         host=urlsplit(ctx["redirect_uri"]).netloc,
         can_write="tasks:write" in ctx["scopes"],
+        can_read_notes="corpus:read" in ctx["scopes"],
+        can_propose="corpus:propose" in ctx["scopes"],
         hidden=ctx["hidden"], error=error, username=username,
     ), status)
 
@@ -334,7 +340,11 @@ def authorize_post():
         return _consent(ctx, "Invalid credentials.", 401, username)
     _log_attempt(conn, username, True)
 
-    scopes = [s for s in ctx["scopes"] if s != "tasks:write" or request.form.get("allow_write") == "1"]
+    # Each non-default capability needs its own ticked box on the consent page.
+    gated = {"tasks:write": "allow_write", "corpus:read": "allow_notes", "corpus:propose": "allow_propose"}
+    scopes = [s for s in ctx["scopes"] if s not in gated or request.form.get(gated[s]) == "1"]
+    if "corpus:propose" in scopes and "corpus:read" not in scopes:
+        scopes.remove("corpus:propose")  # can't propose edits to notes the app may not read
     if not scopes:
         return _redirect_page(ctx["redirect_uri"], {"error": "access_denied", "state": ctx["state"]})
 
