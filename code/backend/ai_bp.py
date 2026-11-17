@@ -415,7 +415,9 @@ def chat_endpoint():
         try:
             system_blocks = _build_system(last_user_msg, ou)
             staged_by_tools: list = []
-            llm_tools = tools_registry.build_tools(conn=db, staged_actions=staged_by_tools)
+            asked: list = []
+            llm_tools = tools_registry.build_tools(
+                conn=db, staged_actions=staged_by_tools, questions=asked)
             result = None
 
             # Did web-sourced text reach the model this turn? Block 0 is
@@ -476,6 +478,7 @@ def chat_endpoint():
                         for tc in result.tool_calls
                     ],
                     "actions": actions,
+                    "question": asked[0] if asked else None,
                 }
                 yield f"data: {json.dumps({'type': 'done', 'result': done_payload})}\n\n"
 

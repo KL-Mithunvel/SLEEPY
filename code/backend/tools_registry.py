@@ -53,9 +53,56 @@ def _is_allowed_email_recipient(to: str) -> bool:
     return to.endswith(_ALLOWED_EMAIL_DOMAIN)
 
 
-def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
+MAX_QUESTION_LEN = 300
+MAX_OPTION_LEN = 120
+MIN_OPTIONS, MAX_OPTIONS = 2, 4
+
+
+def clean_question(inp: dict) -> dict:
+    """
+    Validate an `ask_user` call into {"question", "options"}. Raises ValueError
+    with a message the model can act on. The UI appends its own final "type your
+    own answer" choice, so the model is told never to add one itself.
+    """
+    question = " ".join(str(inp.get("question") or "").split())
+    if not question:
+        raise ValueError("question must not be empty")
+    if len(question) > MAX_QUESTION_LEN:
+        raise ValueError(f"question is too long (max {MAX_QUESTION_LEN} characters)")
+    raw = inp.get("options")
+    if not isinstance(raw, list):
+        raise ValueError("options must be a list of short strings")
+    options: list[str] = []
+    for item in raw:
+        text = " ".join(str(item).split())
+        if not text:
+            continue
+        if len(text) > MAX_OPTION_LEN:
+            raise ValueError(f"each option must be at most {MAX_OPTION_LEN} characters")
+        if text.casefold() not in {o.casefold() for o in options}:
+            options.append(text)
+    if not MIN_OPTIONS <= len(options) <= MAX_OPTIONS:
+        raise ValueError(f"give between {MIN_OPTIONS} and {MAX_OPTIONS} distinct options")
+    return {"question": question, "options": options}
+
+
+def build_tools(conn, staged_actions: list | None = None,
+                questions: list | None = None) -> list[Tool]:
     data_root = config.USER_DATA_ROOT
     src_root = str(config.SRC_ROOT)
+
+    def h_ask_user(inp: dict) -> str:
+        try:
+            q = clean_question(inp)
+        except ValueError as e:
+            return f"[error: {e}]"
+        if questions is not None:
+            if questions:
+                return ("[error: you already asked a question this turn. One at a time — "
+                        "end your turn and wait for the answer.]")
+            questions.append(q)
+        return ("Question shown to the user as buttons. End your turn now with no further "
+                "text and no more tool calls — their answer arrives as the next message.")
 
     def _safe_path(base: str, rel_path: str) -> str:
         norm = rel_path.replace("\\", "/").lstrip("/")
@@ -262,6 +309,31 @@ def build_tools(conn, staged_actions: list | None = None) -> list[Tool]:
             return f"[error: {e}]"
 
     return [
+        Tool(
+            name="ask_user",
+            description=(
+                "Ask the user ONE clarifying question as clickable multiple-choice buttons. Use it "
+                "whenever you are not sure what they mean or where something belongs (see 'When "
+                "Uncertain'), instead of guessing or asking in prose. Give 2-4 concrete, mutually "
+                "exclusive options, most likely first. Do NOT add an 'other' option — the UI always "
+                "adds a final 'type my own answer' choice. After calling it, end your turn."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string", "description": "One short, specific question."},
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": MIN_OPTIONS,
+                        "maxItems": MAX_OPTIONS,
+                        "description": "2-4 distinct answers the user can click.",
+                    },
+                },
+                "required": ["question", "options"],
+            },
+            handler=h_ask_user,
+        ),
         Tool(
             name="load_skill",
             description="Load the full content of a named skill workflow (e.g. 'daily-review', 'weekly-review').",

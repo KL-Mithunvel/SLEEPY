@@ -7,6 +7,10 @@ import EditWarnings from '../components/EditWarnings.vue'
 const ai = useAiStore()
 const messagesEl = ref(null)
 const inputEl = ref(null)
+const ownAnswers = ref({})  // message index -> typed "my own answer" text
+
+// Changes a connected app (e.g. Claude on the phone) staged for approval.
+onMounted(() => ai.loadPending())
 
 function scrollToBottom() {
   nextTick(() => {
@@ -66,6 +70,7 @@ const TOOL_LABELS = {
   list_files:    'Listing files',
   search_corpus: 'Searching corpus',
   send_email:    'Sending email',
+  ask_user:      'Preparing a question',
 }
 
 function toolLabel(name) {
@@ -128,6 +133,42 @@ function toolLabel(name) {
             <!-- Text content -->
             <div v-if="msg.content" class="msg-content md-rendered" v-html="renderMd(msg.content)"></div>
             <span v-if="msg.content && msg.streaming" class="msg-cursor">█</span>
+          </div>
+        </div>
+
+        <!-- AI clarifying question (grill-me): option buttons + type-your-own -->
+        <div v-else-if="msg.type === 'question'" class="msg-row msg-row--ai">
+          <div class="msg-question-card">
+            <div class="msg-question-text">
+              <i class="bi bi-question-circle me-2" style="color: var(--accent);"></i>{{ msg.question.question }}
+            </div>
+            <template v-if="msg.answered === null">
+              <button
+                v-for="opt in msg.question.options"
+                :key="opt"
+                class="btn btn-sm btn-outline-primary msg-question-opt"
+                :disabled="ai.loading"
+                @click="ai.answerQuestion(i, opt)"
+              >{{ opt }}</button>
+              <div class="msg-question-own">
+                <input
+                  v-model="ownAnswers[i]"
+                  class="form-control form-control-sm"
+                  placeholder="Something else — type your own answer…"
+                  :disabled="ai.loading"
+                  maxlength="500"
+                  @keydown.enter.prevent="ai.answerQuestion(i, ownAnswers[i])"
+                />
+                <button
+                  class="btn btn-sm btn-primary"
+                  :disabled="ai.loading || !(ownAnswers[i] || '').trim()"
+                  @click="ai.answerQuestion(i, ownAnswers[i])"
+                ><i class="bi bi-send"></i></button>
+              </div>
+            </template>
+            <div v-else class="msg-question-answer">
+              <i class="bi bi-check2 me-1"></i>{{ msg.answered }}
+            </div>
           </div>
         </div>
 
@@ -362,6 +403,27 @@ function toolLabel(name) {
   border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.07));
   background: rgba(110, 168, 254, 0.05);
 }
+
+.msg-question-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-width: min(32rem, 100%);
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.07));
+  border-radius: 8px;
+  background: rgba(110, 168, 254, 0.05);
+}
+.msg-question-text { font-size: 0.85rem; }
+.msg-question-opt { text-align: left; font-size: 0.8rem; white-space: normal; }
+.msg-question-own { display: flex; gap: 0.4rem; }
+.msg-question-own .form-control {
+  font-size: 0.8rem;
+  background: var(--bg-card);
+  border-color: var(--border-color);
+  color: var(--text-main);
+}
+.msg-question-answer { font-size: 0.8rem; color: var(--text-muted-custom); }
 
 .msg-edit-summary {
   padding: 0.45rem 0.85rem;

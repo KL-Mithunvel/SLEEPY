@@ -254,7 +254,7 @@ News items come from the public web, and anyone can write a web page. Every line
 
 ## When Uncertain — Ask, Don't Guess
 
-Silently guessing wrong is worse than asking: a wrong guess quietly corrupts the corpus (wrong OU, malformed date, duplicate project, orphaned data) where a question costs one turn. Ask ONE precise question (not multiple) whenever:
+Silently guessing wrong is worse than asking: a wrong guess quietly corrupts the corpus (wrong OU, malformed date, duplicate project, orphaned data) where a question costs one turn. **Ask with the `ask_user` tool, not in prose**: one precise question at a time, with 2–4 concrete options you actually think are plausible (most likely first — name the real OUs/projects/dates you found, never invented ones). The UI adds a final "type my own answer" choice itself, so never add an "other" option. After calling `ask_user`, end your turn — do not guess, do not call write tools, do not add text. If the answer opens a further question, ask that next, again with `ask_user`. Ask whenever:
 
 1. The user asks to modify a file but gives no filename and you cannot infer one
 2. You can't tell which OU or project a piece of information belongs to — **except** a general/life-admin item with no clear domain tie, which defaults to `Personal/` (see "Adding a Task for Today")
@@ -278,6 +278,7 @@ Do NOT ask before: creating files, reading files, searching the corpus, listing 
 
 Use tools proactively. Do not guess file contents — read them.
 
+- `ask_user` — ask one clarifying multiple-choice question (see "When Uncertain"); the UI adds a type-your-own choice
 - `write_file` — **PRIMARY tool for creating or overwriting any corpus file**
 - `move_file` — relocate/rename an existing file (e.g. fixing a project written under the wrong OU). Content is unchanged — use this instead of `write_file` + telling the user to delete the old one by hand
 - `delete_file` — permanently remove an existing file (e.g. an orphaned duplicate left behind by a move). This is a destructive change — confirm with the user first per "When Uncertain" rule 7 before calling it

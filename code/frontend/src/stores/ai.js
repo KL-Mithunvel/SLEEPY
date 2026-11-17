@@ -37,6 +37,8 @@ export const useAiStore = defineStore('ai', {
     history(state) {
       return state.messages
         .filter(m => !m.streaming)
+        // A turn that only asked a question has an empty text bubble; the API rejects empty content.
+        .filter(m => (m.historyContent ?? m.content ?? '') !== '')
         .map(m => ({
           role: m.role,
           content: m.historyContent ?? m.content,
@@ -95,6 +97,19 @@ export const useAiStore = defineStore('ai', {
               this.messages[placeholderIdx].historyContent =
                 this.messages[placeholderIdx].content
 
+              // Grill-me: the AI asked a clarifying question (buttons + type-your-own).
+              if (result.question) {
+                const q = result.question
+                this.messages.push({
+                  role: 'assistant',
+                  type: 'question',
+                  content: q.question,
+                  historyContent: `[I asked: "${q.question}" — options: ${q.options.join(' / ')}]`,
+                  question: q,
+                  answered: null,
+                })
+              }
+
               for (const action of (result.actions || [])) {
                 const { content, historyContent } = describeStagedAction(action)
                 this.messages.push({
@@ -126,6 +141,16 @@ export const useAiStore = defineStore('ai', {
       } finally {
         this.loading = false
       }
+    },
+
+    // A click on an option, or the typed "my own answer" text. The answer is
+    // sent as a normal user message so the model sees it in the history.
+    async answerQuestion(idx, answer) {
+      const msg = this.messages[idx]
+      const text = (answer || '').trim()
+      if (!msg?.question || msg.answered !== null || !text || this.loading) return
+      msg.answered = text
+      await this.send(text)
     },
 
     async confirmEdit(idx) {
